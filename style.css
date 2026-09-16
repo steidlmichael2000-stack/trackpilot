@@ -192,11 +192,23 @@ body {
 
 .qrow { display: flex; align-items: center; gap: 4px; }
 
-.qicon {
-  flex: none; width: 19px; height: 19px; margin: 0 2px 0 8px;
+/* Die Lupe ist der Suchknopf. Sie sieht aus wie das Zeichen, das in jeder
+   Suchzeile links steht -- und genau deshalb braucht es daneben keinen zweiten
+   Knopf mehr, der dasselbe tut. */
+.qgo {
+  flex: none; width: 34px; height: 34px; padding: 0; margin-left: 2px;
+  display: grid; place-items: center;
+  border: none; border-radius: 2px; background: none; cursor: pointer;
+}
+.qgo svg {
+  width: 19px; height: 19px;
   fill: none; stroke: var(--muted-2); stroke-width: 2; stroke-linecap: round;
 }
-.search.offen .qicon { stroke: var(--accent); }
+.search.offen .qgo svg { stroke: var(--accent); }
+.search.hat-text .qgo svg { stroke: var(--accent); }
+.qgo:active svg { stroke: var(--text); }
+/* Laeuft gerade eine Abfrage, ist die Lupe nicht noch einmal ausloesbar. */
+.qgo.busy { pointer-events: none; opacity: .5; }
 
 #q {
   flex: 1 1 auto; min-width: 0;
@@ -207,8 +219,7 @@ body {
 }
 #q::placeholder { color: var(--muted-2); font-weight: 500; opacity: 1; }
 
-/* Pfeil und Kreuz stehen nur da, wenn auch etwas in der Zeile steht. */
-.search:not(.hat-text) .go,
+/* Das Kreuz steht nur da, wenn auch etwas in der Zeile steht. */
 .search:not(.hat-text) .qclear { display: none; }
 
 .qclear {
@@ -261,30 +272,13 @@ body {
   font-weight: 500; opacity: 1;
 }
 
-/* Trenner anhängen — sitzt im Feld rechts und erscheint erst, wenn dort etwas
-   steht. Der Zahlenblock des Handys kennt weder & noch Leertaste. */
-.kmplus {
-  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-  width: 26px; height: 26px; padding: 0;
-  display: grid; place-items: center;
-  border-radius: 2px; border: 1px solid var(--line);
-  background: var(--panel-2); color: var(--muted);
-  font: inherit; font-size: .92rem; font-weight: 700; line-height: 1; cursor: pointer;
-}
-.kmplus:active { color: var(--accent); border-color: var(--accent); }
-
-.go, .more {
+.more {
   flex: none;
   display: grid; place-items: center;
   border: none; cursor: pointer;
   border-radius: 2px;
+  width: 38px; height: 40px; background: none; color: var(--muted);
 }
-.go { width: 44px; height: 40px; background: var(--accent); color: var(--accent-ink); }
-.go svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-.go:active { filter: brightness(.9); }
-.go.busy { pointer-events: none; opacity: .65; }
-
-.more { width: 38px; height: 40px; background: none; color: var(--muted); }
 .more svg { width: 20px; height: 20px; fill: currentColor; }
 .more:active, .more.is-on { color: var(--accent); }
 
@@ -857,7 +851,7 @@ html[data-theme="light"] .bb-actions .maps { color: #fff; }
   .field label { font-size: .6rem; }
   .field input { font-size: 1.02rem; }
   #q { font-size: 1rem; }
-  .go { width: 40px; }
+  .qgo { width: 30px; }
   .more { width: 34px; }
 }
 

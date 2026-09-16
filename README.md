@@ -82,14 +82,16 @@ passiert:
 Sobald ein Buchstabe vorkommt, wird nach Namen gesucht; das ist hart, aber eindeutig, und man
 weiß beim Tippen jederzeit, was gerade passiert.
 
+**Gesucht wird mit der Eingabetaste oder der Lupe.** Auf dem Handy heißt die Eingabetaste
+„Suchen"; die Lupe links in der Zeile ist derselbe Knopf für den Fall, dass die Tastatur schon
+zu ist. Einen zusätzlichen Pfeil daneben gibt es nicht — er täte nur dasselbe ein drittes Mal.
+
 Das **×** in der Zeile leert sie samt beider Felder, ohne dass die Leiste zuklappt. Ein Tipp in
 die zugeklappte Zeile markiert den bisherigen Text ganz — Tippen ersetzt ihn dann einfach. Am
 Rechner führen ↑ und ↓ durch die Trefferliste, Enter nimmt die markierte Zeile.
 
-Auf dem Handy ist der Weg über die beiden Felder der eigentliche: Der Zahlenblock hat keine
-Leertaste, mit der sich Strecke und Kilometer in einer Zeile trennen ließen. Enter in der Zeile
-springt deshalb weiter ins Kilometerfeld; ein zweites Enter sucht. Bei einem Namen nimmt Enter
-gleich den ersten Treffer.
+Enter in der Zeile springt weiter ins Kilometerfeld, wenn dort noch nichts steht; ein zweites
+Enter sucht. Bei einem Namen nimmt Enter gleich den ersten Treffer.
 
 Ein Tipp neben die Leiste oder eine fertige Suche faltet alles wieder zu einer Zeile zusammen,
 damit von der Karte so wenig wie möglich verdeckt bleibt. **Der Verlauf merkt sich beides** —
@@ -160,10 +162,10 @@ untere Leiste beschreibt immer einen davon; umgeschaltet wird über die Kilomete
 oder durch Antippen eines Pins, ohne neu zu rechnen. Der geteilte Link enthält alle Kilometer
 und stellt die Reihe beim Öffnen wieder her.
 
-**Der Trennerknopf.** Der Zahlenblock des Handys hat weder `&` noch Leertaste, und das Feld auf
-eine Volltastatur umzustellen würde den häufigen Fall — eine einzelne Zahl tippen — verschlechtern.
-Deshalb steht rechts im Feld ein kleiner `&`-Knopf, sobald dort etwas drinsteht; er hängt den
-Trenner an und lässt die Tastatur, wie sie ist.
+**Wo man das auf dem Handy tippt.** Das Kilometerfeld hat bewusst den Zahlenblock — der häufige
+Fall ist eine einzelne Zahl. Der kennt aber weder `&` noch Leertaste. Für eine Reihe gehört die
+Eingabe deshalb in die Suchzeile oben, die eine vollständige Tastatur hat:
+`5100 1,304 & 2,5 & 14+250`. Sie zerlegt das genauso in Strecke und Kilometer.
 
 ## Wie genau ist das?
 

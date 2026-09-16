@@ -4023,7 +4023,6 @@ function applyPoint(ref, km, result) {
 
   $('#ref').value = ref;
   $('#km').value = fmtKm(km);
-  kmPlusZeigen();
   felderAufQ();
 
   drawPoint();
@@ -4296,7 +4295,8 @@ function updateBH() {
 function setBusy(on) {
   view.busy = on;
   $('#progress').hidden = !on;
-  $('#go').classList.toggle('busy', on);
+  const lupe = $('#qGo');
+  if (lupe) lupe.classList.toggle('busy', on);
 }
 
 /* ============================ Suche über die Felder ============================ */
@@ -4438,15 +4438,6 @@ async function searchReihe(ref, tokens) {
   if (fehler.length) toast(`${fehler.length} von ${kms.length} nicht bestimmbar — siehe unten.`);
 }
 
-/* Der Trennerknopf steht nur da, wenn im Feld schon etwas steht — vorher wäre
- * er sinnlos und würde bloß den Platz für die Zahl wegnehmen. */
-function kmPlusZeigen() {
-  const el = $('#km'), k = $('#kmPlus');
-  if (!el || !k) return;
-  k.hidden = !el.value.trim();
-  el.style.paddingRight = k.hidden ? '' : '26px';
-}
-
 /* ====================== Eine Zeile oben, zwei Felder darunter ======================
  *
  * Getippt wird in eine einzige Zeile — so, wie ein Achspunkt auf dem Zettel
@@ -4479,7 +4470,6 @@ function qAufFelder() {
   const z = streckeModus(text) ? qZerlegen(text) : { ref: '', km: '' };
   $('#ref').value = z.ref;
   $('#km').value = z.km;
-  kmPlusZeigen();
   suchTextMerken();
 }
 
@@ -5353,7 +5343,11 @@ async function share() {
 /* ============================ Start ============================ */
 
 function bind() {
-  on('#go', 'click', search);
+  /* Die Lupe darf dem Feld nicht den Fokus nehmen -- sonst klappt die Leiste
+   * schon zu, waehrend der Finger noch auf ihr liegt, und der Klick geht ins
+   * Leere. Deshalb erst mousedown abfangen, dann suchen. */
+  on('#qGo', 'mousedown', ev => ev.preventDefault());
+  on('#qGo', 'click', search);
   on('#menuBtn', 'click', () => $('#sheet').hidden ? openSheet() : closeSheet());
 
   /* Die eine Zeile oben. Antippen klappt die Felder auf, Tippen zerlegt den
@@ -5397,7 +5391,6 @@ function bind() {
     setVal('#q', '');
     setVal('#ref', '');
     setVal('#km', '');
-    kmPlusZeigen();
     suchTextMerken();
     suchAuf();
     $('#q').focus();
@@ -5425,16 +5418,7 @@ function bind() {
     if (ev.key === 'Enter') { ev.preventDefault(); search(); ev.target.blur(); }
   });
   on('#km', 'focus', closeSuggest);
-  on('#km', 'input', () => { kmPlusZeigen(); felderAufQ(); });
-  on('#kmPlus', 'click', () => {
-    const el = $('#km');
-    el.value = el.value.replace(/[&;\s]+$/, '') + ' & ';
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-    kmPlusZeigen();
-    felderAufQ();
-  });
-  kmPlusZeigen();
+  on('#km', 'input', felderAufQ);
 
   document.querySelectorAll('[data-base]').forEach(b => b.addEventListener('click', () => setBase(b.dataset.base)));
   on('#ormBtn', 'click', () => toggleOverlay('orm'));
@@ -5570,7 +5554,6 @@ function boot() {
     const letzte = recent.find(r => recentArt(r) === 'strecke');
     if (letzte) setVal('#ref', letzte.ref);
   }
-  kmPlusZeigen();
   felderAufQ();
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
