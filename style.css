@@ -207,20 +207,30 @@ body {
 }
 #q::placeholder { color: var(--muted-2); font-weight: 500; opacity: 1; }
 
-/* Der Pfeil steht nur da, wenn es etwas zu suchen gibt. */
-.search:not(.hat-text) .go { display: none; }
+/* Pfeil und Kreuz stehen nur da, wenn auch etwas in der Zeile steht. */
+.search:not(.hat-text) .go,
+.search:not(.hat-text) .qclear { display: none; }
+
+.qclear {
+  flex: none; width: 30px; height: 30px; padding: 0;
+  display: grid; place-items: center;
+  border: none; border-radius: 2px; cursor: pointer;
+  background: none; color: var(--muted-2);
+}
+.qclear svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.qclear:active { color: var(--text); }
 
 /* Aufgeklappter Teil. Die Hoehe ist fest genug angesetzt, dass beide Felder
    samt Beschriftung hineinpassen; ueber max-height laesst sich das anders als
    ueber auto sauber schieben.
 
-   Bei einer Ortssuche bleibt er zu: dort gibt es keinen Kilometer, und die
-   Trefferliste soll den Platz haben. */
+   Bei einer Orts- oder Koordinatensuche bleibt er zu: dort gibt es keinen
+   Kilometer, und die Trefferliste soll den Platz haben. */
 .detail {
   max-height: 0; opacity: 0; overflow: hidden;
   transition: max-height .2s ease, opacity .16s ease;
 }
-.search.offen:not(.ort) .detail { max-height: 100px; opacity: 1; }
+.search.offen:not(.frei) .detail { max-height: 100px; opacity: 1; }
 
 .detail-in {
   display: flex; align-items: stretch; gap: 2px;
@@ -246,7 +256,10 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
-.field input::placeholder { color: var(--muted-2); font-weight: 500; opacity: 1; }
+.field input::placeholder {
+  color: color-mix(in srgb, var(--muted-2) 62%, transparent);
+  font-weight: 500; opacity: 1;
+}
 
 /* Trenner anhängen — sitzt im Feld rechts und erscheint erst, wenn dort etwas
    steht. Der Zahlenblock des Handys kennt weder & noch Leertaste. */
@@ -385,6 +398,14 @@ body {
 .suggest-item .s-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .suggest-info { margin: 0; padding: 9px 11px; color: var(--muted); font-size: .84rem; }
+
+/* Mit den Pfeiltasten durch die Liste: die markierte Zeile muss sich vom
+   blossen Ueberfahren mit der Maus unterscheiden, sonst weiss man nach einem
+   Tastendruck nicht, wo man steht. */
+.suggest-item.aktiv {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 
 /* ---------- Menü ---------- */
 

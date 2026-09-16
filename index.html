@@ -64,11 +64,11 @@
 
   <!-- ---------- obere Leiste ---------- -->
   <div class="bar bar-top">
-    <!-- Oben steht nur eine Zeile. Erst wenn sie angetippt wird, klappt darunter
-         die Aufteilung in Strecke und Kilometer auf: im Gelaende tippt man meist
-         nur die Streckennummer, und die zweite Zeile nimmt bis dahin bloss Platz
-         und Aufmerksamkeit weg. Was in die eine Zeile getippt wird, steht
-         zerlegt sofort in den beiden Feldern -- und umgekehrt. -->
+    <!-- Oben steht eine einzige Zeile, und sie nimmt alles entgegen: einen Namen
+         (Bahnhof, Ortschaft, Strasse), eine Streckennummer mit Kilometer oder eine
+         eingefuegte Koordinate. Was darunter erscheint, richtet sich danach, was
+         darin steht -- die Felder Strecke und Kilometer klappen nur auf, wenn es
+         wirklich um eine Strecke geht. -->
     <div id="search" class="search">
 
       <div class="qrow">
@@ -77,6 +77,11 @@
         </svg>
         <input id="q" type="text" autocomplete="off" spellcheck="false" enterkeyhint="search"
                aria-label="Suche" aria-describedby="qHelp">
+        <!-- Leeren, ohne die Zeile Zeichen für Zeichen zurückzunehmen. Steht nur
+             da, wenn auch etwas drinsteht. -->
+        <button id="qClear" class="qclear" type="button" aria-label="Eingabe löschen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
         <button id="go" class="go" type="button" aria-label="Suchen">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M12 5l7 7-7 7"/></svg>
         </button>
@@ -105,7 +110,7 @@
       </div>
 
     </div>
-    <p id="qHelp" class="sr-only">Ort, Stadt oder Bahnhof eingeben. Beginnt die Eingabe mit einer Ziffer, wird sie als Streckennummer gelesen und darunter klappen die Felder für Strecke und Kilometer auf.</p>
+    <p id="qHelp" class="sr-only">Nimmt einen Namen (Bahnhof, Ortschaft, Straße), eine Streckennummer mit Kilometer oder eine Koordinate. Sobald ein Buchstabe vorkommt, wird nach Namen gesucht; stehen nur Zahlen da, klappen darunter die Felder für Strecke und Kilometer auf.</p>
     <p id="refHelp" class="sr-only">Nur die Strecke eingeben zeigt den ganzen Streckenverlauf. Ein Klick auf die Karte setzt den Kilometer.</p>
     <p id="kmHelp" class="sr-only">Mehrere Kilometer durch kaufmännisches Und oder Leerzeichen trennen — sie werden alle auf einmal gerechnet.</p>
     <div id="suggest" class="suggest" role="listbox" aria-label="Zuletzt gesucht" hidden></div>
@@ -117,15 +122,6 @@
 
   <!-- ---------- Menü ---------- -->
   <div id="sheet" class="sheet" hidden>
-
-    <details class="sheet-sec" data-sec="stelle">
-      <summary><h2>Betriebsstelle suchen</h2></summary>
-      <div class="row">
-        <input id="facQ" type="text" placeholder="Name, DS100 oder UIC" autocomplete="off" spellcheck="false" enterkeyhint="search">
-        <button id="facGo" class="btn" type="button">Suchen</button>
-      </div>
-      <div id="facOut" class="fac-out"></div>
-    </details>
 
     <details class="sheet-sec" data-sec="karte">
       <summary><h2>Karte</h2></summary>

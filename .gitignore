@@ -8,3 +8,7 @@ desktop.ini
 
 # Rohe Overpass-Antworten des Netzbauers
 .cache/
+
+# Python-Zwischenstand des Netzbauers
+__pycache__/
+*.pyc

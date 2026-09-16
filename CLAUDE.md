@@ -22,11 +22,13 @@ Origin, nicht am Pfad. Ein neuer Name würde sie verwaisen lassen:
 | Stelle | Datei | Warum |
 |---|---|---|
 | `STORE_KEY_ALT = 'railnav.v3'` | `app.js` | Einstellungen und Verlauf werden beim ersten Start übernommen und danach unter dem neuen Schlüssel gespeichert. |
-| `KML_DB = 'railnav-kml'` | `app.js` | Enthält die vom Nutzer importierten KML-Dateien. Ein neuer Datenbankname würde sie unerreichbar machen. |
+| `KML_DB_ALT = 'railnav-kml'` | `app.js` | Die Datenbank mit den importierten KML-Dateien. Sie heißt seit dem 16.09.2026 `trackpilot-kml`; der alte Name steht nur noch im einmaligen Umzug (`kmlUmziehen`), der den Bestand herüberkopiert und die alte Datenbank danach löscht. |
 | `ALT_PRAEFIX = 'railnav-'` | `sw.js` | Räumt die Caches der alten Fassung weg, die sonst dauerhaft auf dem Gerät lägen. |
 
-Der Migrationspfad für `STORE_KEY_ALT` darf frühestens weg, wenn sicher ist,
-dass niemand mehr eine Fassung von vor der Umbenennung installiert hat.
+Diese drei Migrationspfade dürfen frühestens weg, wenn sicher ist, dass niemand
+mehr eine Fassung von vor der Umbenennung installiert hat. Sie sind **nicht**
+der Produktname, sondern die Schlüssel, unter denen fremde Geräte ihre eigenen
+Daten liegen haben — wer sie streicht, löscht die Daten dieser Geräte mit.
 
 ## Icons
 

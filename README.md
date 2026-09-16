@@ -59,8 +59,9 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
 - **Das Gleisnetz liegt bei.** Welche Strecke an einer Stelle liegt und wie das Gleis dort
   verläuft, beantwortet die App aus mitgelieferten Kacheln statt über eine Fremdabfrage —
   gemessen 18 ms statt Sekunden, und es geht ohne Netz.
-- **Freitextsuche** in derselben Zeile — Betriebsstellen, Ortschaften, Straßen und Adressen,
-  bevorzugt in der Nähe des gerade gezeigten Kartenausschnitts.
+- **Eine Suchzeile für alles** — Betriebsstellen, Ortschaften, Straßen und Adressen (bevorzugt in
+  der Nähe des gezeigten Ausschnitts), Streckennummer mit Kilometer, oder eine eingefügte
+  Koordinate.
 - **Offlinefähig** — die App selbst und bereits geladene Kartenkacheln bleiben ohne Netz nutzbar.
 
 **Oben steht nur eine Zeile**, und sie nimmt alles entgegen. Was darin steht, entscheidet, was
@@ -71,9 +72,19 @@ passiert:
   Ein Tipp setzt den Punkt auf die Karte, mit derselben unteren Leiste wie alles andere — samt
   Koordinate, Google Maps, Route und Teilen. Die Treffer werden nach der Kartenmitte sortiert:
   Wer an der Strecke steht und `Ebing` tippt, meint das Ebing vor sich.
-- **Eine Ziffer am Anfang** liest die Zeile als Streckennummer. Dann klappen darunter die beiden
-  Felder *Strecke* und *Kilometer* auf, gefüllt aus dem, was in der Zeile steht — `5100 12,5`
+- **Eine Koordinate** — `50.004918, 10.917318`, so wie der Knopf *Kopieren* sie herausgibt —
+  setzt einen Punkt an dieser Stelle, mit dem Knopf *Kilometer bestimmen* daran. Damit ist der
+  Weg zurück da: Koordinate aus einer Nachricht einfügen und den Kilometer dazu rechnen lassen.
+- **Nur Zahlen** heißt Streckennummer und Kilometer. Dann klappen darunter die beiden Felder
+  *Strecke* und *Kilometer* auf, gefüllt aus dem, was in der Zeile steht — `5100 12,5`
   → Strecke 5100, km 12,5. Eine Änderung im Feld schreibt sich in die Zeile zurück.
+
+Sobald ein Buchstabe vorkommt, wird nach Namen gesucht; das ist hart, aber eindeutig, und man
+weiß beim Tippen jederzeit, was gerade passiert.
+
+Das **×** in der Zeile leert sie samt beider Felder, ohne dass die Leiste zuklappt. Ein Tipp in
+die zugeklappte Zeile markiert den bisherigen Text ganz — Tippen ersetzt ihn dann einfach. Am
+Rechner führen ↑ und ↓ durch die Trefferliste, Enter nimmt die markierte Zeile.
 
 Auf dem Handy ist der Weg über die beiden Felder der eigentliche: Der Zahlenblock hat keine
 Leertaste, mit der sich Strecke und Kilometer in einer Zeile trennen ließen. Enter in der Zeile
@@ -81,11 +92,14 @@ springt deshalb weiter ins Kilometerfeld; ein zweites Enter sucht. Bei einem Nam
 gleich den ersten Treffer.
 
 Ein Tipp neben die Leiste oder eine fertige Suche faltet alles wieder zu einer Zeile zusammen,
-damit von der Karte so wenig wie möglich verdeckt bleibt.
+damit von der Karte so wenig wie möglich verdeckt bleibt. **Der Verlauf merkt sich beides** —
+gesuchte Strecken mit Kilometer und gewählte Orte —, sodass die leere Zeile beide Wege wieder
+einen Tipp entfernt anbietet.
 
 Die Ortssuche läuft über [Photon](https://photon.komoot.io/) und weicht auf Nominatim aus, wenn
 Photon nicht antwortet — beides OpenStreetMap-Daten, beides nur mit Netz. Die Betriebsstellen
-kommen wie bisher über die OpenRailwayMap-API; die eigene Suche dafür steht weiterhin im Menü.
+kommen über die OpenRailwayMap-API. Eine eigene Betriebsstellensuche im Menü gibt es nicht mehr:
+Die Zeile oben kann dasselbe und mehr.
 
 Eingabe: `12,5` oder `12.5`, auch Hektometer-Schreibweise `14+250` (= km 14,250).
 Nur die Streckennummer ohne Kilometer zeigt den Streckenverlauf.

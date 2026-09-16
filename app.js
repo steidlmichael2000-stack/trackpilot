@@ -2025,10 +2025,13 @@ function wmsLogin() {
  *
  * Die Dateien bleiben auf dem Gerät, es wird nichts hochgeladen. */
 
-/* Bewusst beim alten Namen belassen: die Datenbank haengt am Origin, nicht am
- * Pfad. Ein neuer Name wuerde die bereits importierten KML-Dateien verwaisen
- * lassen, ohne dass der Nutzer etwas davon haette. */
-const KML_DB = 'railnav-kml';
+const KML_DB = 'trackpilot-kml';
+/* Bis zur Umbenennung hieß die Datenbank anders. Sie hängt am Origin und
+ * enthält die vom Nutzer importierten Dateien — deshalb wird sie beim ersten
+ * Start einmalig herüberkopiert und danach gelöscht, statt sie verwaisen zu
+ * lassen. Diese Zeile darf verschwinden, wenn kein Gerät mehr eine Fassung von
+ * vor dem 15.09.2026 hat. */
+const KML_DB_ALT = 'railnav-kml';
 /* Reihum vergeben, damit sich mehrere Dateien ohne eigene Farbangabe
  * voneinander unterscheiden. */
 const KML_FARBEN = ['#e6484b', '#f59e0b', '#22c55e', '#4b93e6', '#a855f7', '#14b8a6', '#ec4899', '#84cc16'];
@@ -2184,8 +2187,17 @@ const kmlEbenen = new Map();          // id → Leaflet-Gruppe der sichtbaren Da
 let kmlOffen = null;
 function kmlDb() {
   if (kmlOffen) return kmlOffen;
-  kmlOffen = new Promise((ok, fehler) => {
-    const rq = indexedDB.open(KML_DB, 1);
+  kmlOffen = (async () => {
+    const db = await kmlDbOeffnen(KML_DB);
+    await kmlUmziehen(db);
+    return db;
+  })();
+  return kmlOffen;
+}
+
+function kmlDbOeffnen(name) {
+  return new Promise((ok, fehler) => {
+    const rq = indexedDB.open(name, 1);
     rq.onupgradeneeded = () => {
       const db = rq.result;
       db.createObjectStore('akten', { keyPath: 'id' });   // klein: Name, Farbe, sichtbar
@@ -2194,7 +2206,33 @@ function kmlDb() {
     rq.onsuccess = () => ok(rq.result);
     rq.onerror = () => fehler(rq.error || new Error('kein lokaler Speicher verfügbar'));
   });
-  return kmlOffen;
+}
+
+/* Einmaliger Umzug aus der Datenbank unter dem alten Namen.
+ *
+ * Bewusst ohne indexedDB.databases(): das kennt nicht jeder Browser, und wo es
+ * fehlt, wäre der alte Bestand stillschweigend weg. Die alte Datenbank wird
+ * deshalb einfach geöffnet — gab es sie nicht, entsteht eine leere, die
+ * gleich wieder gelöscht wird.
+ *
+ * Das Schreiben ist idempotent (put über dieselbe id), deshalb darf der Umzug
+ * nach einem Abbruch beim nächsten Start einfach noch einmal laufen. Erst wenn
+ * er ganz durch ist, wird die alte Datenbank entfernt. */
+async function kmlUmziehen(neu) {
+  let alt = null;
+  try {
+    alt = await kmlDbOeffnen(KML_DB_ALT);
+    const akten = await kmlLaden(alt);
+    for (const a of akten) await kmlAblegen(a, neu);
+    alt.close();
+    alt = null;
+    indexedDB.deleteDatabase(KML_DB_ALT);
+    if (akten.length) toast(`${akten.length} gespeicherte KML-Datei${akten.length === 1 ? '' : 'en'} übernommen.`);
+  } catch {
+    /* Geht der Umzug schief, bleibt der alte Bestand liegen und der nächste
+     * Start versucht es erneut — verloren ist dabei nichts. */
+    if (alt) { try { alt.close(); } catch { /* egal */ } }
+  }
 }
 
 function kmlKopf(akte) {
@@ -2203,8 +2241,8 @@ function kmlKopf(akte) {
   return kopf;
 }
 
-async function kmlLaden() {
-  const db = await kmlDb();
+async function kmlLaden(db) {
+  db = db || await kmlDb();
   return new Promise((ok, fehler) => {
     const tx = db.transaction(['akten', 'geo'], 'readonly');
     const rq = tx.objectStore('akten').getAll();
@@ -2222,8 +2260,8 @@ async function kmlLaden() {
   });
 }
 
-async function kmlAblegen(akte) {
-  const db = await kmlDb();
+async function kmlAblegen(akte, db) {
+  db = db || await kmlDb();
   return new Promise((ok, fehler) => {
     const tx = db.transaction(['akten', 'geo'], 'readwrite');
     tx.objectStore('akten').put(kmlKopf(akte));
@@ -4270,13 +4308,17 @@ async function search() {
    * keiner vor — etwa weil der Knopf schneller war als der Dienst —, wird er
    * hier geholt. */
   const frei = $('#q') ? $('#q').value.trim() : '';
+
+  const k = koordLesen(frei);
+  if (k) { koordWaehlen(k); return; }
+
   if (ortModus(frei)) {
-    if (ortTreffer.length) { trefferWaehlen(ortTreffer[0]); return; }
+    if (suggestEintraege.length) { suggestEintraege[0].tun(); return; }
     setBusy(true);
     try {
       clearTimeout(ortTimer);
       await ortSuchen(frei);
-      if (ortTreffer.length) trefferWaehlen(ortTreffer[0]);
+      if (suggestEintraege.length) suggestEintraege[0].tun();
       else toast(`Nichts zu „${frei}“ gefunden.`);
     } finally {
       setBusy(false);
@@ -4432,9 +4474,9 @@ function qZerlegen(text) {
 /** Zeile → Felder */
 function qAufFelder() {
   const text = $('#q').value;
-  // Ein Ortsname ist keine Streckennummer -- er darf nicht im Feld stehenbleiben
-  // und spaeter mitgesucht werden.
-  const z = ortModus(text) ? { ref: '', km: '' } : qZerlegen(text);
+  // Ein Ortsname oder eine Koordinate ist keine Streckennummer -- so etwas darf
+  // nicht im Feld stehenbleiben und spaeter mitgesucht werden.
+  const z = streckeModus(text) ? qZerlegen(text) : { ref: '', km: '' };
   $('#ref').value = z.ref;
   $('#km').value = z.km;
   kmPlusZeigen();
@@ -4450,13 +4492,13 @@ function felderAufQ() {
   suchTextMerken();
 }
 
-/* Der Pfeil steht nur da, wenn es etwas zu suchen gibt — und die Felder für
- * Strecke und Kilometer nur, solange es nicht nach einem Ortsnamen aussieht. */
+/* Pfeil und Kreuz stehen nur da, wenn etwas in der Zeile steht — und die
+ * Felder für Strecke und Kilometer nur, solange es auch um eine Strecke geht. */
 function suchTextMerken() {
   const s = $('#search'), q = $('#q');
   if (!s || !q) return;
   s.classList.toggle('hat-text', !!q.value.trim());
-  s.classList.toggle('ort', ortModus(q.value));
+  s.classList.toggle('frei', !streckeModus(q.value));
 }
 
 function suchAuf() { $('#search').classList.add('offen'); }
@@ -4474,34 +4516,6 @@ function fitLine(e) {
 }
 
 /* ============================ Betriebsstellen ============================ */
-
-async function runFacility() {
-  const q = $('#facQ').value.trim();
-  const out = $('#facOut');
-  if (!q) { out.innerHTML = ''; return; }
-  out.innerHTML = '<p class="fine">Suche …</p>';
-  try {
-    const list = await searchFacility(q);
-    if (!list.length) { out.innerHTML = `<p class="fine">Nichts zu „${esc(q)}" gefunden.</p>`; return; }
-    out.innerHTML = list.map((f, i) => {
-      const meta = [f.ds100 && 'DS100 ' + f.ds100, f.uic && 'UIC ' + f.uic, f.operator].filter(Boolean).join(' · ');
-      return `<button class="fac-item" type="button" data-fac="${i}">${esc(f.name)}<small>${esc(meta || 'Betriebsstelle')}</small></button>`;
-    }).join('');
-    out.querySelectorAll('[data-fac]').forEach(btn => btn.addEventListener('click', () => {
-      const f = list[Number(btn.dataset.fac)];
-      view.km = null;
-      view.point = { ...f, quality: 'betriebsstelle' };
-      $('#km').value = '';
-      felderAufQ();
-      drawPoint();
-      renderBottom();
-      map.setView([f.lat, f.lon], 16);
-      closeSheet();
-    }));
-  } catch (err) {
-    out.innerHTML = `<p class="fine">Suche fehlgeschlagen: ${esc(err.message)}</p>`;
-  }
-}
 
 /* ============================ Standort ============================ */
 
@@ -4941,47 +4955,158 @@ function saveStore() {
   } catch { /* voll oder gesperrt */ }
 }
 
+/* ---------- Verlauf ---------- */
+
+/* Der Verlauf kennt zweierlei: eine Strecke mit Kilometer und einen Ort. Wer
+ * im Gelände arbeitet, springt zwischen beidem hin und her — die Ortschaft
+ * suchen, dann zurück auf den Achspunkt. Einträge aus älteren Fassungen haben
+ * kein `art`; das sind immer Strecken. */
+function recentArt(r) { return r && r.art ? r.art : 'strecke'; }
+
 function pushRecent(ref, km) {
-  const entry = { ref, km };
-  recent = [entry, ...recent.filter(r => !(r.ref === ref && Math.abs(r.km - km) < 1e-6))].slice(0, 12);
+  const e = { art: 'strecke', ref, km };
+  recent = [e, ...recent.filter(r => !(recentArt(r) === 'strecke'
+    && r.ref === ref && Math.abs(r.km - km) < 1e-6))].slice(0, 12);
   saveStore();
 }
 
-/* Was unter der Zeile steht, hängt davon ab, was darin steht:
+function pushRecentOrt(t) {
+  const e = {
+    art: 'ort', name: t.name, sub: t.sub || '',
+    lat: t.lat, lon: t.lon, bbox: t.bbox || null, typ: t.typ || '',
+    stelle: t.art === 'stelle' ? t.roh : null
+  };
+  recent = [e, ...recent.filter(r => !(recentArt(r) === 'ort'
+    && r.name === e.name && Math.abs(r.lat - e.lat) < 1e-6))].slice(0, 12);
+  saveStore();
+}
+
+/* ============================ Was unter der Zeile steht ============================
  *
- *   leer oder mit einer Ziffer beginnend → Streckennummer, also der Verlauf
- *   sonst                                → Freitext, also Orte und Bahnhöfe
+ * Die eine Zeile nimmt dreierlei entgegen, und daran hängt alles Weitere:
  *
- * Die Ziffer als Weiche ist hart, aber eindeutig: Streckennummern sind immer
- * Zahlen, Ortsnamen fangen nie mit einer an. Wer eine Hausnummer voranstellt,
- * bekommt die Streckensuche — dafür weiß man beim Tippen jederzeit, was
- * gerade passiert, ohne dass die Leiste hin und her springt. */
+ *   ein Buchstabe kommt vor   → Name: Betriebsstellen und Orte
+ *   zwei Dezimalzahlen        → Koordinate: Punkt setzen
+ *   nur Zahlen                → Strecke und Kilometer
+ *
+ * Der Buchstabe als Weiche ist hart, aber eindeutig: Streckennummern und
+ * Kilometer sind immer Zahlen, Ortsnamen enthalten immer Buchstaben. Dadurch
+ * weiß man beim Tippen jederzeit, was gerade passiert, ohne dass die Leiste
+ * hin und her springt. */
 
 function ortModus(text) { return /[^\s\d.,+&;:\/-]/.test(text || ''); }
 
-/* Merkt sich, was gerade in der Liste steht — Enter nimmt daraus den ersten
- * Treffer, ohne noch einmal zu fragen. */
-let ortTreffer = [];
+/* Geht es überhaupt um eine Strecke? Nur dann werden die beiden Felder
+ * darunter gezeigt und gefüllt. Eine Streckennummer ist eine ganze Zahl —
+ * steht gleich hinter den ersten Ziffern ein Komma oder Punkt, ist das der
+ * Anfang einer Koordinate und gehört nicht ins Streckenfeld. */
+function streckeModus(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;                       // leer: die Felder dürfen dastehen
+  if (ortModus(t) || koordLesen(t)) return false;
+  return /^\d{1,6}(?![\d.,])/.test(t);
+}
+
+/* Eine eingefügte Koordinate. Die App gibt selbst welche heraus — der Knopf
+ * „Kopieren“ legt sie in der Form 50.004918, 10.917318 ab —, und aus einer
+ * Nachricht kommt oft genau so eine zurück. Drei Nachkommastellen werden
+ * verlangt, damit „5100 12,5“ niemals als Koordinate durchgeht. */
+const KOORD_RE = /^\s*(-?\d{1,3}[.,]\d{3,})(?:\s*[,;]\s*|\s+)(-?\d{1,3}[.,]\d{3,})\s*$/;
+
+function koordLesen(text) {
+  const m = KOORD_RE.exec(String(text || ''));
+  if (!m) return null;
+  const lat = Number(m[1].replace(',', '.'));
+  const lon = Number(m[2].replace(',', '.'));
+  if (!isFinite(lat) || !isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+/* ---------- Die Liste selbst ---------- */
+
+/* Jede Zeile bringt ihr Aussehen und ihre Tat mit. Dadurch tut ein Tipp und
+ * die Eingabetaste dasselbe, ohne dass es zweimal dasteht. */
+let suggestEintraege = [];
+let suggestAktiv = -1;
+
 let ortTimer = 0;
 let ortZaehler = 0;
 let ortCtrl = null;
 
+const IKON_BAHN = '<svg class="s-ikon bahn" viewBox="0 0 24 24" aria-hidden="true">' +
+  '<rect x="6" y="3" width="12" height="13" rx="2.5"/><path d="M6 10h12M8.5 20l2-3.5M15.5 20l-2-3.5"/></svg>';
+const IKON_ORT = '<svg class="s-ikon" viewBox="0 0 24 24" aria-hidden="true">' +
+  '<path d="M12 21.5C7.8 16.6 5.5 13.3 5.5 10a6.5 6.5 0 1 1 13 0c0 3.3-2.3 6.6-6.5 11.5z"/>' +
+  '<circle cx="12" cy="10" r="2.3"/></svg>';
+const IKON_KOORD = '<svg class="s-ikon bahn" viewBox="0 0 24 24" aria-hidden="true">' +
+  '<circle cx="12" cy="12" r="6.2"/><path d="M12 1.8v4M12 18.2v4M1.8 12h4M18.2 12h4"/></svg>';
+const IKON_UHR = '<svg class="s-ikon" viewBox="0 0 24 24" aria-hidden="true">' +
+  '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.3l3.4 2"/></svg>';
+
+function suggestZeile(i, ikon, name, sub) {
+  return `<button class="suggest-item s-treffer" type="button" role="option" data-i="${i}">
+      ${ikon}<span class="s-text"><b>${esc(name)}</b><span>${esc(sub || '')}</span></span>
+    </button>`;
+}
+
+function suggestSetzen(eintraege) {
+  suggestEintraege = eintraege;
+  suggestAktiv = -1;
+  const box = $('#suggest');
+  if (!eintraege.length) { box.innerHTML = ''; box.hidden = true; return; }
+  box.innerHTML = eintraege.map((e, i) => e.html(i)).join('');
+  box.hidden = false;
+  box.querySelectorAll('[data-i]').forEach(btn => btn.addEventListener('mousedown', ev => {
+    ev.preventDefault();   // Fokus im Feld lassen, sonst schließt die Liste zuerst
+    const e = suggestEintraege[Number(btn.dataset.i)];
+    if (e) e.tun();
+  }));
+}
+
+function suggestMeldung(html) {
+  suggestEintraege = [];
+  suggestAktiv = -1;
+  const box = $('#suggest');
+  box.innerHTML = `<p class="suggest-info">${html}</p>`;
+  box.hidden = false;
+}
+
+/* Mit den Pfeiltasten durch die Liste — am Rechner der schnellste Weg, und
+ * ohne Markierung wüsste man nach dem ersten Tastendruck nicht, wo man steht. */
+function suggestBewegen(schritt) {
+  const n = suggestEintraege.length;
+  if (!n || $('#suggest').hidden) return false;
+  suggestAktiv += schritt;
+  if (suggestAktiv < 0) suggestAktiv = n - 1;
+  if (suggestAktiv >= n) suggestAktiv = 0;
+  const zeilen = $('#suggest').querySelectorAll('[data-i]');
+  zeilen.forEach((z, i) => z.classList.toggle('aktiv', i === suggestAktiv));
+  const z = zeilen[suggestAktiv];
+  if (z && z.scrollIntoView) z.scrollIntoView({ block: 'nearest' });
+  return true;
+}
+
+function suggestNehmen() {
+  const e = suggestEintraege[suggestAktiv];
+  if (!e) return false;
+  e.tun();
+  return true;
+}
+
 function openSuggest() {
-  const q = $('#q');
-  const text = q ? q.value : '';
+  const text = $('#q') ? $('#q').value : '';
+  const k = koordLesen(text);
+  if (k) { ortAbbrechen(); koordZeigen(k); return; }
   if (ortModus(text)) { ortSpaeter(text.trim()); return; }
   ortAbbrechen();
   verlaufZeigen();
 }
 
-function suggestHtml(html) {
-  const box = $('#suggest');
-  box.innerHTML = html;
-  box.hidden = !html;
-}
-
 function closeSuggest() {
   ortAbbrechen();
+  suggestEintraege = [];
+  suggestAktiv = -1;
   $('#suggest').hidden = true;
 }
 
@@ -4989,30 +5114,56 @@ function ortAbbrechen() {
   clearTimeout(ortTimer);
   ortZaehler++;                     // späte Antworten laufen damit ins Leere
   if (ortCtrl) { ortCtrl.abort(); ortCtrl = null; }
-  ortTreffer = [];
+}
+
+/* ---------- Koordinate ---------- */
+
+function koordZeigen(k) {
+  suggestSetzen([{
+    html: i => suggestZeile(i, IKON_KOORD, fmtCoord(k.lat, k.lon),
+      'Koordinate · setzt einen Punkt, von dem aus sich der Kilometer rechnen lässt'),
+    tun: () => koordWaehlen(k)
+  }]);
+}
+
+function koordWaehlen(k) {
+  closeSuggest();
+  suchZu();
+  $('#q').blur();
+  map.setView([k.lat, k.lon], Math.max(map.getZoom(), 17));
+  merkPunkt(k.lat, k.lon);
 }
 
 /* ---------- Verlauf ---------- */
 
 function verlaufZeigen() {
   const typed = $('#ref').value.trim().toLowerCase();
-  const list = recent.filter(r => !typed || String(r.ref).toLowerCase().startsWith(typed)).slice(0, 6);
-  if (!list.length) { suggestHtml(''); return; }
+  const list = recent.filter(r => {
+    if (!typed) return true;
+    // Getippt werden Ziffern, also ist die Streckennummer gemeint
+    return recentArt(r) === 'strecke' && String(r.ref).toLowerCase().startsWith(typed);
+  }).slice(0, 6);
 
-  suggestHtml(list.map((r, i) =>
-    `<button class="suggest-item" type="button" role="option" data-rec="${i}">
-       <b>${esc(r.ref)}</b><span>km ${esc(fmtKm(r.km))}</span>
-     </button>`).join(''));
-
-  $('#suggest').querySelectorAll('[data-rec]').forEach(btn => btn.addEventListener('mousedown', ev => {
-    ev.preventDefault();   // Blur des Feldes verhindern, sonst schließt die Liste zuerst
-    const r = list[Number(btn.dataset.rec)];
-    $('#ref').value = r.ref;
-    $('#km').value = fmtKm(r.km);
-    felderAufQ();
-    closeSuggest();
-    search();
-  }));
+  suggestSetzen(list.map(r => recentArt(r) === 'ort'
+    ? {
+        html: i => suggestZeile(i, r.stelle ? IKON_BAHN : IKON_ORT, r.name, r.sub),
+        tun: () => trefferWaehlen({
+          art: r.stelle ? 'stelle' : 'ort', roh: r.stelle,
+          name: r.name, sub: r.sub, lat: r.lat, lon: r.lon, bbox: r.bbox, typ: r.typ
+        })
+      }
+    : {
+        html: i => `<button class="suggest-item" type="button" role="option" data-i="${i}">
+            <b>${esc(r.ref)}</b><span>km ${esc(fmtKm(r.km))}</span>
+          </button>`,
+        tun: () => {
+          $('#ref').value = r.ref;
+          $('#km').value = fmtKm(r.km);
+          felderAufQ();
+          closeSuggest();
+          search();
+        }
+      }));
 }
 
 /* ---------- Orte und Bahnhöfe ---------- */
@@ -5021,10 +5172,15 @@ function verlaufZeigen() {
  * antworten kann, und beide Dienste bitten um maßvolle Nutzung. */
 function ortSpaeter(text) {
   clearTimeout(ortTimer);
-  if (text.length < 2) { ortAbbrechen(); suggestHtml(''); return; }
-  suggestHtml('<p class="suggest-info">Suche …</p>');
+  if (text.length < 2) { ortAbbrechen(); suggestSetzen([]); return; }
+  suggestMeldung('Suche …');
   ortTimer = setTimeout(() => ortSuchen(text), 300);
 }
+
+const STELLE_ART = {
+  station: 'Bahnhof', halt: 'Haltepunkt', yard: 'Bahnhofsteil', junction: 'Abzweigstelle',
+  service_station: 'Betriebsbahnhof', crossover: 'Überleitstelle'
+};
 
 async function ortSuchen(text) {
   if (ortCtrl) ortCtrl.abort();
@@ -5040,43 +5196,36 @@ async function ortSuchen(text) {
   ]);
   if (mein !== ortZaehler) return;   // inzwischen weitergetippt
 
-  ortTreffer = [
+  const treffer = [
     ...stellen.slice(0, 4).map(f => ({
       art: 'stelle', name: f.name, lat: f.lat, lon: f.lon, roh: f,
-      sub: [{ station: 'Bahnhof', halt: 'Haltepunkt', yard: 'Bahnhofsteil', junction: 'Abzweigstelle',
-              service_station: 'Betriebsbahnhof', crossover: 'Überleitstelle' }[f.kind] || 'Betriebsstelle',
-            f.ds100 && 'DS100 ' + f.ds100, f.uic && 'UIC ' + f.uic].filter(Boolean).join(' · ')
+      sub: [STELLE_ART[f.kind] || 'Betriebsstelle',
+            f.ds100 && 'DS100 ' + f.ds100,
+            f.uic && 'UIC ' + f.uic].filter(Boolean).join(' · ')
     })),
     ...orte
   ];
 
-  if (!ortTreffer.length) {
-    suggestHtml(`<p class="suggest-info">Nichts zu „${esc(text)}“ gefunden.</p>`);
+  if (!treffer.length) {
+    suggestMeldung(`Nichts zu „${esc(text)}“ gefunden.`);
     return;
   }
 
-  const bahn = '<svg class="s-ikon bahn" viewBox="0 0 24 24" aria-hidden="true">' +
-    '<rect x="6" y="3" width="12" height="13" rx="2.5"/><path d="M6 10h12M8.5 20l2-3.5M15.5 20l-2-3.5"/></svg>';
-  const pin = '<svg class="s-ikon" viewBox="0 0 24 24" aria-hidden="true">' +
-    '<path d="M12 21.5C7.8 16.6 5.5 13.3 5.5 10a6.5 6.5 0 1 1 13 0c0 3.3-2.3 6.6-6.5 11.5z"/>' +
-    '<circle cx="12" cy="10" r="2.3"/></svg>';
-
-  suggestHtml(ortTreffer.map((t, i) =>
-    `<button class="suggest-item s-treffer" type="button" role="option" data-tref="${i}">
-       ${t.art === 'stelle' ? bahn : pin}
-       <span class="s-text"><b>${esc(t.name)}</b><span>${esc(t.sub || '')}</span></span>
-     </button>`).join(''));
-
-  $('#suggest').querySelectorAll('[data-tref]').forEach(btn => btn.addEventListener('mousedown', ev => {
-    ev.preventDefault();
-    trefferWaehlen(ortTreffer[Number(btn.dataset.tref)]);
-  }));
+  suggestSetzen(treffer.map(t => ({
+    html: i => suggestZeile(i, t.art === 'stelle' ? IKON_BAHN : IKON_ORT, t.name, t.sub),
+    tun: () => trefferWaehlen(t)
+  })));
 }
 
 /* Ein Treffer wird zum Punkt auf der Karte — mit derselben unteren Leiste wie
  * alles andere, also samt Koordinate, Google-Maps-Knopf und Teilen. */
 function trefferWaehlen(t) {
   if (!t) return;
+  pushRecentOrt(t);
+  // Die Zeile zeigt danach, was gewählt wurde -- nicht mehr das Bruchstück,
+  // das zum Suchen gereicht hat.
+  setVal('#q', t.name);
+  suchTextMerken();
   closeSuggest();
   suchZu();
   $('#q').blur();
@@ -5209,21 +5358,50 @@ function bind() {
 
   /* Die eine Zeile oben. Antippen klappt die Felder auf, Tippen zerlegt den
    * Text sofort in Strecke und Kilometer. */
-  on('#q', 'focus', () => { suchAuf(); openSuggest(); });
+  on('#q', 'focus', ev => {
+    /* Kommt die Leiste gerade erst auf, steht dort meist noch die letzte
+     * Suche. Sie ganz zu markieren spart das Zeichenweise-Loeschen: Tippen
+     * ersetzt sie dann einfach. Ist die Leiste schon offen, bleibt die
+     * Schreibmarke, wo sie hingesetzt wurde. */
+    const warZu = !$('#search').classList.contains('offen');
+    suchAuf();
+    if (warZu && ev.target.value) { try { ev.target.select(); } catch { /* egal */ } }
+    openSuggest();
+  });
   on('#q', 'input', () => { qAufFelder(); openSuggest(); });
   on('#q', 'keydown', ev => {
     if (ev.key === 'Escape') { ev.target.blur(); suchZu(); return; }
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      if (suggestBewegen(ev.key === 'ArrowDown' ? 1 : -1)) ev.preventDefault();
+      return;
+    }
     if (ev.key !== 'Enter') return;
     ev.preventDefault();
-    // Bei Freitext nimmt Enter den ersten Treffer — die Liste bleibt stehen,
-    // bis er feststeht, sonst sieht man nicht, was gewählt wurde.
-    if (ortModus(ev.target.value)) { search(); return; }
+    // Ist in der Liste eine Zeile markiert, gilt die — sonst das, was dasteht.
+    if (suggestNehmen()) return;
+    // Bei Freitext und Koordinate nimmt Enter den ersten Treffer.
+    if (ortModus(ev.target.value) || koordLesen(ev.target.value)) { search(); return; }
     closeSuggest();
     // Steht noch kein Kilometer da, geht es dorthin weiter — wie früher von
     // Strecke nach Kilometer. Ein zweites Enter sucht dann die ganze Strecke.
     if (!$('#km').value.trim()) { suchAuf(); $('#km').focus(); return; }
     ev.target.blur();
     search();
+  });
+
+  /* Der Loeschknopf darf dem Feld nicht den Fokus nehmen -- sonst klappt die
+   * Leiste unter dem Finger zu, statt eine leere Zeile zum Weitertippen
+   * dazulassen. */
+  on('#qClear', 'mousedown', ev => ev.preventDefault());
+  on('#qClear', 'click', () => {
+    setVal('#q', '');
+    setVal('#ref', '');
+    setVal('#km', '');
+    kmPlusZeigen();
+    suchTextMerken();
+    suchAuf();
+    $('#q').focus();
+    openSuggest();
   });
 
   /* Aufgeklappter Teil: bleibt offen, solange darin gearbeitet wird, und
@@ -5257,9 +5435,6 @@ function bind() {
     felderAufQ();
   });
   kmPlusZeigen();
-
-  on('#facQ', 'keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); runFacility(); } });
-  on('#facGo', 'click', runFacility);
 
   document.querySelectorAll('[data-base]').forEach(b => b.addEventListener('click', () => setBase(b.dataset.base)));
   on('#ormBtn', 'click', () => toggleOverlay('orm'));
@@ -5388,7 +5563,13 @@ function boot() {
   kmlBoot();      // nebenher: die Karte soll nicht auf den Speicher warten
 
   if (readHash()) search();
-  else if (recent[0]) $('#ref').value = recent[0].ref;
+  else {
+    /* Beim Start die zuletzt gesuchte Strecke vorlegen. Im Verlauf stehen jetzt
+     * auch Orte -- ein Ort hat keine Streckennummer und wuerde als "undefined"
+     * in der Zeile landen. */
+    const letzte = recent.find(r => recentArt(r) === 'strecke');
+    if (letzte) setVal('#ref', letzte.ref);
+  }
   kmPlusZeigen();
   felderAufQ();
 
