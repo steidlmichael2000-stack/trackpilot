@@ -2,8 +2,10 @@
    Farben laufen über Custom Properties, damit Hell/Dunkel an einer Stelle sitzt. */
 
 :root {
-  /* Messwerk · Nacht — Violett ist die Signalfarbe dieser App, dieselbe
-     wie auf ihrem Icon und ihrer Kachel auf MS Tools. */
+  /* Messwerk · Nacht. Die Signalfarbe steht hier nur als Rückfallwert:
+     gesetzt wird sie aus PALETTEN in app.js als Inline-Wert auf <html>,
+     weil sie je Thema einen eigenen Ton braucht und umschaltbar ist.
+     Standard ist Lapis, der Blauton des Logos. */
   --bg: #06070b;
   --glass: rgba(13, 15, 21, .94);
   --panel-2: #12151d;
@@ -11,7 +13,7 @@
   --text: #e9ebf1;
   --muted: #8a90a3;
   --muted-2: rgba(255, 255, 255, .52);
-  --accent: #a78bfa;
+  --accent: #55a5e7;
   --accent-ink: #06070b;
   --ok: #34d399;
   --warn: #f5a524;
@@ -32,7 +34,8 @@ html[data-theme="light"] {
   --text: #17202a;
   --muted: #58636f;
   --muted-2: #7b8794;
-  --accent: #1d6fe0;
+  --accent: #1761a3;
+  --accent-ink: #ffffff;
   --ok: #15803d;
   --warn: #b45309;
   --bad: #c62828;
@@ -48,7 +51,8 @@ html[data-theme="light"] {
     --text: #17202a;
     --muted: #58636f;
     --muted-2: #7b8794;
-    --accent: #1d6fe0;
+    --accent: #1761a3;
+    --accent-ink: #ffffff;
     --ok: #15803d;
     --warn: #b45309;
     --bad: #c62828;
@@ -498,6 +502,21 @@ body {
   border-color: var(--accent); color: var(--accent);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
+
+/* Signalfarbe. Jedes Feld zeigt beide Töne der Farbe — links den fürs
+ * Dunkle, rechts den fürs Helle. Quadratisch wie alles hier. */
+.pal-label {
+  margin: 14px 0 7px; font-size: .78rem; font-weight: 600; color: var(--muted);
+}
+.pal { display: flex; gap: 7px; flex-wrap: wrap; }
+.pal-btn {
+  width: 40px; height: 30px; padding: 0;
+  border: 1px solid var(--line); border-radius: 2px;
+  background: linear-gradient(100deg, var(--pal-dark) 0 50%, var(--pal-light) 50% 100%);
+  cursor: pointer;
+}
+.pal-btn.is-on { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 3px var(--text); }
+.pal-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
 .fac-out:not(:empty) { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .fac-item {

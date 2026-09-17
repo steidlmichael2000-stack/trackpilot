@@ -30,6 +30,29 @@ mehr eine Fassung von vor der Umbenennung installiert hat. Sie sind **nicht**
 der Produktname, sondern die Schlüssel, unter denen fremde Geräte ihre eigenen
 Daten liegen haben — wer sie streicht, löscht die Daten dieser Geräte mit.
 
+## Signalfarbe
+
+Umschaltbar, Standard ist **Lapis** (`#1761A3`) — der Blauton des Firmenlogos.
+Die Farben stehen in `PALETTEN` in `app.js`, **nicht** im Stylesheet: jede Farbe
+braucht einen eigenen Ton für Hell und für Dunkel, und die Wahl muss zur
+Laufzeit umschaltbar sein. `applyPalette()` setzt `--accent` und `--accent-ink`
+als Inline-Wert auf `<html>` und schlägt damit beide Themenblöcke in `style.css`,
+die nur noch Rückfallwerte tragen.
+
+Der Logoton selbst steht auf dem dunklen Grund nur bei 3:1 und ist dort für
+Beschriftungen zu dunkel — im Dunkelmodus läuft deshalb ein aufgehellter Ton
+derselben Farbe (`#55A5E7`). `ink` ist die Schrift auf gefüllten Flächen und
+wechselt je Ton zwischen Schwarz und Weiß. Wer eine Farbe ergänzt, prüft beide
+Richtungen.
+
+Bei `theme: 'auto'` hängt die Wahl am Betriebssystem — dafür liegt ein
+`matchMedia`-Zuhörer in `bind()`. Ohne ihn bliebe der Ton beim Umschalten des
+Geräts stehen.
+
+**Offen:** `icon.svg` und die Kachel `.card-rail` auf MS Tools tragen weiterhin
+Violett (`#a78bfa`). Solange Lapis der Standard ist, passen App und Icon
+farblich nicht zusammen.
+
 ## Icons
 
 `icon.svg` ist die Vorlage, `make-icons.ps1` rasterisiert daraus die PNGs in

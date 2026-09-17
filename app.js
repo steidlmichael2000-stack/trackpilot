@@ -1573,8 +1573,22 @@ const view = {
   busy: false
 };
 
+/* Signalfarben. Standard ist Lapis — der Blauton des Logos.
+ * Je Farbe ein Ton fürs Dunkle und einer fürs Helle: der Logoton selbst
+ * steht auf schwarzem Grund nur bei 3:1 und ist dort für Beschriftungen
+ * zu dunkel, im Hellen sitzt er dagegen genau richtig. `ink` ist die
+ * Schrift auf gefüllten Flächen — mal Schwarz, mal Weiß, je nachdem,
+ * wie hell die Fläche ist. */
+const PALETTEN = {
+  lapis:   { name: 'Lapis',   dark: { accent: '#55a5e7', ink: '#06070b' }, light: { accent: '#1761a3', ink: '#ffffff' } },
+  grau:    { name: 'Grau',    dark: { accent: '#7d7d7d', ink: '#06070b' }, light: { accent: '#5f5f5f', ink: '#ffffff' } },
+  violett: { name: 'Violett', dark: { accent: '#a78bfa', ink: '#06070b' }, light: { accent: '#6d4fd6', ink: '#ffffff' } },
+  orange:  { name: 'Orange',  dark: { accent: '#f5a524', ink: '#06070b' }, light: { accent: '#96590a', ink: '#ffffff' } },
+  gruen:   { name: 'Grün',    dark: { accent: '#34d399', ink: '#06070b' }, light: { accent: '#0f8a62', ink: '#ffffff' } },
+};
+
 let prefs = {
-  theme: 'auto', base: 'osm', orm: true, baseOpacity: 100,
+  theme: 'auto', palette: 'lapis', base: 'osm', orm: true, baseOpacity: 100,
   wegLinie: true, steinLinie: true,      // die beiden Rechenhilfen auf der Karte
   wms: { url: '', layers: '', opacity: 75, on: false }   // nur Adresse und Layer, nie Zugangsdaten
 };
@@ -5261,7 +5275,51 @@ function applyTheme() {
   const el = document.documentElement;
   if (prefs.theme === 'auto') el.removeAttribute('data-theme');
   else el.setAttribute('data-theme', prefs.theme);
+  applyPalette();
   syncButtons();
+}
+
+/** Hell oder dunkel — bei 'auto' entscheidet das Betriebssystem. */
+function istHell() {
+  if (prefs.theme === 'light') return true;
+  if (prefs.theme === 'dark') return false;
+  return window.matchMedia('(prefers-color-scheme: light)').matches;
+}
+
+/* Die Signalfarbe steht als Inline-Wert auf <html> und schlägt damit beide
+ * Themenblöcke im Stylesheet. Deshalb muss sie bei jedem Wechsel neu
+ * gesetzt werden — auch, wenn das Betriebssystem umschaltet. */
+function applyPalette() {
+  const p = PALETTEN[prefs.palette] || PALETTEN.lapis;
+  const ton = istHell() ? p.light : p.dark;
+  const el = document.documentElement;
+  el.style.setProperty('--accent', ton.accent);
+  el.style.setProperty('--accent-ink', ton.ink);
+}
+
+function buildPalRow() {
+  const box = $('#palRow');
+  if (!box) return;
+  box.textContent = '';
+  Object.entries(PALETTEN).forEach(([key, p]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pal-btn';
+    b.dataset.palette = key;
+    b.title = p.name;
+    b.setAttribute('aria-label', 'Signalfarbe ' + p.name);
+    // Das Feld zeigt beide Töne: links der helle, rechts der dunkle Grund
+    b.style.setProperty('--pal-dark', p.dark.accent);
+    b.style.setProperty('--pal-light', p.light.accent);
+    b.addEventListener('click', () => {
+      prefs.palette = key;
+      applyPalette();
+      syncButtons();
+      saveStore();
+    });
+    box.appendChild(b);
+  });
+  syncButtons();   // applyTheme läuft vor bind(), da gibt es die Felder noch nicht
 }
 
 function syncButtons() {
@@ -5269,6 +5327,8 @@ function syncButtons() {
     b.classList.toggle('is-on', b.dataset.base === (prefs.base || 'osm')));
   document.querySelectorAll('[data-theme]').forEach(b =>
     b.classList.toggle('is-on', b.dataset.theme === (prefs.theme || 'auto')));
+  document.querySelectorAll('[data-palette]').forEach(b =>
+    b.classList.toggle('is-on', b.dataset.palette === (prefs.palette || 'lapis')));
   if (map) {
     for (const [kennung, layer] of Object.entries(overlayLayers)) {
       const btn = $(kennung === 'orm' ? '#ormBtn' : '#parzBtn');
@@ -5440,6 +5500,10 @@ function bind() {
     applyTheme();
     saveStore();
   }));
+  buildPalRow();
+  // Bei 'Automatisch' muss die Signalfarbe mitgehen, wenn das Gerät umschaltet
+  window.matchMedia('(prefers-color-scheme: light)')
+    .addEventListener('change', () => { if (prefs.theme === 'auto') applyPalette(); });
 
   setVal('#baseOpacity', prefs.baseOpacity == null ? 100 : prefs.baseOpacity);
   on('#baseOpacity', 'input', ev => {
