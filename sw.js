@@ -5,7 +5,7 @@
  * neue Version sofort ankommt statt hinter einem alten Cache zu hängen.
  */
 
-const VERSION = 'v29';
+const VERSION = 'v30';
 const SHELL = `trackpilot-shell-${VERSION}`;
 const TILES = `trackpilot-tiles-${VERSION}`;
 const DATA = `trackpilot-data-${VERSION}`;
@@ -59,7 +59,9 @@ async function trim(cacheName, max) {
   await Promise.all(keys.slice(0, keys.length - max).map(k => cache.delete(k)));
 }
 
-async function networkFirst(request, cacheName, frisch) {
+const MAX_DATA = 300;
+
+async function networkFirst(request, cacheName, frisch, max) {
   const cache = await caches.open(cacheName);
   try {
     /* Eigene Dateien bewusst ohne HTTP-Cache holen. GitHub Pages setzt
@@ -70,7 +72,10 @@ async function networkFirst(request, cacheName, frisch) {
     const res = frisch && request.method === 'GET'
       ? await fetch(request.url, { cache: 'reload', credentials: 'same-origin' })
       : await fetch(request);
-    if (res && res.ok) cache.put(request, res.clone());
+    if (res && res.ok) {
+      await cache.put(request, res.clone());
+      if (max) trim(cacheName, max);
+    }
     return res;
   } catch (err) {
     const hit = await cache.match(request);
@@ -90,8 +95,11 @@ async function cacheFirst(request, cacheName, max) {
     const hit = await cache.match(request);
     if (hit) return hit;
     const res = await fetch(request);
-    // Kacheln kommen ohne CORS zurück (opaque) — trotzdem brauchbar für <img>
-    if (res && (res.ok || res.type === 'opaque')) {
+    /* Nur echte Treffer ablegen. Die Kachel-Layer laden per CORS, der Status ist
+     * also lesbar. Undurchsichtige Antworten (opaque) bleiben draußen: Sie können
+     * eine 429- oder 5xx-Seite sein, und Chrome rechnet jede mit mehreren MB auf
+     * den Speicher an, den sich alle Apps dieser Herkunft teilen. */
+    if (res && res.ok) {
       cache.put(request, res.clone());
       trim(cacheName, max);
     }
@@ -118,6 +126,6 @@ self.addEventListener('fetch', event => {
   } else if (TILE_HOSTS.some(h => url.hostname === h || url.hostname.endsWith('.' + h))) {
     event.respondWith(cacheFirst(request, TILES, MAX_TILES));
   } else if (url.hostname === 'api.openrailwaymap.org') {
-    event.respondWith(networkFirst(request, DATA, false));
+    event.respondWith(networkFirst(request, DATA, false, MAX_DATA));
   }
 });

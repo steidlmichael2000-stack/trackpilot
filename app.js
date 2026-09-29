@@ -206,17 +206,12 @@ async function tryFetch(url, timeout) {
   }
 }
 
-/** Direktabruf; nur falls der blockiert wird, einmalig über einen öffentlichen CORS-Proxy. */
+/** Nur Direktabruf. Bis 29.09.2026 ging jede gescheiterte Anfrage still an den
+ * öffentlichen Proxy allorigins.win: Suchtexte landeten bei einem Dritten, und
+ * der hätte die Lage der Kilometersteine beliebig verfälschen können. Die
+ * ORM-API sendet selbst CORS-Header, der Umweg bringt nichts. */
 async function getJson(url) {
-  try {
-    return await tryFetch(url, 15000);
-  } catch (err) {
-    try {
-      return await tryFetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url), 20000);
-    } catch {
-      throw new Error(err.message || 'Netzwerkfehler');
-    }
-  }
+  return tryFetch(url, 15000);
 }
 
 /* Je Strecke werden alle geladenen Steine gesammelt. Die API antwortet im festen
@@ -387,7 +382,9 @@ async function searchFacility(query) {
  * zeigen statt mit festem Zoom mitten hinein. */
 async function searchOrt(text, signal) {
   const c = map.getCenter();
-  const nah = `&lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}`;
+  // Zwei Stellen (etwa 1 km) reichen, um nahe Treffer vorzuziehen. Nach einer
+  // Ortung ist die Kartenmitte der eigene Standort, der soll nicht genauer raus.
+  const nah = `&lat=${c.lat.toFixed(2)}&lon=${c.lng.toFixed(2)}`;
   try {
     const j = await holJson(`${PHOTON}?q=${encodeURIComponent(text)}&lang=de&limit=10${nah}`, signal);
     /* Bahnobjekte fliegen raus: Nach „Bamberg“ kamen von dort drei weitere
@@ -1644,12 +1641,17 @@ function initMap() {
    * Wer über einen WMS-Hintergrund (maxZoom 22) tiefer hineinzoomte und dann
    * zurück auf Karte oder Luftbild schaltete, saß auf weißem Grund. Dasselbe
    * hatten wir schon beim eigenen WMS-Layer. */
+  /* crossOrigin: Alle eingebauten Dienste senden CORS-Header (geprüft 29.09.2026).
+   * Mit CORS kommt die Kachel samt Status an, und der Service Worker legt nur
+   * echte Treffer ab. Ohne CORS wäre sie undurchsichtig ("opaque"): Fehlerseiten
+   * landeten mit im Cache, und Chrome rechnet jede solche Antwort mit mehreren MB
+   * auf den Speicher an, den sich alle Apps dieser Herkunft teilen. */
   baseOsm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 22, maxNativeZoom: 19,
+    maxZoom: 22, maxNativeZoom: 19, crossOrigin: 'anonymous',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   });
   baseSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 22, maxNativeZoom: 18, attribution: 'Luftbild: Esri, Maxar'
+    maxZoom: 22, maxNativeZoom: 18, crossOrigin: 'anonymous', attribution: 'Luftbild: Esri, Maxar'
   });
 
   /* Offene Dienste der Bayerischen Vermessungsverwaltung, alle CC BY 4.0 und mit
@@ -1663,14 +1665,14 @@ function initMap() {
   const BVV = 'DOP20/Relief/Parzellen: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0)';
 
   baseDop = L.tileLayer.wms('https://geoservices.bayern.de/od/wms/dop/v1/dop20', {
-    layers: 'by_dop20c', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, attribution: BVV
+    layers: 'by_dop20c', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
   });
 
   /* Schräglicht und nicht die kombinierte Darstellung: Das Schräglicht zeigt
    * Dämme, Einschnitte und alte Trassen plastisch, die kombinierte Fassung wäscht
    * genau diese kleinen Formen weg. */
   baseRelief = L.tileLayer.wms('https://geoservices.bayern.de/od/wms/dgm/v1/relief', {
-    layers: 'by_relief_schraeglicht', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, attribution: BVV
+    layers: 'by_relief_schraeglicht', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
   });
 
   /* Parzellarkarte nur als Umring: Die Farbfassung bringt einen deckend weißen
@@ -1678,12 +1680,12 @@ function initMap() {
    * Der Dienst zeichnet erst unterhalb 1:5000, also etwa ab Zoomstufe 17. */
   parzLayer = L.tileLayer.wms('https://geoservices.bayern.de/od/wms/alkis/v1/parzellarkarte', {
     layers: 'by_alkis_parzellarkarte_umr_schwarz', format: 'image/png', transparent: true,
-    version: '1.3.0', maxZoom: 22, attribution: BVV
+    version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
   });
 
   baseLayers = { osm: baseOsm, sat: baseSat, dop: baseDop, relief: baseRelief };
   ormLayer = L.tileLayer('https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', {
-    subdomains: 'abc', maxZoom: 22, maxNativeZoom: 19, opacity: 0.85,
+    subdomains: 'abc', maxZoom: 22, maxNativeZoom: 19, opacity: 0.85, crossOrigin: 'anonymous',
     attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>'
   });
 
@@ -1897,10 +1899,16 @@ function toggleOverlay(kennung) {
 let wmsLayer = null;
 let wmsFehler = 0;
 
+/* Nur https: Ein http-Dienst scheitert auf der https-Seite ohnehin (Mixed Content),
+ * und ein "javascript:"-Wert darf nie in window.open oder fetch landen. */
+function wmsUrlOk(u) {
+  try { return new URL(u).protocol === 'https:'; } catch { return false; }
+}
+
 function wmsBuild() {
   const url = (prefs.wms.url || '').trim();
   const layers = (prefs.wms.layers || '').trim();
-  if (!url || !layers) return null;
+  if (!url || !layers || !wmsUrlOk(url)) return null;
 
   const layer = L.tileLayer.wms(url, {
     layers, format: 'image/png', transparent: true, version: '1.3.0',
@@ -2004,6 +2012,7 @@ function wmsShowLayers(caps) {
 async function wmsLoadLayers() {
   const url = ($('#wmsUrl').value || '').trim();
   if (!url) { toast('Bitte zuerst die Adresse des Dienstes eintragen.'); return; }
+  if (!wmsUrlOk(url)) { toast('Nur https-Adressen sind möglich.'); return; }
   $('#wmsList').innerHTML = '<p class="fine">Frage den Dienst …</p>';
   const sep = url.includes('?') ? '&' : '?';
   try {
@@ -2022,6 +2031,7 @@ async function wmsLoadLayers() {
 function wmsLogin() {
   const url = (prefs.wms.url || '').trim();
   if (!url) { toast('Bitte zuerst die Adresse des Dienstes eintragen.'); return; }
+  if (!wmsUrlOk(url)) { toast('Nur https-Adressen sind möglich.'); return; }
   // GetCapabilities aufrufen: Der Browser fragt die Zugangsdaten ab und merkt sie
   // sich für die Domain. Nebenbei sieht man dort die verfügbaren Layer.
   const sep = url.includes('?') ? '&' : '?';
@@ -2560,6 +2570,11 @@ function kmlParse(xmlText) {
 
 /* -------- KMZ auspacken -------- */
 
+/* Obergrenzen gegen präparierte Dateien. Großzügig: Vermessungs-KML mit einigen
+ * zehntausend Objekten liegen weit darunter. */
+const KML_MAX_DATEI = 100e6;
+const KML_MAX_ENTPACKT = 300e6;
+
 /* Ein KMZ ist ein ZIP mit einer KML darin. Gelesen wird über das zentrale
  * Verzeichnis am Dateiende: Nur dort stehen die Größen verlässlich — bei
  * gestreamt geschriebenen ZIPs sind sie im lokalen Kopf null. Das Aufblasen
@@ -2601,7 +2616,22 @@ async function kmzText(buf) {
   if (kml.verfahren !== 8) throw new Error('unbekannte Packmethode im KMZ');
   if (typeof DecompressionStream !== 'function') throw new Error('dieser Browser kann KMZ nicht entpacken');
   const strom = new Blob([kml.daten]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  return kmlDekodieren(await new Response(strom).arrayBuffer());
+  /* Beim Entpacken mitzählen: Eine präparierte KMZ (Zip-Bombe) bläht sich sonst
+   * auf Gigabytes auf und reißt den Tab mit. */
+  const teile = [];
+  let summe = 0;
+  const leser = strom.getReader();
+  for (;;) {
+    const { done, value } = await leser.read();
+    if (done) break;
+    summe += value.byteLength;
+    if (summe > KML_MAX_ENTPACKT) {
+      leser.cancel();
+      throw new Error('entpackt größer als ' + Math.round(KML_MAX_ENTPACKT / 1e6) + ' MB');
+    }
+    teile.push(value);
+  }
+  return kmlDekodieren(await new Blob(teile).arrayBuffer());
 }
 
 /** Ältere KML kommen in ISO-8859-1 — sonst werden Umlaute zu Fragezeichen. */
@@ -2960,6 +2990,7 @@ async function kmlOeffnen(dateien) {
 
   for (const datei of dateien) {
     try {
+      if (datei.size > KML_MAX_DATEI) throw new Error('größer als ' + Math.round(KML_MAX_DATEI / 1e6) + ' MB');
       const buf = await datei.arrayBuffer();
       const istZip = buf.byteLength > 4 && new DataView(buf).getUint32(0, false) === 0x504b0304;
       const roh = istZip ? await kmzText(buf) : kmlDekodieren(buf);

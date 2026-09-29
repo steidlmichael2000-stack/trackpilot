@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- Nur eigene Skripte. Bilder und Abfragen dürfen an jede https-Adresse, weil der
+     eigene WMS frei eintragbar ist. Alle Apps teilen sich diese Herkunft und damit
+     Speicher und Caches, deshalb gilt die CSP als zweite Verteidigungslinie hinter esc(). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>TrackPilot — Streckenkilometer auf der Karte</title>
 <meta name="description" content="Streckennummer und Kilometer eingeben, Position auf der Karte sehen, per Klick auf die Karte den Kilometer ablesen und in Google Maps öffnen.">
 <meta name="theme-color" content="#14181d">
