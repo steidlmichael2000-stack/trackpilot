@@ -49,9 +49,10 @@ Bei `theme: 'auto'` hängt die Wahl am Betriebssystem — dafür liegt ein
 `matchMedia`-Zuhörer in `bind()`. Ohne ihn bliebe der Ton beim Umschalten des
 Geräts stehen.
 
-**Offen:** `icon.svg` und die Kachel `.card-rail` auf MS Tools tragen weiterhin
-Violett (`#a78bfa`). Solange Lapis der Standard ist, passen App und Icon
-farblich nicht zusammen.
+`icon.svg`, die PNGs und die Kachel `.card-rail` auf MS Tools sind seit
+September 2026 ebenfalls Lapis. Die Icon-Adressen tragen `?v=lapis`, damit
+installierte Apps das alte violette Icon nicht aus dem Zwischenspeicher weiter
+zeigen — bei einem neuen Motiv den Wert ändern.
 
 ## Icons
 

@@ -146,8 +146,8 @@ function haversine(aLat, aLon, bLat, bLon) {
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
+// Keine eigene Route mehr: In Google Maps ist sie ein Tipp, zwei Knöpfe dafür waren zu viel
 const gmapsUrl = (lat, lon) => `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
-const gmapsRoute = (lat, lon) => `https://www.google.com/maps/dir/?api=1&destination=${lat.toFixed(6)},${lon.toFixed(6)}`;
 
 /** "12+250" → 12.25, "12,5" → 12.5 */
 function toKm(token) {
@@ -346,6 +346,23 @@ async function resolvePoint(ref, km) {
     }
   }
 
+  /* Steinlücke über MAX_GAP_KM: geradlinig nicht mehr, am Gleisverlauf entlang
+   * aber schon — bis MAX_GLEIS_GAP_KM, dieselbe Grenze wie beim Antippen der
+   * Karte. Vorher galt sie nur in dieser einen Richtung: An Strecke 5321 lieferte
+   * ein Tipp in der Lücke km 87,2–96,2 den Kilometer am Gleis entlang, die
+   * Eingabe „5321 90" dagegen den Stein bei km 87,2 mit „2,8 km daneben". */
+  if (verworfen && verworfen.grund === 'luecke') {
+    /* rejectReason prüft die Lücke vor der Geometrie. Für die Anzeige zählt aber
+     * der wahre Grund: Ein 12-km-Paar, das geometrisch nicht zusammenpasst, ist
+     * kein „über 25 km". */
+    if (upper.km - lower.km > MAX_GLEIS_GAP_KM) verworfen.zuWeit = true;
+    else if (!segmentOk(lower, upper, MAX_GLEIS_GAP_KM)) verworfen.grund = 'geometrie';
+    else {
+      const weit = await gleisWeit(lower, upper, km);
+      if (weit) return weit;
+    }
+  }
+
   // Jenseits des äußersten Steins: am Gleis entlang hinauslaufen statt aufgeben
   if (e.sorted.length > 1) {
     const hinaus = await extrapolieren(ref, km, e.sorted);
@@ -357,6 +374,35 @@ async function resolvePoint(ref, km) {
     lat: near.lat, lon: near.lon, quality: 'naechster',
     delta: near.km - km, nearKm: near.km, verworfen,
     operator: near.operator, lineRef: near.ref
+  };
+}
+
+/** Position zu einem Kilometer in einer weiten Steinlücke, am Gleisweg abgetragen.
+ *
+ *  Erst aus den mitgelieferten Kacheln, sonst über Overpass: Die Suche ist ein
+ *  bewusster Griff, da darf sie ein paar Sekunden kosten. Ob der Weg zum Paar
+ *  passt, prüft wegAusWegen (Gleisweg gegen Kilometerdifferenz). Klappt beides
+ *  nicht, gibt es null, und es bleibt beim nächsten Stein. */
+async function gleisWeit(A, B, km) {
+  let weg = null;
+  try {
+    weg = await gleisWegZwischen(A, B, true);
+    if (!weg) {
+      /* Nicht in den Kacheln: Overpass braucht dafür 15–40 s. Ohne Zeile unten
+       * liefe nur der dünne Balken, und die App sähe aus, als hinge sie. */
+      showStatus(`Zwischen km ${fmtKm(A.km)} und ${fmtKm(B.km)} ist kein Stein erfasst. ` +
+        `Hole den Gleisverlauf von Overpass — das dauert einige Sekunden …`);
+      weg = await gleisWegZwischen(A, B);
+    }
+  } catch { return null; }
+  if (!weg) return null;
+  const t = (km - A.km) / (B.km - A.km);
+  const pos = pointAlong(weg.path, t * weg.length);
+  return {
+    lat: pos.lat, lon: pos.lon, quality: 'gleis-weit',
+    between: [A.km, B.km], chord: haversine(A.lat, A.lon, B.lat, B.lon),
+    wegLaenge: weg.length, nominal: weg.nominal, pfad: weg.path,
+    operator: A.operator || B.operator, lineRef: A.ref || B.ref
   };
 }
 
@@ -599,6 +645,17 @@ const GLEIS_ERR = { typical: 21, worst: 88, sehne: 186, ueber100: 3, faelle: 13 
  * dem Fehler, den entlangLaufen() beschreibt — dieselbe Messung mit dem alten
  * Lauf ergibt heute Median 20 m und Zehntel 137 m. */
 const EXTRA_ERR = { typical: 13, worst: 57, stein: 208, faelle: 2929, beantwortet: 1073 };
+
+/* Am Gleis entlang über weite Steinlücken (8–25 km), die Zahlen aus der Messung
+ * bei MAX_GLEIS_GAP_KM: 1802 übersprungene Zwischensteine, im Median 16–19 m,
+ * im ungünstigen Zehntel bis 52 m. */
+const WEIT_ERR = { typical: 19, worst: 52, faelle: 1802 };
+
+/** Welche Messung für eine Rechnung am Gleis entlang gilt — nach dem Steinabstand,
+ *  nicht nach der Richtung. Sonst stand an derselben Stelle der 9-km-Lücke bei
+ *  5321 nach dem Tipp „±88 m" (gemessen an 3–7 km) und nach der Eingabe „±52 m". */
+const gleisErr = p =>
+  p && p.between && p.between[1] - p.between[0] > MAX_GAP_KM ? WEIT_ERR : GLEIS_ERR;
 
 /** Nächster Punkt auf dem Streckenzug der Kilometersteine — liefert auch den Kilometer dort.
  *
@@ -1605,7 +1662,7 @@ const kmTokens = s => String(s).split(/[&;\s]+/).filter(Boolean);
 
 /* ============================ Karte ============================ */
 
-let map, baseOsm, baseSat, baseDop, baseRelief, ormLayer, parzLayer;
+let map, baseOsm, baseDark, baseSat, baseDop, baseRelief, ormLayer, parzLayer, strLayer, ortLayer;
 let msLayer, trackLayer, pointLayer, meLayer, merkLayer, liveLayer;
 /* Hintergründe schließen sich aus, Auflagen nicht — als Verzeichnis gehalten,
  * damit ein weiterer Dienst nur ein Eintrag und ein Knopf ist. */
@@ -1613,7 +1670,64 @@ let baseLayers = {};
 let overlayLayers = {};
 let pointMarker = null;
 
+/* Zwei Finger drehen die Karte erst, wenn sie sich um DREH_SCHWELLE Grad
+ * gegeneinander verdreht haben — wie bei Google Maps. Vorher bleibt die Karte
+ * genordet, und ein Zweifinger-Zoom kippt sie nicht nebenbei ein paar Grad.
+ * Ist die Schwelle erreicht, dreht die Karte von dort aus weiter, ohne den
+ * aufgelaufenen Winkel nachzuholen: kein Ruck.
+ *
+ * leaflet-rotate kennt keine Schwelle. Statt die Bibliothek unter vendor/ zu
+ * ändern, wird ihr Gestenhandler hier umhüllt: Solange die Schwelle nicht
+ * erreicht ist, steht sein _rotating auf false — der Zoom läuft dabei normal
+ * weiter —, und beim Überschreiten wird _startBearing so verschoben, dass die
+ * Rechnung der Bibliothek genau beim aktuellen Winkel ansetzt. */
+const DREH_SCHWELLE = 15;
+
+function drehSchwelleEinbauen() {
+  const G = L.Map.TouchGestures && L.Map.TouchGestures.prototype;
+  if (!G || G._drehSchwelle) return;
+  G._drehSchwelle = true;
+  const start = G._onTouchStart, zug = G._onTouchMove, ende = G._onTouchEnd;
+
+  G._onTouchStart = function (e) {
+    /* Nur wenn die Bibliothek wirklich eine neue Geste beginnt — ihre eigenen
+     * Bedingungen. Ein dritter Finger mitten in einer Drehung löst ebenfalls
+     * touchstart aus; ohne diese Prüfung fiele die laufende Drehung dann zurück
+     * in die Wartestellung und bräuchte noch einmal 15°. */
+    const neu = e.touches && e.touches.length === 2 &&
+      !this._map._animatingZoom && !this._zooming && !this._rotating;
+    start.call(this, e);
+    if (!neu) return;
+    this._drehWartet = !!this._rotating;
+    if (this._drehWartet) this._rotating = false;
+  };
+
+  G._onTouchMove = function (e) {
+    if (this._drehWartet && e.touches && e.touches.length === 2) {
+      const m = this._map;
+      const v = m.mouseEventToContainerPoint(e.touches[0])
+        .subtract(m.mouseEventToContainerPoint(e.touches[1]));
+      // Dieselbe Rechnung wie in leaflet-rotate, samt Halbkreis-Ausgleich
+      let d = (Math.atan(v.x / v.y) - this._startTheta) * L.DomUtil.RAD_TO_DEG;
+      if (v.y < 0) d += 180;
+      const r = ((this._startBearing - d - m.getBearing()) % 360 + 540) % 360 - 180;
+      if (Math.abs(r) >= DREH_SCHWELLE) {
+        this._startBearing -= r;
+        this._rotating = true;
+        this._drehWartet = false;
+      }
+    }
+    zug.call(this, e);
+  };
+
+  G._onTouchEnd = function (e) {
+    this._drehWartet = false;
+    ende.call(this, e);
+  };
+}
+
 function initMap() {
+  drehSchwelleEinbauen();
   map = L.map('map', {
     zoomControl: false, attributionControl: true, tap: true,
     // Drehung über leaflet-rotate; eigener Nordknopf statt des mitgelieferten
@@ -1654,6 +1768,30 @@ function initMap() {
     maxZoom: 22, maxNativeZoom: 18, crossOrigin: 'anonymous', attribution: 'Luftbild: Esri, Maxar'
   });
 
+  /* Dunkle Karte und die beiden Esri-Auflagen. Nachgemessen am 29.09.2026 über
+   * Nürnberg: Dark Gray liefert bis Zoomstufe 16 echte Kacheln, darüber nur einen
+   * immer gleichen Platzhalter von 2521 Byte — daher maxNativeZoom 16, sonst
+   * stünde ab 17 die Meldung „Map data not yet available" auf der Karte. Das
+   * Straßennetz zeichnet bis 19. Die Ortsnamen liefern auch darüber Kacheln, nur
+   * leere (872 Byte, durchsichtig): Ganz nah gibt es keine Ortsnamen mehr, und
+   * vergrößerte Schrift aus Stufe 16 wäre unscharf und riesig. Alle drei senden
+   * CORS, und der Dienst steht bei Esri auf „mature support": Er läuft weiter,
+   * wird aber nicht mehr aktualisiert. */
+  /* Ein Wortlaut für alle drei: Leaflet führt gleiche Quellenangaben nur einmal,
+   * sonst stünde die Zeile bei Dunkel mit Straßen und Namen dreifach da und
+   * läge auf dem Handy über drei Zeilen. */
+  const ESRI = 'Esri, HERE, Garmin, &copy; OpenStreetMap';
+  const ESRI_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+  baseDark = L.tileLayer(ESRI_URL + 'Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 22, maxNativeZoom: 16, crossOrigin: 'anonymous', attribution: ESRI
+  });
+  strLayer = L.tileLayer(ESRI_URL + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 22, maxNativeZoom: 19, crossOrigin: 'anonymous', attribution: ESRI
+  });
+  ortLayer = L.tileLayer(ESRI_URL + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 22, maxNativeZoom: 19, crossOrigin: 'anonymous', attribution: ESRI
+  });
+
   /* Offene Dienste der Bayerischen Vermessungsverwaltung, alle CC BY 4.0 und mit
    * EPSG:3857, laufen also direkt in Leaflet. Als WMS haben sie keine natürliche
    * Zoomgrenze, deshalb maxZoom 22.
@@ -1683,7 +1821,7 @@ function initMap() {
     version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
   });
 
-  baseLayers = { osm: baseOsm, sat: baseSat, dop: baseDop, relief: baseRelief };
+  baseLayers = { osm: baseOsm, dark: baseDark, sat: baseSat, dop: baseDop, relief: baseRelief };
   ormLayer = L.tileLayer('https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', {
     subdomains: 'abc', maxZoom: 22, maxNativeZoom: 19, opacity: 0.85, crossOrigin: 'anonymous',
     attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>'
@@ -1701,10 +1839,10 @@ function initMap() {
    * ein Doppeltipp. Der Platz rechts unten gehört damit den eigenen Knöpfen. */
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 
-  overlayLayers = { orm: ormLayer, parz: parzLayer };
-  if (prefs.orm !== false) ormLayer.addTo(map);
-  if (prefs.parz) { parzFarbeAnpassen(); parzLayer.addTo(map); }
-  if (prefs.base && prefs.base !== 'osm') setBase(prefs.base);
+  overlayLayers = { orm: ormLayer, parz: parzLayer, str: strLayer, ort: ortLayer };
+  if (prefs.base && prefs.base !== 'osm') setBase(prefs.base, true);
+  for (const k of Object.keys(overlayLayers)) auflageSetzen(k);
+  ordneAuflagen();
   applyBaseOpacity();
   if (prefs.wms && prefs.wms.on) wmsApply(true);
 
@@ -1822,14 +1960,19 @@ function parzFarbeAnpassen() {
   if (parzLayer.wmsParams.layers !== wunsch) parzLayer.setParams({ layers: wunsch });
 }
 
-/** Reihenfolge der Auflagen: eigener WMS unten, dann Parzellen, Bahn-Layer oben. */
+/** Reihenfolge der Auflagen, von unten: eigener WMS, Parzellen, Straßen,
+ *  Bahn-Layer, Ortsnamen. Die Bahn liegt über den Straßen, weil es um sie geht;
+ *  die Namen ganz oben, damit keine Linie durch die Schrift läuft. */
 function ordneAuflagen() {
   if (wmsLayer) wmsLayer.bringToFront();
-  if (map.hasLayer(parzLayer)) parzLayer.bringToFront();
-  if (map.hasLayer(ormLayer)) ormLayer.bringToFront();
+  for (const layer of [parzLayer, strLayer, ormLayer, ortLayer]) {
+    if (layer && map.hasLayer(layer)) layer.bringToFront();
+  }
 }
 
-function setBase(which) {
+/** still: beim Start. Dort steht die Karte noch auf der Deutschlandansicht,
+ *  die über Bayern hinausreicht — die Warnung käme bei jedem Öffnen. */
+function setBase(which, still = false) {
   if (!baseLayers[which]) which = 'osm';
   prefs.base = which;
 
@@ -1837,8 +1980,9 @@ function setBase(which) {
     if (kennung !== which && map.hasLayer(layer)) map.removeLayer(layer);
   }
   if (!map.hasLayer(baseLayers[which])) baseLayers[which].addTo(map);
+  for (const k of NUR_UEBER_BILD) auflageSetzen(k);
 
-  if ((which === 'dop' || which === 'relief') && ausserhalbBayerns()) {
+  if (!still && (which === 'dop' || which === 'relief') && ausserhalbBayerns()) {
     toast('Dieser Dienst deckt nur Bayern ab — hier bleibt der Grund weiß.');
   }
 
@@ -1864,22 +2008,40 @@ function applyBaseOpacity() {
   if (val) val.textContent = Math.round(o * 100) + ' %';
 }
 
-function toggleOverlay(kennung) {
+/* Straßen und Ortsnamen stecken in der OSM-Karte schon drin. Über ihr bleiben
+ * sie eingeschaltet, werden aber nicht gezeichnet — sonst lägen Esri-Straßen
+ * doppelt über den OSM-Straßen. Beim Wechsel auf ein Bild erscheinen sie. */
+const NUR_UEBER_BILD = new Set(['str', 'ort']);
+
+/** Ist die Auflage gewählt? Der Bahn-Layer ist von Haus aus an, die übrigen aus. */
+function auflageGewaehlt(kennung) {
+  return kennung === 'orm' ? prefs.orm !== false : !!prefs[kennung];
+}
+
+/** Die Auflage so auf die Karte bringen, wie Wahl und Grundkarte es verlangen. */
+function auflageSetzen(kennung) {
   const layer = overlayLayers[kennung];
   if (!layer) return;
+  const sichtbar = auflageGewaehlt(kennung) &&
+    !(NUR_UEBER_BILD.has(kennung) && (prefs.base || 'osm') === 'osm');
+  if (sichtbar && kennung === 'parz') parzFarbeAnpassen();
+  if (sichtbar && !map.hasLayer(layer)) layer.addTo(map);
+  if (!sichtbar && map.hasLayer(layer)) map.removeLayer(layer);
+}
 
-  if (map.hasLayer(layer)) {
-    map.removeLayer(layer);
-    prefs[kennung] = false;
-  } else {
-    if (kennung === 'parz') {
-      parzFarbeAnpassen();
-      if (ausserhalbBayerns()) toast('Die Parzellarkarte deckt nur Bayern ab.');
-      else if (map.getZoom() < 17) toast('Parzellen zeichnet der Dienst erst ab Zoomstufe 17 (1:5000).');
-    }
-    layer.addTo(map);
-    prefs[kennung] = true;
+function toggleOverlay(kennung) {
+  if (!overlayLayers[kennung]) return;
+  const an = !auflageGewaehlt(kennung);
+  prefs[kennung] = an;
+
+  if (an && kennung === 'parz') {
+    if (ausserhalbBayerns()) toast('Die Parzellarkarte deckt nur Bayern ab.');
+    else if (map.getZoom() < 17) toast('Parzellen zeichnet der Dienst erst ab Zoomstufe 17 (1:5000).');
   }
+  if (an && NUR_UEBER_BILD.has(kennung) && (prefs.base || 'osm') === 'osm') {
+    toast('Über der Karte schon enthalten — erscheint über Luftbild, DOP20, Relief und Dunkel.');
+  }
+  auflageSetzen(kennung);
   ordneAuflagen();
   saveStore();
   syncButtons();
@@ -1937,9 +2099,11 @@ function wmsApply(sichtbar) {
   if (sichtbar) {
     wmsLayer = wmsBuild();
     if (!wmsLayer) { prefs.wms.on = false; toast('Bitte Adresse und Layer-Namen eintragen.'); }
-    else { wmsLayer.addTo(map); wmsLayer.bringToFront(); }
+    else wmsLayer.addTo(map);
   }
-  if (map.hasLayer(ormLayer)) ormLayer.bringToFront();
+  // Dieselbe Reihenfolge wie überall: WMS unten, Parzellen bis Ortsnamen darüber.
+  // Vorher kam nur der Bahn-Layer nach oben, der WMS verdeckte die Parzellen.
+  ordneAuflagen();
   saveStore();
   syncButtons();
 }
@@ -3220,7 +3384,6 @@ function merkPunkt(lat, lon) {
     `<b>Gesetzter Punkt</b>` +
     `<span>${fmtCoord(lat, lon)}</span>` +
     `<a href="${gmapsUrl(lat, lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>` +
-    `<a href="${gmapsRoute(lat, lon)}" target="_blank" rel="noopener" class="merk-zweit">Route dorthin</a>` +
     `<button type="button" class="kml-km" data-merkkm>Kilometer bestimmen` +
     `<small>rechnet die Stelle auf die Strecke</small></button>`
   ).openOn(map);
@@ -4060,6 +4223,7 @@ function applyPoint(ref, km, result) {
   reihe = [];          // ein einzelner Punkt löst die Reihe ab
   reiheAktiv = 0;
   reiheFehler = [];
+  neuerPunktInfoZu();
   view.ref = ref;
   view.km = km;
   view.point = result;
@@ -4077,26 +4241,35 @@ function applyPoint(ref, km, result) {
   updateHash();
 }
 
+/* Aus dem Standort festgehalten kommt die Ortungsungenauigkeit dazu. Sie
+ * verschiebt den Punkt auch längs der Strecke, wirkt also unmittelbar auf den
+ * Kilometer; beide Anteile addiert ist die obere Schranke — ohne die Richtung
+ * des Fehlers zu kennen, geht es nicht enger. Galt bisher nur beim Lesen von
+ * der Sehne ('karte'), nicht bei der Rechnung am Gleis entlang. */
+const ortAnteil = p => (p.standort ? Math.round(p.standort.genau) : 0);
+
+/* Das Schild trägt nur die Zahl. Wie gerechnet wurde, steht hinter
+ * dem i-Knopf der unteren Leiste — vorn gelesen wird nur, wie weit der Punkt
+ * danebenliegen kann. Die Wörter davor („entlang des Gleises", „interpoliert")
+ * waren für die Anzeige Ballast. */
+const plusMinus = m => `±${nfM.format(m)} m`;
+
 function qualityTag(p) {
   if (p.quality === 'exakt') return { cls: 'ok', text: 'Kilometerstein' };
   if (p.quality === 'gleis') return { cls: 'ok', text: 'auf dem Gleis' };
   /* Orange trotz der besseren Rechnung: Über so weite Steinabstände bleiben
-   * gemessen bis zu 88 m Unsicherheit, und die kommt aus den Steinen selbst. */
-  if (p.quality === 'karte-gleis') return { cls: 'warn', text: `entlang des Gleises ±${nfM.format(GLEIS_ERR.worst)} m` };
-  if (p.quality === 'extrapoliert') return { cls: 'warn', text: `hinausgerechnet ±${nfM.format(EXTRA_ERR.worst)} m` };
+   * gemessen bis zu 88 bzw. 52 m Unsicherheit, und die kommt aus den Steinen selbst. */
+  if (p.quality === 'karte-gleis') return { cls: 'warn', text: plusMinus(gleisErr(p).worst + ortAnteil(p)) };
+  if (p.quality === 'gleis-weit') return { cls: 'warn', text: plusMinus(WEIT_ERR.worst) };
+  if (p.quality === 'extrapoliert') return { cls: 'warn', text: plusMinus(EXTRA_ERR.worst) };
   if (p.quality === 'interpoliert') {
     // Schwelle bei 50 m: die beiden dichten Steinabstände bleiben grün,
     // orange wird es erst, wenn die Steine wirklich weit auseinanderstehen.
-    return { cls: p.err.worst > 50 ? 'warn' : 'ok', text: `interpoliert ±${nfM.format(p.err.worst)} m` };
+    return { cls: p.err.worst > 50 ? 'warn' : 'ok', text: plusMinus(p.err.worst) };
   }
   // Beim Tippen kommt die Unsicherheit des eigenen Fingers hinzu — bleibt orange
   if (p.quality === 'karte') {
-    /* Aus dem Standort festgehalten tritt die Ortungsungenauigkeit an die Stelle
-     * des Fingers. Sie verschiebt den Punkt auch längs der Strecke, wirkt also
-     * unmittelbar auf den Kilometer; beide Anteile addiert ist die obere
-     * Schranke — ohne die Richtung des Fehlers zu kennen, geht es nicht enger. */
-    const err = tapError(p.chord || 0).worst + (p.standort ? Math.round(p.standort.genau) : 0);
-    return { cls: 'warn', text: `${p.standort ? 'vom Standort' : 'von der Karte'} ±${nfM.format(err)} m` };
+    return { cls: 'warn', text: plusMinus(tapError(p.chord || 0).worst + ortAnteil(p)) };
   }
   if (p.quality === 'betriebsstelle') return { cls: 'ok', text: 'Betriebsstelle' };
   if (p.quality === 'ort') return { cls: 'ok', text: 'Ort' };
@@ -4151,15 +4324,32 @@ function renderBottom() {
       `Verbindung nicht mehr, deshalb wurde der tatsächliche Gleisverlauf geholt und daran entlang gemessen: ` +
       `${nfM.format(p.wegLaenge)} m Gleisweg, laut Kilometrierung ${nfM.format(p.nominal)} m. ` +
       `Geradlinig käme km ${fmtKm(p.sehneKm)} heraus, ${nfM.format(Math.abs(view.km - p.sehneKm) * 1000)} m ` +
-      `daneben. An ${GLEIS_ERR.faelle} übersprungenen Zwischensteinen mit ähnlichem Abstand nachgemessen lag ` +
-      `dieser Weg typisch ${nfM.format(GLEIS_ERR.typical)} m neben dem wahren Kilometer und höchstens ` +
-      `${nfM.format(GLEIS_ERR.worst)} m; die geradlinige Ablesung traf im Mittel ebenso gut, lag aber in ` +
-      `${GLEIS_ERR.ueber100} der ${GLEIS_ERR.faelle} Fälle über 100 m daneben, bis zu ${nfM.format(GLEIS_ERR.sehne)} m. ` +
-      `Übrig bleibt die Erfassungsgenauigkeit der Steine, gegen die kein Gleisverlauf hilft.`;
+      `daneben. ` +
+      (gleisErr(p) === WEIT_ERR
+        ? `An ${WEIT_ERR.faelle} übersprungenen Zwischensteinen bei 8 bis 25 km Steinabstand nachgemessen lag ` +
+          `dieser Weg typisch ${nfM.format(WEIT_ERR.typical)} m neben dem wahren Kilometer, im ungünstigen ` +
+          `Zehntel ${nfM.format(WEIT_ERR.worst)} m. `
+        : `An ${GLEIS_ERR.faelle} übersprungenen Zwischensteinen mit ähnlichem Abstand nachgemessen lag ` +
+          `dieser Weg typisch ${nfM.format(GLEIS_ERR.typical)} m neben dem wahren Kilometer und höchstens ` +
+          `${nfM.format(GLEIS_ERR.worst)} m; die geradlinige Ablesung traf im Mittel ebenso gut, lag aber in ` +
+          `${GLEIS_ERR.ueber100} der ${GLEIS_ERR.faelle} Fälle über 100 m daneben, bis zu ${nfM.format(GLEIS_ERR.sehne)} m. `) +
+      `Übrig bleibt die Erfassungsgenauigkeit der Steine, gegen die kein Gleisverlauf hilft.` +
+      (p.standort
+        ? ` Aus dem verfolgten Standort festgehalten, den das Gerät auf ±${nfM.format(p.standort.genau)} m genau ` +
+          `meldete — das ist in der Zahl oben dazugerechnet.`
+        : '');
     if (p.offset > 150) {
       warn = `<p class="bb-note">Der Punkt liegt ${nfM.format(p.offset)} m querab des Gleises. ` +
         `Abgelesen wird die Stelle, an der das Lot auf das Gleis trifft.</p>`;
     }
+  } else if (p.quality === 'gleis-weit') {
+    detail = `Zwischen den Steinen bei km ${fmtKm(p.between[0])} und ${fmtKm(p.between[1])} ist nichts weiter ` +
+      `erfasst — ${fmtKm(p.between[1] - p.between[0])} km Lücke. Geradlinig lässt sich darüber nicht mehr ` +
+      `sinnvoll interpolieren, deshalb wurde der Kilometer am tatsächlichen Gleisverlauf abgetragen: ` +
+      `${nfM.format(p.wegLaenge)} m Gleisweg, laut Kilometrierung ${nfM.format(p.nominal)} m. An ` +
+      `${WEIT_ERR.faelle} übersprungenen Zwischensteinen bei 8 bis 25 km Steinabstand nachgemessen lag diese ` +
+      `Rechnung typisch ${nfM.format(WEIT_ERR.typical)} m neben dem wahren Ort, im ungünstigen Zehntel ` +
+      `${nfM.format(WEIT_ERR.worst)} m.`;
   } else if (p.quality === 'extrapoliert') {
     detail = `Bei km ${fmtKm(view.km)} ist kein Stein erfasst, und es gibt auch keinen davor — ` +
       `die Kilometrierung fängt hier erst an oder hört auf. Statt den nächstgelegenen Stein zu ` +
@@ -4179,9 +4369,14 @@ function renderBottom() {
   } else if (p.quality === 'naechster') {
     warn = `<p class="bb-note">Bei km ${fmtKm(view.km)} ist kein Stein erfasst. Angezeigt wird der nächstgelegene bei km ${fmtKm(p.nearKm)} — ${fmtKm(Math.abs(p.delta))} km Unterschied.</p>`;
     if (p.verworfen && p.verworfen.grund === 'luecke') {
-      warn += `<p class="bb-note">Die nächsten Steine stehen bei km ${fmtKm(p.verworfen.von)} und ${fmtKm(p.verworfen.bis)} — ` +
-        `${fmtKm(p.verworfen.entlang / 1000)} km Lücke. Über so weite Strecken wird nicht mehr interpoliert, ` +
-        `weil der Verlauf dazwischen unbekannt ist.</p>`;
+      /* Hierher kommt es nur noch, wenn auch der Gleisweg nicht geholfen hat —
+       * der Grund soll dastehen, nicht ein allgemeines „unbekannt". */
+      const v = p.verworfen;
+      const warum = v.zuWeit
+        ? `Über mehr als ${MAX_GLEIS_GAP_KM} km wird auch am Gleis entlang nicht mehr gerechnet.`
+        : 'Der Gleisverlauf dazwischen war nicht zu bekommen oder passt nicht zur Kilometrierung.';
+      warn += `<p class="bb-note">Die nächsten Steine stehen bei km ${fmtKm(v.von)} und ${fmtKm(v.bis)} — ` +
+        `${fmtKm(v.entlang / 1000)} km Lücke. ${warum}</p>`;
     } else if (p.verworfen && p.verworfen.grund === 'geometrie') {
       const v = p.verworfen;
       warn += `<p class="bb-note">Die Steine bei km ${fmtKm(v.von)} und ${fmtKm(v.bis)} wären Nachbarn, liegen aber ` +
@@ -4251,26 +4446,45 @@ function renderBottom() {
       <p class="bb-title">${esc(title)}</p>
       <span class="tag ${tag.cls}">${esc(tag.text)}</span>
     </div>
-    <p class="bb-coord">${fmtCoord(p.lat, p.lon)}</p>
     ${warn}
     ${refine}
-    <details class="bb-more">
-      <summary>Herkunft &amp; Genauigkeit</summary>
+    <!-- Koordinaten und Herkunft klappt der i-Knopf unten auf. Das Feld steht
+         über den Knöpfen, damit die beim Aufklappen nicht unter dem Finger
+         wegrutschen. Gebraucht wird es selten; Google Maps und Teilen tragen
+         die Koordinaten ohnehin mit. -->
+    <div id="bbInfo" class="bb-info"${infoOffen ? '' : ' hidden'}>
+      <p class="bb-coord">${fmtCoord(p.lat, p.lon)}</p>
       <p class="bb-note plain">${esc(sub)}${detail ? ' · ' + esc(detail) : ''}</p>
-    </details>
+    </div>
     <button type="button" id="bbClose" class="bb-close" aria-label="Anzeige schließen">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
+    <!-- Navigation läuft über Google Maps, die Route ist dort ein Tipp. Info und
+         Teilen als Symbole, damit der Hauptknopf Platz hat. -->
     <div class="bb-actions">
       <a class="maps" href="${gmapsUrl(p.lat, p.lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>
-      <a href="${gmapsRoute(p.lat, p.lon)}" target="_blank" rel="noopener">Route</a>
-      <button type="button" id="copyBtn">Kopieren</button>
-      <button type="button" id="shareBtn">Teilen</button>
+      <button type="button" id="infoBtn" class="bb-ikon${infoOffen ? ' is-on' : ''}" aria-label="Koordinaten und Herkunft"
+              title="Koordinaten und Herkunft" aria-controls="bbInfo" aria-expanded="${infoOffen}">
+        <!-- Dieselbe Zeichnung wie vor „Hinweise" im Menü -->
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.8v5.7"/><circle class="voll" cx="12" cy="7.7" r="1.1"/></svg>
+      </button>
+      <button type="button" id="shareBtn" class="bb-ikon" aria-label="Teilen" title="Teilen">
+        <!-- Drei Punkte, verbunden — das Teilen-Zeichen von Android. Der Pfeil aus
+             der Kiste davor las sich wie Hochladen. Die Striche enden rechnerisch
+             am Kreisrand (r 2,6), statt in die Kreise hineinzulaufen. -->
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="17.5" cy="5.5" r="2.6"/><circle cx="6.5" cy="12" r="2.6"/><circle cx="17.5" cy="18.5" r="2.6"/><path d="M8.74 10.68 15.26 6.82M8.74 13.32l6.52 3.86"/></svg>
+      </button>
     </div>`;
 
   bindBottom();
   updateBH();
 }
+
+/* Steht das Info-Feld offen? Gemerkt über das Neuzeichnen hinweg — beim
+ * Durchschalten einer Reihe oder nach „auf das Gleis rechnen" bleibt es
+ * offen. Ein neuer Punkt fängt wieder zu an (neuerPunktInfoZu). */
+let infoOffen = false;
+const neuerPunktInfoZu = () => { infoOffen = false; };
 
 /** Ereignisse der unteren Leiste — separat, weil die Leiste neu gezeichnet wird. */
 function bindBottom() {
@@ -4280,21 +4494,20 @@ function bindBottom() {
   document.querySelectorAll('#bottom [data-reihe]').forEach(btn =>
     btn.addEventListener('click', () => reiheWaehlen(Number(btn.dataset.reihe))));
 
-  const copy = $('#copyBtn');
-  if (copy) copy.addEventListener('click', async () => {
-    const p = view.point;
-    if (!p) return;
-    toast(await copyText(fmtCoord(p.lat, p.lon)) ? 'Koordinaten kopiert' : 'Kopieren nicht möglich');
-  });
-
   const teilen = $('#shareBtn');
   if (teilen) teilen.addEventListener('click', share);
 
   const refine = $('#refineBtn');
   if (refine) refine.addEventListener('click', refineOnTrack);
 
-  const more = $('.bb-more');
-  if (more) more.addEventListener('toggle', updateBH);
+  const info = $('#infoBtn');
+  if (info) info.addEventListener('click', () => {
+    infoOffen = !infoOffen;
+    $('#bbInfo').hidden = !infoOffen;
+    info.classList.toggle('is-on', infoOffen);
+    info.setAttribute('aria-expanded', String(infoOffen));
+    updateBH();
+  });
 }
 
 function showStatus(msg) {
@@ -4428,6 +4641,7 @@ async function searchReihe(ref, tokens) {
     return;
   }
 
+  neuerPunktInfoZu();
   const kms = tokens.map(toKm);
   const unlesbar = tokens.filter((t, i) => !isFinite(kms[i]));
   if (unlesbar.length) {
@@ -4565,6 +4779,7 @@ function fitLine(e) {
 
 let ortWatch = null;
 let ortLetzt = null;              // { lat, lon, genau }
+let meMarker = null, meKreis = null;   // der blaue Punkt und sein Genauigkeitskreis
 
 const ortAn = () => ortWatch != null;
 
@@ -4591,7 +4806,7 @@ function locate() {
   const btn = $('#mapLocBtn');
   if (btn) btn.classList.add('busy');
   liveKmAn = false;      // jede neue Verfolgung fängt ohne Rechnung an
-  toast('Standort wird verfolgt. Den Kilometer bestimmt der Knopf in der Zeile oben.');
+  toast('Standort wird verfolgt. Für den Kilometer den blauen Punkt antippen.');
 
   ortWatch = navigator.geolocation.watchPosition(ortNeu, ortFehler, {
     enableHighAccuracy: true, maximumAge: 2000, timeout: 25000
@@ -4605,6 +4820,7 @@ function ortStop(nachricht) {
   ortLetzt = null;
   liveVergessen();
   if (meLayer) meLayer.clearLayers();
+  meMarker = meKreis = null;
   const btn = $('#mapLocBtn');
   if (btn) btn.classList.remove('busy', 'is-on');
   if (nachricht) toast(nachricht);
@@ -4627,13 +4843,26 @@ function ortNeu(pos) {
   const btn = $('#mapLocBtn');
   if (btn) { btn.classList.remove('busy'); btn.classList.add('is-on'); }
 
-  meLayer.clearLayers();
-  L.marker([lat, lon], {
-    icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] })
-  }).addTo(meLayer);
-  L.circle([lat, lon], {
-    radius: Math.max(accuracy || 0, 5), color: '#2f81f7', weight: 1, fillOpacity: 0.12, interactive: false
-  }).addTo(meLayer);
+  /* Der Punkt ist der Auslöser für den Kilometer. Er ist 16 px groß, die
+   * Trefferfläche drumherum 44 px — sonst trifft man ihn im Gelände nicht.
+   *
+   * Angelegt wird er einmal und danach nur verschoben. Neu gebaut bei jeder
+   * Meldung (etwa im Sekundentakt) verschwände das Element unter dem Finger,
+   * und ein Tipp zwischen Aufsetzen und Loslassen ginge ins Leere. Mit
+   * Tastatur lässt er sich anspringen und mit Enter auslösen. */
+  const radius = Math.max(accuracy || 0, 5);
+  if (!meMarker) {
+    meMarker = L.marker([lat, lon], {
+      icon: L.divIcon({ className: 'me-hit', html: '<div class="me-dot"></div>', iconSize: [44, 44], iconAnchor: [22, 22] }),
+      title: 'Kilometer an meinem Standort'
+    }).on('click', meTipp).addTo(meLayer);
+    meKreis = L.circle([lat, lon], {
+      radius, color: '#2f81f7', weight: 1, fillOpacity: 0.12, interactive: false
+    }).addTo(meLayer);
+  } else {
+    meMarker.setLatLng([lat, lon]);
+    meKreis.setLatLng([lat, lon]).setRadius(radius);
+  }
 
   /* Nur der erste Fix bewegt die Karte, und auch der nicht beim Messen. Jede
    * weitere Meldung setzt bloß den Punkt um. Vorher zog die Karte nach, sobald
@@ -4718,10 +4947,10 @@ let liveSteine = null;    // { ref, lat, lon, umkreis, sorted } aus den Kacheln
 let liveVon = null;       // Standort und Strecke der letzten Rechnung
 let liveSuchVon = null;   // wo zuletzt nach einer Strecke gesucht wurde
 let liveRechnet = false;
-/* Der Standortknopf zeigt nur noch, wo man steht. Gerechnet wird erst, wenn
- * man es in der Zeile darüber verlangt — die Rechnung fragt bei jedem Schritt
- * Kacheln und notfalls Overpass, und das soll niemand ungefragt auslösen.
- * Beim Beenden der Verfolgung fällt der Schalter wieder zurück. */
+/* Der Standortknopf zeigt nur, wo man steht. Gerechnet wird erst, wenn man
+ * den blauen Punkt auf der Karte antippt — die Rechnung fragt bei jedem
+ * Schritt Kacheln und notfalls Overpass, und das soll niemand ungefragt
+ * auslösen. Beim Beenden der Verfolgung fällt der Schalter wieder zurück. */
 let liveKmAn = false;
 
 function liveVergessen() {
@@ -4891,8 +5120,20 @@ function liveKmZeichnen() {
   }).addTo(liveLayer);
 }
 
+/** Tipp auf den eigenen Punkt: Der erste wirft die laufende Rechnung an, jeder
+ *  weitere hält den Kilometer fest wie ein Tipp auf die Zahl in der Zeile.
+ *  Beim Messen bleibt der Tipp ein Messpunkt — der Marker schluckt ihn sonst. */
+function meTipp(ev) {
+  if (messModus) { messTipp(ev.latlng); return; }
+  if (!liveKmAn) { liveKmStart(); return; }
+  /* Ein Doppeltipp soll nicht gleich festhalten, bevor überhaupt ein Kilometer
+   * da ist — liveKmFest ginge dann den Weg über kmAnStelle, der ins Netz darf. */
+  if (!liveKm && liveRechnet) { toast('Kilometer wird noch gerechnet …'); return; }
+  liveKmFest();
+}
+
 /** Die laufende Rechnung anwerfen — der bewusste Griff, den der Standortknopf
- *  nicht mehr mitmacht. Von hier an rechnet jede Standortmeldung mit. */
+ *  nicht mitmacht. Von hier an rechnet jede Standortmeldung mit. */
 function liveKmStart() {
   if (!ortLetzt) return;
   liveKmAn = true;
@@ -4940,12 +5181,10 @@ function liveLeiste() {
     stuecke.push(`<button type="button" class="live-teil live-km live-km-aus" data-livekm ` +
       `title="Kilometer hier bestimmen"><b>km —</b>` +
       `<small>${esc(liveGrund || 'wird gerechnet …')}</small></button>`);
-  } else {
-    stuecke.push(`<button type="button" class="live-teil live-km live-km-frag" data-livean ` +
-      `title="Kilometer zum Standort bestimmen"><b>km ?</b>` +
-      `<small>antippen — dann läuft er mit</small></button>`);
   }
-  stuecke.push(`<span class="tag">±${nfM.format(ortLetzt.genau)} m</span>`);
+  // Ohne Rechnung steht kein Kilometer da: Den wirft der Tipp auf den Punkt an.
+  // „GPS" davor: Sonst las sich die Zahl neben dem Kilometer wie dessen Genauigkeit
+  stuecke.push(`<span class="tag" title="Ortungsgenauigkeit des Geräts">GPS ±${nfM.format(ortLetzt.genau)} m</span>`);
 
   if (messModus && messPunkte.length) {
     const p = messPunkte[messPunkte.length - 1];
@@ -4966,8 +5205,6 @@ function liveLeiste() {
   el.hidden = false;
   const knopf = el.querySelector('[data-livekm]');
   if (knopf) knopf.addEventListener('click', liveKmFest);
-  const an = el.querySelector('[data-livean]');
-  if (an) an.addEventListener('click', liveKmStart);
   updateBH();
 }
 
@@ -5173,10 +5410,16 @@ function koordWaehlen(k) {
 
 function verlaufZeigen() {
   const typed = $('#ref').value.trim().toLowerCase();
+  /* Steht schon ein Kilometer da, zählen nur Einträge, die mit ihm beginnen.
+   * Sonst bliebe bei „5100 341" die alte Suche „5100 km 10,0" stehen und sähe
+   * aus wie ein Vorschlag zur Eingabe. Verglichen wird in der Schreibweise der
+   * Anzeige, damit „10,0" und „10.0" dasselbe treffen. */
+  const kmTyped = $('#km').value.trim().replace('.', ',');
   const list = recent.filter(r => {
     if (!typed) return true;
     // Getippt werden Ziffern, also ist die Streckennummer gemeint
-    return recentArt(r) === 'strecke' && String(r.ref).toLowerCase().startsWith(typed);
+    if (recentArt(r) !== 'strecke' || !String(r.ref).toLowerCase().startsWith(typed)) return false;
+    return !kmTyped || fmtKm(r.km).startsWith(kmTyped);
   }).slice(0, 6);
 
   suggestSetzen(list.map(r => recentArt(r) === 'ort'
@@ -5188,9 +5431,8 @@ function verlaufZeigen() {
         })
       }
     : {
-        html: i => `<button class="suggest-item" type="button" role="option" data-i="${i}">
-            <b>${esc(r.ref)}</b><span>km ${esc(fmtKm(r.km))}</span>
-          </button>`,
+        // Die Uhr sagt, dass das eine frühere Suche ist und kein Treffer
+        html: i => suggestZeile(i, IKON_UHR, `Strecke ${r.ref}`, `km ${fmtKm(r.km)} · zuletzt gesucht`),
         tun: () => {
           $('#ref').value = r.ref;
           $('#km').value = fmtKm(r.km);
@@ -5266,6 +5508,7 @@ function trefferWaehlen(t) {
   $('#q').blur();
 
   reihe = []; reiheAktiv = 0; reiheFehler = [];
+  neuerPunktInfoZu();
   view.km = null;
   view.point = t.art === 'stelle'
     ? { ...t.roh, quality: 'betriebsstelle' }
@@ -5296,8 +5539,11 @@ function openSheet() {
   closeSuggest();
 }
 
+/* Beim Schließen klappen alle Abschnitte wieder zu: Das Menü öffnet jedes Mal
+ * als kurze Übersicht der Überschriften. */
 function closeSheet() {
   $('#sheet').hidden = true;
+  document.querySelectorAll('#sheet [data-sec]').forEach(b => { b.open = false; });
   $('#menuBtn').classList.remove('is-on');
   $('#menuBtn').setAttribute('aria-expanded', 'false');
 }
@@ -5361,9 +5607,11 @@ function syncButtons() {
   document.querySelectorAll('[data-palette]').forEach(b =>
     b.classList.toggle('is-on', b.dataset.palette === (prefs.palette || 'lapis')));
   if (map) {
-    for (const [kennung, layer] of Object.entries(overlayLayers)) {
-      const btn = $(kennung === 'orm' ? '#ormBtn' : '#parzBtn');
-      if (btn) btn.classList.toggle('is-on', map.hasLayer(layer));
+    // Nach der Wahl, nicht nach der Karte: Straßen und Ortsnamen sind über der
+    // OSM-Karte gewählt, aber nicht gezeichnet
+    for (const kennung of Object.keys(overlayLayers)) {
+      const btn = $('#' + kennung + 'Btn');
+      if (btn) btn.classList.toggle('is-on', auflageGewaehlt(kennung));
     }
   }
 
@@ -5396,7 +5644,8 @@ function updateHash() {
   const p = new URLSearchParams();
   if (view.ref) p.set('r', view.ref);
   if (reihe.length > 1) p.set('k', reihe.map(r => fmtKm(r.km)).join(' '));
-  else if (view.km != null) p.set('k', String(view.km));
+  // Auf den Meter gerundet: Aus dem Standort kam sonst „k=90.00496258884965" in den Link
+  else if (view.km != null) p.set('k', String(Math.round(view.km * 1000) / 1000));
   const hash = '#' + p.toString();
   try { window.history.replaceState(null, '', hash); } catch { location.hash = hash; }
 }
@@ -5491,7 +5740,10 @@ function bind() {
   /* Aufgeklappter Teil: bleibt offen, solange darin gearbeitet wird, und
    * schließt erst bei einem Tipp daneben — nicht schon beim Verlieren des
    * Fokus, sonst rutscht der &-Knopf unter dem Finger weg, der ihn drückt. */
-  on('#search', 'focusin', suchAuf);
+  /* Der Einstellungsknopf sitzt mit in der Suchleiste, gehört aber nicht zur
+   * Suche: Bekommt er den Fokus (etwa beim Schließen des Menüs, nachdem darin
+   * ein Abschnitt angetippt war), darf die Leiste nicht aufklappen. */
+  on('#search', 'focusin', ev => { if (!ev.target.closest('#menuBtn')) suchAuf(); });
   document.addEventListener('pointerdown', ev => {
     const bar = document.querySelector('.bar-top');
     if (bar && !bar.contains(ev.target)) suchZu();
@@ -5526,6 +5778,8 @@ function bind() {
     drawMilestones();
   });
   on('#parzBtn', 'click', () => toggleOverlay('parz'));
+  on('#strBtn', 'click', () => toggleOverlay('str'));
+  on('#ortBtn', 'click', () => toggleOverlay('ort'));
   document.querySelectorAll('[data-theme]').forEach(b => b.addEventListener('click', () => {
     prefs.theme = b.dataset.theme;
     applyTheme();
@@ -5620,18 +5874,12 @@ function bind() {
   window.addEventListener('resize', updateBH);
 }
 
-/* Welche Abschnitte des Menüs offen stehen, bleibt gemerkt — sonst schiebt man
- * sich jedes Mal wieder durch alles nach unten. */
+/* Die Abschnitte des Menüs starten zugeklappt und klappen beim Schließen
+ * wieder zu (closeSheet). Bis September 2026 blieb gemerkt, welche offen
+ * standen — der Eintrag prefs.offen fällt aus dem Speicher. */
 function bindSheetSections() {
-  const bloecke = [...document.querySelectorAll('#sheet [data-sec]')];
-  const offen = Array.isArray(prefs.offen) ? prefs.offen : ['karte', 'kml'];
-  for (const b of bloecke) b.open = offen.includes(b.dataset.sec);
-  for (const b of bloecke) {
-    b.addEventListener('toggle', () => {
-      prefs.offen = bloecke.filter(x => x.open).map(x => x.dataset.sec);
-      saveStore();
-    });
-  }
+  for (const b of document.querySelectorAll('#sheet [data-sec]')) b.open = false;
+  if ('offen' in prefs) { delete prefs.offen; saveStore(); }
 }
 
 function boot() {

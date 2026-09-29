@@ -13,8 +13,10 @@
 <meta name="theme-color" content="#14181d">
 <meta name="color-scheme" content="dark light">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
+<!-- ?v=lapis: Neue Adresse, damit Browser und Startbildschirm das violette
+     Icon aus dem Zwischenspeicher nicht weiter zeigen -->
+<link rel="icon" href="icon.svg?v=lapis" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png?v=lapis">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="TrackPilot">
 <link rel="stylesheet" href="vendor/leaflet.css">
@@ -91,8 +93,13 @@
         <button id="qClear" class="qclear" type="button" aria-label="Eingabe löschen">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
-        <button id="menuBtn" class="more" type="button" aria-label="Mehr" aria-expanded="false" aria-controls="sheet">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        <!-- Drei Schieberegler mit runden Knöpfen (r 2,2). Jede Linie setzt am
+             Knopf aus, statt unter ihm durchzulaufen — so bleibt der Knopf hohl. -->
+        <button id="menuBtn" class="more" type="button" aria-label="Einstellungen" aria-expanded="false" aria-controls="sheet">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 6.5h9.8M17.2 6.5H21M3 12h2.8M10.2 12H21M3 17.5h11.3M18.7 17.5H21"/>
+            <circle cx="15" cy="6.5" r="2.2"/><circle cx="8" cy="12" r="2.2"/><circle cx="16.5" cy="17.5" r="2.2"/>
+          </svg>
         </button>
       </div>
 
@@ -126,18 +133,32 @@
   <div id="sheet" class="sheet" hidden>
 
     <details class="sheet-sec" data-sec="karte">
-      <summary><h2>Karte</h2></summary>
-      <div class="seg" role="group" aria-label="Kartenhintergrund">
+      <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5zM9 4v13.5M15 6.5V20"/></svg><h2>Karte</h2></summary>
+      <!-- Drei Gruppen: genau eine Grundkarte, darüber beliebig viele Auflagen,
+           dazu die Linien, die die Rechnung belegen. Die Grundkarten stehen in zwei
+           Reihen — gezeichnete Karten und Bilder —, fünf in einer Reihe passen
+           auf dem Handy nicht. -->
+      <p class="pal-label">Grundkarte</p>
+      <div class="seg" role="group" aria-label="Grundkarte, gezeichnet">
         <button class="seg-btn" type="button" data-base="osm">Karte</button>
+        <button class="seg-btn" type="button" data-base="dark">Dunkel</button>
+      </div>
+      <div class="seg" role="group" aria-label="Grundkarte, Bild" style="margin-top:7px">
         <button class="seg-btn" type="button" data-base="sat">Luftbild</button>
         <button class="seg-btn" type="button" data-base="dop">DOP20</button>
         <button class="seg-btn" type="button" data-base="relief">Relief</button>
       </div>
-      <div class="seg" role="group" aria-label="Auflagen" style="margin-top:7px">
+      <p class="pal-label">Auflagen</p>
+      <div class="seg" role="group" aria-label="Auflagen">
         <button class="seg-btn" type="button" id="ormBtn">Bahn-Layer</button>
         <button class="seg-btn" type="button" id="parzBtn">Parzellen</button>
       </div>
-      <div class="seg" role="group" aria-label="Rechenhilfen" style="margin-top:7px">
+      <div class="seg" role="group" aria-label="Auflagen aus Esri" style="margin-top:7px">
+        <button class="seg-btn" type="button" id="strBtn">Straßen</button>
+        <button class="seg-btn" type="button" id="ortBtn">Ortsnamen</button>
+      </div>
+      <p class="pal-label">Rechenhilfen</p>
+      <div class="seg" role="group" aria-label="Rechenhilfen">
         <button class="seg-btn" type="button" id="wegLinieBtn">Gleisweg</button>
         <button class="seg-btn" type="button" id="steinLinieBtn">Steinlinie</button>
       </div>
@@ -150,6 +171,12 @@
       Steinen, an dem gerechnet wurde. <strong>Steinlinie</strong> ist die dünne blaue Verbindung durch
       die Kilometersteine, die zeigt, welcher Strang gemeint ist. Beide belegen die Rechnung und lassen
       sich hier abschalten, wenn sie die Karte verdecken — die Steine selbst bleiben stehen.</p>
+      <p class="fine"><strong>Dunkel</strong> ist die dunkelgraue Karte von Esri. Sie hat bis
+      Zoomstufe 16 eigene Kacheln und wird darüber vergrößert, ganz nah also etwas unscharf.</p>
+      <p class="fine"><strong>Straßen</strong> und <strong>Ortsnamen</strong> sind durchsichtige
+      Auflagen von Esri, gemacht für Luftbild, DOP20, Relief und die dunkle Karte. Über der
+      normalen <em>Karte</em> sind beide schon enthalten. Ortsnamen erscheinen vor allem bei
+      mittlerer Zoomstufe; ganz nah stehen die Straßennamen in der Straßen-Auflage.</p>
       <p class="fine"><strong>DOP20</strong> ist das amtliche Orthophoto der Bayerischen
       Vermessungsverwaltung mit 20 cm Bodenauflösung, wesentlich feiner als das weltweite
       <em>Luftbild</em> von Esri. <strong>Relief</strong> ist das Schräglicht aus dem
@@ -163,7 +190,7 @@
     </details>
 
     <details class="sheet-sec" data-sec="kml">
-      <summary><h2>Eigene KML-Dateien</h2></summary>
+      <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8.5L18 6.5V21H6zM14.5 3v3.5H18"/><circle cx="12" cy="13.5" r="2.2"/></svg><h2>Eigene KML-Dateien</h2></summary>
       <div class="row">
         <button id="kmlAdd" class="btn" type="button">KML oder KMZ öffnen</button>
       </div>
@@ -192,7 +219,7 @@
     </details>
 
     <details class="sheet-sec" data-sec="wms">
-      <summary><h2>Eigener WMS-Layer</h2></summary>
+      <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l9 4.5-9 4.5L3 8zM3 12l9 4.5 9-4.5M3 16l9 4.5 9-4.5"/></svg><h2>Eigener WMS-Layer</h2></summary>
       <div class="stack">
         <input id="wmsUrl" type="url" placeholder="https://server/dienst" autocomplete="off" spellcheck="false" inputmode="url">
         <input id="wmsLayers" type="text" placeholder="Layer-Name, mehrere mit Komma" autocomplete="off" spellcheck="false">
@@ -226,7 +253,7 @@
     </details>
 
     <details class="sheet-sec" data-sec="ansicht">
-      <summary><h2>Ansicht</h2></summary>
+      <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path class="voll" d="M12 3.5a8.5 8.5 0 0 0 0 17z"/></svg><h2>Ansicht</h2></summary>
       <div class="seg" role="group" aria-label="Helligkeit">
         <button class="seg-btn" type="button" data-theme="auto">Automatisch</button>
         <button class="seg-btn" type="button" data-theme="light">Hell</button>
@@ -242,7 +269,7 @@
     </details>
 
     <details class="sheet-sec" data-sec="hinweise">
-      <summary><h2>Hinweise</h2></summary>
+      <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.8v5.7"/><circle class="voll" cx="12" cy="7.7" r="1.1"/></svg><h2>Hinweise</h2></summary>
       <p class="fine"><strong>Mehrere Achspunkte auf einmal.</strong> Es dürfen mehrere Angaben
       stehen, getrennt durch <code>&amp;</code> oder ein Leerzeichen — etwa
       <code>5100 1,304 &amp; 2,5 &amp; 14+250</code>. Alle werden gerechnet, stehen mit ihrem
@@ -255,7 +282,8 @@
       Vermessung, Disposition oder sicherheitsrelevante Entscheidungen. Zwischen zwei Steinen
       wird geradlinig interpoliert; im Bogen weicht das ab.</p>
       <p class="fine">Daten © OpenStreetMap-Mitwirkende · Abfrage über die OpenRailwayMap-API ·
-      Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild Esri · DOP20, Geländerelief und
+      Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild, dunkle Karte, Straßen und Ortsnamen
+      Esri, HERE, Garmin, © OpenStreetMap-Mitwirkende · DOP20, Geländerelief und
       Parzellarkarte: Bayerische Vermessungsverwaltung (CC BY 4.0)</p>
       <p class="fine"><a href="https://github.com/steidlmichael2000-stack/trackpilot" target="_blank" rel="noopener">Quellcode auf GitHub</a></p>
     </details>

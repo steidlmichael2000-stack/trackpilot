@@ -16,11 +16,11 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   durch `&` oder ein Leerzeichen — `1,304 & 2,5 & 14+250`. Alle stehen danach mit ihrem Kilometer
   auf der Karte, und die Zeile in der unteren Leiste geht sie durch. Der Link nimmt die ganze
   Liste mit.
-- **Der eigene Kilometer läuft mit.** Ein Tipp auf `km ?` in der Zeile unter der Suchleiste wirft
-  die Rechnung an; von da an steht dort bei jeder neuen Ortung, bei welchem Kilometer welcher
-  Strecke man gerade steht — ohne Netz und ohne weiteres Zutun. Wer an der Strecke läuft, schaut
-  also nur hin. Ein Tipp auf die Zahl hält sie fest. Der Standortknopf allein rechnet nichts: Er
-  zeigt, wo man steht, mehr nicht.
+- **Der eigene Kilometer läuft mit.** Ein Tipp auf den blauen Standortpunkt in der Karte wirft
+  die Rechnung an; von da an steht in der Zeile unter der Suchleiste bei jeder neuen Ortung, bei
+  welchem Kilometer welcher Strecke man gerade steht — ohne Netz und ohne weiteres Zutun. Wer an
+  der Strecke läuft, schaut also nur hin. Ein Tipp auf die Zahl oder ein zweiter auf den Punkt
+  hält sie fest. Der Standortknopf allein rechnet nichts: Er zeigt, wo man steht, mehr nicht.
 - **Kilometersteine sind sichtbar.** Alle erfassten Steine der Strecke stehen beschriftet auf der
   Karte, verbunden zu einer Linie. Man sieht also, worauf sich die Angabe stützt — und kann einen
   Stein direkt antippen, statt zu interpolieren. Am gefundenen Punkt selbst steht der Kilometer
@@ -32,10 +32,13 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
 - **Exakt auf dem Gleis.** Stehen die Steine weit auseinander, wird entlang des tatsächlichen
   Gleisverlaufs gerechnet statt entlang der Luftlinie — in der Richtung km → Position auf
   Knopfdruck, in der Gegenrichtung von selbst, sobald die Steine über 3 km auseinanderstehen und
-  die Gerade zwischen ihnen nichts mehr taugt.
-- **Karte, Luftbild, DOP20 und Geländerelief** umschaltbar, dazu Bahn-Layer und
-  Flurstücksgrenzen als Auflagen, eigener Standort, Link zum Teilen, Betriebsstellensuche über
-  Name, DS100 oder UIC.
+  die Gerade zwischen ihnen nichts mehr taugt. Klafft zwischen zwei Steinen eine Lücke von 8 bis
+  25 km, wird auch in der Richtung km → Position von selbst am Gleis entlang abgetragen, statt
+  den nächsten Stein mit „x km daneben" zu zeigen.
+- **Grundkarte und Auflagen getrennt.** Als Grundkarte Karte, dunkle Karte, Luftbild, DOP20
+  oder Geländerelief; darüber beliebig kombinierbar Bahn-Layer, Flurstücksgrenzen, Straßennetz
+  und Ortsnamen — die beiden letzten für die Bildgrundkarten, auf denen sie sonst fehlen. Dazu
+  eigener Standort, Link zum Teilen, Betriebsstellensuche über Name, DS100 oder UIC.
 - **Eigene KML- und KMZ-Dateien** öffnen — beliebig viele, jede einzeln ein- und ausschaltbar wie
   in einer Ebenenliste, mit wählbarer Farbe, wählbarem Symbol und Namen auf der Karte. Sie bleiben
   auf dem Gerät und sind auch offline wieder da (siehe unten).
@@ -44,7 +47,8 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   Punkt bleibt von allein aktuell. Die Karte fährt dabei nur beim ersten Fix hin und bewegt sich
   danach **nie von selbst**: Beim Zielen und Messen würde eine nachziehende Karte gegen die eigene
   Hand arbeiten. Ein Tipp auf den Knopf holt die Karte zum Standort zurück, der nächste beendet die
-  Verfolgung. Darüber erscheint eine Zeile mit dem Knopf für den **eigenen Kilometer**, der Ortungsgenauigkeit, dem
+  Verfolgung. Darüber erscheint eine Zeile mit der Ortungsgenauigkeit, dem **eigenen Kilometer**
+  (sobald man den Punkt angetippt hat), dem
   Abstand zum letzten Messpunkt und **Entfernung samt Richtungspfeil zum nächsten Objekt der
   geladenen KML-Dateien** — damit lassen sich Punkte im Gelände ablaufen.
 - **Messen** — Punkte auf der Karte antippen, die Luftlinie steht als Maßzahl an jedem Abschnitt
@@ -54,7 +58,8 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
 - **Hintergrund verblassen** — Karte oder Luftbild stufenlos bis auf null, dann bleibt nur der
   Bahn- bzw. WMS-Layer stehen; darunter liegt Weiß, damit schwarze Strichzeichnungen auch im
   Dunkelmodus lesbar bleiben.
-- **Karte drehen** mit zwei Fingern; sobald sie verdreht ist, erscheint links unten ein Kompass,
+- **Karte drehen** mit zwei Fingern — erst ab 15° Verdrehung der Finger, vorher bleibt sie
+  genordet, damit ein Zweifinger-Zoom sie nicht nebenbei kippt; sobald sie verdreht ist, erscheint links unten ein Kompass,
   dessen Nadel samt N mitdreht und nach Norden zeigt — ein Tipp darauf stellt die Karte gerade.
 - **Das Gleisnetz liegt bei.** Welche Strecke an einer Stelle liegt und wie das Gleis dort
   verläuft, beantwortet die App aus mitgelieferten Kacheln statt über eine Fremdabfrage —
@@ -70,9 +75,9 @@ passiert:
 - **Ein Name** — `Zapfendorf`, `Ebing`, `Ludwigstraße Bamberg` — sucht Betriebsstellen und Orte.
   Betriebsstellen stehen oben, mit DS100 und UIC; darunter Ortschaften, Straßen und Adressen.
   Ein Tipp setzt den Punkt auf die Karte, mit derselben unteren Leiste wie alles andere — samt
-  Koordinate, Google Maps, Route und Teilen. Die Treffer werden nach der Kartenmitte sortiert:
+  Koordinate, Google Maps und Teilen. Die Treffer werden nach der Kartenmitte sortiert:
   Wer an der Strecke steht und `Ebing` tippt, meint das Ebing vor sich.
-- **Eine Koordinate** — `50.004918, 10.917318`, so wie der Knopf *Kopieren* sie herausgibt —
+- **Eine Koordinate** — `50.004918, 10.917318`, so wie sie hinter dem i-Knopf der unteren Leiste steht —
   setzt einen Punkt an dieser Stelle, mit dem Knopf *Kilometer bestimmen* daran. Damit ist der
   Weg zurück da: Koordinate aus einer Nachricht einfügen und den Kilometer dazu rechnen lassen.
 - **Nur Zahlen** heißt Streckennummer und Kilometer. Dann klappen darunter die beiden Felder
@@ -379,8 +384,8 @@ steht der Kilometer deshalb in der Zeile unter der Suchleiste und rechnet sich b
 des Geräts neu; auf der Karte zeigt ein gestricheltes Lot vom Standortpunkt auf die Stelle, an der
 er auf dem Gleis landet.
 
-**Angeworfen wird sie von Hand.** Der Standortknopf zeigt nur die eigene Stelle; die Zeile bringt
-dann `km ?` als Knopf mit, und erst der schaltet das Mitrechnen ein. Vorher lief es mit der
+**Angeworfen wird sie von Hand.** Der Standortknopf zeigt nur die eigene Stelle; erst ein Tipp auf
+den blauen Standortpunkt in der Karte schaltet das Mitrechnen ein. Vorher lief es mit der
 Verfolgung automatisch an, und das heißt: Wer bloß sehen will, wo er steht, löst eine Kette von
 Kachelgriffen und notfalls Overpass-Abfragen aus, die im Sekundentakt weiterläuft. Jede neue
 Verfolgung fängt wieder ohne Rechnung an — der Schalter merkt sich nichts.
@@ -390,8 +395,10 @@ auf den Zug der Kilometersteine loten, Kilometer aus der Sehne lesen, und wo die
 Weg abschneidet, am tatsächlichen Gleisverlauf entlang messen. Damit gilt auch die Tabelle
 darüber unverändert. Hinzu kommt allein die Ortungsungenauigkeit des Geräts — die verschiebt den
 Punkt auch **längs** der Strecke und wirkt damit unmittelbar auf den Kilometer. Festgehalten steht
-deshalb `vom Standort ±X m` in der Marke, mit X als Summe beider Anteile: die obere Schranke, denn
-ohne die Richtung des Ortungsfehlers zu kennen geht es nicht enger.
+deshalb `±X m` in der Marke, mit X als Summe beider Anteile — auch bei der Rechnung am Gleis
+entlang: die obere Schranke, denn ohne die Richtung des Ortungsfehlers zu kennen geht es nicht
+enger. In der Zeile oben heißt die Ortungsgenauigkeit allein `GPS ±X m`, damit sie nicht wie die
+Genauigkeit des Kilometers daneben aussieht.
 
 **Ohne Netz, sonst wäre es nicht brauchbar.** Eine Abfrage im Sekundentakt kommt nicht in Frage,
 also kommen die Steine aus der geladenen Strecke oder aus den mitgelieferten Kacheln. Letzteres ist
@@ -426,7 +433,7 @@ mitgelieferten Gleisnetzes". Ein Tipp darauf nimmt den bekannten Weg über die S
 ist ein bewusster Griff und darf deshalb ins Netz gehen.
 
 **Ein Tipp auf die Zahl hält sie fest.** Dann steht der Punkt unten wie jeder andere, mit
-Koordinate, Herkunft, Genauigkeit, Google Maps, Route, Kopieren und Teilen; die Steine der Strecke
+Koordinate, Herkunft, Genauigkeit, Google Maps und Teilen; die Steine der Strecke
 werden dazu nachgeladen. Die Zeile oben läuft daneben weiter.
 
 ### Der Marker gehört aufs Gleis, nicht auf die Sehne
@@ -434,7 +441,7 @@ werden dazu nachgeladen. Die Zeile oben läuft daneben weiter.
 Gemeldet mit zwei Bildschirmfotos an Strecke 5321: Der gesetzte Punkt springt auf die gerade
 Verbindung zwischen den Kilometersteinen und liegt damit sichtbar im Feld neben der Schiene. Das
 war kein Anzeigefehler, sondern genau das, was die App gerechnet hat — und diese Koordinate geht
-in *In Google Maps öffnen*, *Route*, *Kopieren* und *Teilen*.
+in *In Google Maps öffnen* und *Teilen*.
 
 Nachgemessen an denselben 234 Zwischensteinen wie oben liegt der Punkt auf der Sehne im Median
 16 m neben dem Gleis, im ungünstigen Zehntel 87 m, im schlechtesten Fall 378 m. An den beiden
@@ -478,8 +485,8 @@ von 7 auf 1, das 99. Perzentil von 144 auf 106 m, bei unverändertem Median. Ein
 es nicht — der Rest ist die Erfassungsgenauigkeit der Steine, gegen die kein Verlauf hilft.
 
 **Unterhalb dieser Schwelle gibt es weiter keine Feinrechnung des Kilometers.** Sie könnte nur diese wenigen Meter wegnehmen und kostet eine Overpass-Abfrage von
-15–40 s. Angezeigt wird stattdessen die gemessene Zahl: Das Etikett lautet „von der Karte ±57 m",
-und unter *Herkunft & Genauigkeit* steht, woher der Wert kommt.
+15–40 s. Angezeigt wird stattdessen die gemessene Zahl: Das Etikett lautet „±57 m",
+und hinter dem i-Knopf steht, woher der Wert kommt.
 
 ### Wenn gar kein Steinpaar da ist
 
