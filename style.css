@@ -168,10 +168,15 @@ body {
   flex: none; width: 21px; height: 20px; padding: 0;
   display: grid; place-items: center;
   border: 0; border-right: 1px solid var(--line);
-  background: none; color: var(--muted-2);
-  font: inherit; font-size: .74rem; line-height: 1; cursor: pointer;
+  background: none; color: var(--accent);        /* Signalfarbe aus den Einstellungen */
+  font: inherit; font-size: .74rem; font-weight: 600; line-height: 1; cursor: pointer;
 }
-.quellen-knopf[aria-expanded="true"] { color: var(--text); }
+/* Aufgeklappt wie ein eingeschalteter Knopf; padding-box, damit die Tönung
+   nicht auch unter dem Trennstrich liegt und der doppelt deckt */
+.quellen-knopf[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  background-clip: padding-box;
+}
 
 /* Nordknopf — oben auf der Knopfsäule rechts: Standort 0–42, Messen 48–90,
    Nord 96–138 über der Grundlinie. Er erscheint nur bei gedrehter Karte und

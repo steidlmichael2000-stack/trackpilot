@@ -1662,7 +1662,7 @@ const kmTokens = s => String(s).split(/[&;\s]+/).filter(Boolean);
 
 /* ============================ Karte ============================ */
 
-let map, baseOsm, baseDark, baseSat, baseDop, baseRelief, ormLayer, parzLayer, strLayer, ortLayer;
+let map, baseOsm, baseSat, baseDop, baseRelief, ormLayer, parzLayer, glGrund;
 let msLayer, trackLayer, pointLayer, meLayer, merkLayer, liveLayer;
 /* Hintergründe schließen sich aus, Auflagen nicht — als Verzeichnis gehalten,
  * damit ein weiterer Dienst nur ein Eintrag und ein Knopf ist. */
@@ -1726,7 +1726,7 @@ function drehSchwelleEinbauen() {
   };
 }
 
-/* ---- Dunkle Grundkarte: OpenFreeMap über MapLibre ----
+/* ---- MapLibre-Grund: dunkle Karte, scharfe Straßen und Ortsnamen ----
  *
  * OpenFreeMap gibt es nur als Vektorkarte, und die zeichnet Leaflet nicht.
  * Deshalb läuft dafür eine zweite Karte (MapLibre GL, vendor/maplibre/, BSD-3)
@@ -1734,26 +1734,171 @@ function drehSchwelleEinbauen() {
  * bleibt die eine Karte, die bedient wird, und MapLibre zieht bei jeder
  * Bewegung, jedem Zoom und jeder Drehung nach (glNachziehen).
  *
+ * Sie zeichnet zweierlei (glStil):
+ * - die dunkle Grundkarte, den fertigen Stil von OpenFreeMap;
+ * - ein Bild (Luftbild, DOP20, Relief) mit Straßen und Ortsnamen als Vektoren
+ *   darüber. Die kamen bis 30.09.2026 als Rasterkacheln von Esri — auf dem
+ *   Land ab Zoomstufe 16 leer (gemessen bei Ermetzhofen: nur noch 872-Byte-
+ *   Leerbilder) und auf dem Handy unscharf hochgezogen. Als Vektoren sind sie
+ *   in jeder Zoomstufe scharf und reichen bis ganz nah.
+ *   Das Bild zeichnet dann MapLibre mit, nicht Leaflet: Nur so liegen die
+ *   Straßen zwischen Bild und Bahn-Layer. Leaflet legt Parzellen, Bahn-Layer,
+ *   eigenen WMS und Pins weiter obendrauf.
+ * Über Karte und Dunkel braucht es keine Auflage, dort sind Straßen und Namen
+ * schon drin; dann zeichnet Leaflet die Karte wie immer (glGebraucht).
+ *
  * Warum nicht als Leaflet-Ebene (maplibre-gl-leaflet): Die legt ihre Fläche in
  * die Kachelebene, und die dreht leaflet-rotate per CSS. Eine gedrehte
  * bildschirmgroße Fläche lässt an den Ecken Lücken. Hinter der Karte dreht
  * MapLibre selbst und füllt das Bild immer ganz.
  *
- * Geladen wird MapLibre erst, wenn jemand die dunkle Karte wählt: rund 1,2 MB,
- * die sonst jeder Start mitschleppen müsste. Version 6.10.0, am 30.09.2026 aus
+ * Geladen wird MapLibre erst, wenn es gebraucht wird: rund 1,2 MB, die sonst
+ * jeder Start mitschleppen müsste. Version 6.10.0, am 30.09.2026 aus
  * der npm-Registry geholt und gegen deren SHA-512-Prüfsumme geprüft; bewusst
  * nicht die damals sechs Tage alte 6.11.2. Der Worker startet als eigene Datei
  * vom selben Ort, die CSP (script-src/worker-src 'self') bleibt dadurch streng.
  *
  * Zoom: Leaflet rechnet mit 256-px-Kacheln, MapLibre mit 512 px — dieselbe
  * Ansicht ist in MapLibre eine Stufe kleiner. */
-const OFM_STIL = 'https://tiles.openfreemap.org/styles/dark';
+const OFM_DUNKEL = 'https://tiles.openfreemap.org/styles/dark';
+const OFM_KACHELN = 'https://tiles.openfreemap.org/planet';
+const OFM_GLYPHEN = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
 const OFM_QUELLE = '<a href="https://openfreemap.org/">OpenFreeMap</a> &copy; OpenMapTiles, Daten &copy; OpenStreetMap';
+const BVV_QUELLE = 'DOP20/Relief/Parzellen: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0)';
+
+/* Die Bilder für MapLibre — dieselben Dienste und Grenzen wie die Leaflet-
+ * Ebenen in initMap. Die WMS-Dienste fragt MapLibre über {bbox-epsg-3857} ab;
+ * bei EPSG:3857 steht die Achsfolge in WMS 1.3.0 wie gewohnt (x, y). Eine
+ * 256er-Rasterkachel holt MapLibre auf derselben Zoomstufe wie Leaflet. */
+const BVV_WMS = (dienst, ebene) => `https://geoservices.bayern.de/od/wms/${dienst}?SERVICE=WMS&REQUEST=GetMap` +
+  `&VERSION=1.3.0&LAYERS=${ebene}&STYLES=&FORMAT=image/jpeg&CRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}`;
+const GL_BILDER = {
+  sat: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    maxzoom: 18, quelle: 'Luftbild: Esri, Maxar' },
+  dop: { url: BVV_WMS('dop/v1/dop20', 'by_dop20c'), maxzoom: 22, quelle: BVV_QUELLE },
+  relief: { url: BVV_WMS('dgm/v1/relief', 'by_relief_schraeglicht'), maxzoom: 22, quelle: BVV_QUELLE }
+};
 
 let gl = null;            // die MapLibre-Karte, sobald geladen
 let glVersprechen = null; // läuft das Laden schon?
-let glAn = false;         // ist die dunkle Karte gerade die Grundkarte?
+let glAn = false;         // zeichnet MapLibre gerade den Grund?
+let glKaputt = false;     // ließ es sich nicht laden (kein WebGL, offline beim ersten Mal)?
 let glDeckung = 1;
+let glStilZuletzt = '';   // der zuletzt gesetzte Stil, als Text — gleich heißt: nichts tun
+let glQuellenZuletzt = [];
+
+/** Braucht die Ansicht MapLibre? Für die dunkle Karte immer, für Straßen und
+ *  Ortsnamen nur über einem Bild. */
+function glGebraucht() {
+  if (glKaputt) return false;
+  const b = prefs.base || 'osm';
+  return b === 'dark' || (!!GL_BILDER[b] && (!!prefs.str || !!prefs.ort));
+}
+
+/* Straßen und Namen über dem Bild: helle Linien mit dunklem Umriss, damit sie
+ * auf hellem Acker wie auf dunklem Wald stehen; Fernstraßen gelb, Hauptstraßen
+ * blassgelb, der Rest weiß. Keine Bahn — die zeichnet der Bahn-Layer. Kleine
+ * Straßen erst ab Zoomstufe 13 (Leaflet 14), sonst deckt das Netz das Bild zu. */
+const GL_NAME = ['coalesce', ['get', 'name:de'], ['get', 'name']];
+const GL_GROSS = ['motorway', 'trunk', 'primary', 'secondary'];
+const GL_KLEIN = ['tertiary', 'minor', 'service'];
+const glLinie = klassen => ['all',
+  ['match', ['geometry-type'], ['LineString', 'MultiLineString'], true, false],
+  ['match', ['get', 'class'], klassen, true, false]];
+const glBreite = (fern, haupt, sonst) => ['interpolate', ['exponential', 1.5], ['zoom'],
+  9, ['match', ['get', 'class'], ['motorway', 'trunk'], fern[0], ['primary', 'secondary'], haupt[0], sonst[0]],
+  18, ['match', ['get', 'class'], ['motorway', 'trunk'], fern[1], ['primary', 'secondary'], haupt[1], sonst[1]]];
+const GL_UMRISS = glBreite([2.6, 14], [2.2, 11], [1.4, 7]);
+const GL_STRICH = glBreite([1.2, 10], [0.9, 7.5], [0.5, 4.5]);
+const GL_FARBE = ['match', ['get', 'class'], ['motorway', 'trunk'], '#ffd166',
+  ['primary', 'secondary'], '#fff1b8', 'rgba(255, 255, 255, 0.85)'];
+const GL_SCHRIFT_WEISS = { 'text-color': '#ffffff', 'text-halo-color': 'rgba(0, 0, 0, 0.8)', 'text-halo-width': 1.3 };
+
+function glStrassen() {
+  const quelle = { source: 'ofm', 'source-layer': 'transportation' };
+  const rund = { 'line-cap': 'round', 'line-join': 'round' };
+  return [
+    { id: 'str-umriss-klein', type: 'line', ...quelle, minzoom: 13, filter: glLinie(GL_KLEIN), layout: rund,
+      paint: { 'line-color': 'rgba(0, 0, 0, 0.45)', 'line-width': GL_UMRISS } },
+    { id: 'str-umriss-gross', type: 'line', ...quelle, minzoom: 8, filter: glLinie(GL_GROSS), layout: rund,
+      paint: { 'line-color': 'rgba(0, 0, 0, 0.45)', 'line-width': GL_UMRISS } },
+    { id: 'str-klein', type: 'line', ...quelle, minzoom: 13, filter: glLinie(GL_KLEIN), layout: rund,
+      paint: { 'line-color': GL_FARBE, 'line-width': GL_STRICH } },
+    { id: 'str-gross', type: 'line', ...quelle, minzoom: 8, filter: glLinie(GL_GROSS), layout: rund,
+      paint: { 'line-color': GL_FARBE, 'line-width': GL_STRICH } },
+    { id: 'str-namen', type: 'symbol', source: 'ofm', 'source-layer': 'transportation_name', minzoom: 13,
+      filter: ['match', ['get', 'class'], [...GL_GROSS, ...GL_KLEIN], true, false],
+      layout: { 'symbol-placement': 'line', 'text-field': GL_NAME, 'text-font': ['Noto Sans Regular'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 13, 10, 18, 13], 'text-max-angle': 30 },
+      paint: GL_SCHRIFT_WEISS }
+  ];
+}
+
+/* Ortsnamen: Städte groß und fett, Dörfer kleiner, Weiler und Ortsteile erst
+ * aus der Nähe. Welche bei Platzmangel zuerst stehen, entscheidet der Rang. */
+function glOrte() {
+  const groesse = f => ['match', ['get', 'class'], 'city', 16 * f, 'town', 14 * f, 'village', 12.5 * f, 11 * f];
+  const ebene = (id, minzoom, klassen) => ({
+    id, type: 'symbol', source: 'ofm', 'source-layer': 'place', minzoom,
+    filter: ['match', ['get', 'class'], klassen, true, false],
+    layout: { 'text-field': GL_NAME, 'text-font': ['Noto Sans Bold'], 'text-max-width': 8,
+      'text-size': ['interpolate', ['linear'], ['zoom'], 8, groesse(0.85), 14, groesse(1.15)],
+      'symbol-sort-key': ['coalesce', ['get', 'rank'], 99] },
+    paint: GL_SCHRIFT_WEISS
+  });
+  return [
+    ebene('ort-namen', 8, ['city', 'town', 'village']),
+    ebene('ort-namen-klein', 12, ['hamlet', 'suburb', 'quarter', 'neighbourhood'])
+  ];
+}
+
+/** Der Stil für die aktuelle Wahl: die dunkle Karte als fertiger Stil, sonst
+ *  Bild + Straßen/Namen, zusammengesetzt. Die Deckkraft wirkt nur aufs Bild;
+ *  verblasst liegt Weiß darunter wie bei den übrigen Grundkarten. */
+function glStil() {
+  const b = prefs.base || 'osm';
+  if (b === 'dark' || !GL_BILDER[b]) return OFM_DUNKEL;
+  const bild = GL_BILDER[b];
+  const grund = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#06070b';
+  return {
+    version: 8, glyphs: OFM_GLYPHEN,
+    sources: {
+      bild: { type: 'raster', tiles: [bild.url], tileSize: 256, maxzoom: bild.maxzoom },
+      ofm: { type: 'vector', url: OFM_KACHELN }
+    },
+    layers: [
+      { id: 'hintergrund', type: 'background', paint: { 'background-color': glDeckung < 1 ? '#ffffff' : grund } },
+      { id: 'bild', type: 'raster', source: 'bild', paint: { 'raster-opacity': glDeckung, 'raster-fade-duration': 0 } },
+      ...(prefs.str ? glStrassen() : []),
+      ...(prefs.ort ? glOrte() : [])
+    ]
+  };
+}
+
+/** Den Stil nur setzen, wenn er sich geändert hat. Zwischen zwei zusammen-
+ *  gesetzten Stilen gleicht MapLibre nur den Unterschied ab (diff) — eine
+ *  zugeschaltete Auflage lädt das Bild nicht neu. */
+function glStilSetzen() {
+  if (!gl) return;
+  const stil = glStil();
+  const text = typeof stil === 'string' ? stil : JSON.stringify(stil);
+  if (text === glStilZuletzt) return;
+  glStilZuletzt = text;
+  gl.setStyle(stil, { diff: true });
+}
+
+/* Quellenangaben für das, was MapLibre gerade zeichnet. Die Leaflet-Ebene des
+ * Bildes ist dann nicht auf der Karte und bringt ihre Angabe nicht selbst mit;
+ * deshalb hier von Hand. Leaflet zählt gleiche Angaben mit — die BVV-Angabe der
+ * Parzellen und die des DOP20 heben sich also nicht gegenseitig auf. */
+function glQuellenErneuern() {
+  const b = prefs.base || 'osm';
+  const neu = !glAn ? [] : b === 'dark' ? [OFM_QUELLE] : [GL_BILDER[b].quelle, OFM_QUELLE];
+  if (neu.join('|') === glQuellenZuletzt.join('|')) return;
+  for (const q of glQuellenZuletzt) map.attributionControl.removeAttribution(q);
+  for (const q of neu) map.attributionControl.addAttribution(q);
+  glQuellenZuletzt = neu;
+}
 
 function glLage() {
   /* Die Mitte, wie sie gezeichnet ist, nicht getCenter(): Nach setView meldet
@@ -1782,11 +1927,15 @@ function glZoomGleiten(ev) {
   });
 }
 
+/* Verblassen. Die dunkle Karte ist ein fertiger Stil: dort wird die ganze
+ * Fläche durchscheinend, mit Weiß darunter. Beim Bild wirkt die Deckkraft im
+ * Stil nur aufs Bild (glStil) — Straßen und Namen bleiben kräftig. */
 function glDeckungSetzen() {
   const flaeche = $('#glKarte');
-  // Verblasst liegt Weiß darunter, wie bei den übrigen Grundkarten
-  if (flaeche) flaeche.style.background = glDeckung < 1 ? '#ffffff' : '';
-  if (gl) gl.getCanvas().style.opacity = String(glDeckung);
+  const dunkel = (prefs.base || 'osm') === 'dark';
+  if (flaeche) flaeche.style.background = dunkel && glDeckung < 1 ? '#ffffff' : '';
+  if (gl) gl.getCanvas().style.opacity = String(dunkel ? glDeckung : 1);
+  glStilSetzen();
 }
 
 async function glLaden() {
@@ -1797,8 +1946,10 @@ async function glLaden() {
       css.href = 'vendor/maplibre/maplibre-gl.css';
       document.head.appendChild(css);
       const maplibregl = await import('./vendor/maplibre/maplibre-gl.mjs');
+      const stil = glStil();
+      glStilZuletzt = typeof stil === 'string' ? stil : JSON.stringify(stil);
       gl = new maplibregl.Map({
-        container: 'glKarte', style: OFM_STIL,
+        container: 'glKarte', style: stil,
         interactive: false, attributionControl: false,
         fadeDuration: 0, maxZoom: 21,
         ...glLage()
@@ -1818,24 +1969,34 @@ async function glLaden() {
  * läuft keine Animation), stünden die Karten versetzt. */
 const GL_EREIGNISSE = 'move zoom rotate viewreset resize moveend zoomend';
 
-/** Die dunkle Karte als Leaflet-Ebene — nur ein Schalter für #glKarte, damit
- *  setBase, Deckkraft und Quellenangabe sie wie jede andere Grundkarte führen. */
+/** MapLibre als Leaflet-Ebene — nur ein Schalter für #glKarte, damit
+ *  grundAnwenden und die Deckkraft sie wie jede andere Grundkarte führen.
+ *  Die Quellenangabe setzt glQuellenErneuern, sie wechselt mit dem Inhalt. */
 const GlGrund = L.Layer.extend({
-  getAttribution() { return OFM_QUELLE; },
-
   onAdd(m) {
     glAn = true;
     $('#glKarte').hidden = false;
     $('#map').classList.add('gl-grund');
     m.on(GL_EREIGNISSE, glNachziehen);
     m.on('zoomanim', glZoomGleiten);
+    glQuellenErneuern();
     glLaden().then(() => {
+      glStilSetzen();
       glNachziehen();
       gl.resize();     // war das Feld beim Anlegen noch verborgen, stimmt die Größe sonst nicht
     }).catch(err => {
-      console.warn('Dunkle Karte nicht verfügbar:', err);
-      toast('Dunkle Karte nicht verfügbar — zurück auf die normale Karte.');
-      if (glAn) setBase('osm');
+      /* Ohne MapLibre (kein WebGL, beim ersten Mal offline) zurück auf das,
+       * was Leaflet allein kann: die Karte statt Dunkel, das Bild ohne
+       * Straßen und Namen. */
+      console.warn('MapLibre nicht verfügbar:', err);
+      glKaputt = true;
+      if ((prefs.base || 'osm') === 'dark') {
+        toast('Dunkle Karte nicht verfügbar — zurück auf die normale Karte.');
+        setBase('osm');
+      } else {
+        toast('Straßen und Ortsnamen gerade nicht verfügbar.');
+        grundAnwenden();
+      }
     });
     return this;
   },
@@ -1846,6 +2007,7 @@ const GlGrund = L.Layer.extend({
     $('#map').classList.remove('gl-grund');
     m.off(GL_EREIGNISSE, glNachziehen);
     m.off('zoomanim', glZoomGleiten);
+    glQuellenErneuern();
     return this;
   },
 
@@ -1898,25 +2060,10 @@ function initMap() {
     maxZoom: 22, maxNativeZoom: 18, crossOrigin: 'anonymous', attribution: 'Luftbild: Esri, Maxar'
   });
 
-  /* Die beiden Esri-Auflagen. Nachgemessen am 29.09.2026 über Nürnberg: Das
-   * Straßennetz zeichnet bis 19. Die Ortsnamen liefern auch darüber Kacheln, nur
-   * leere (872 Byte, durchsichtig): Ganz nah gibt es keine Ortsnamen mehr, und
-   * vergrößerte Schrift aus Stufe 16 wäre unscharf und riesig. Beide senden
-   * CORS, und der Dienst steht bei Esri auf „mature support": Er läuft weiter,
-   * wird aber nicht mehr aktualisiert.
-   *
-   * Ein Wortlaut für beide: Leaflet führt gleiche Quellenangaben nur einmal.
-   * Die dunkle Karte kam bis 30.09.2026 ebenfalls von Esri (Dark Gray) — zu
-   * grau und flau; sie ist jetzt OpenFreeMap, siehe GlGrund. */
-  const ESRI = 'Esri, HERE, Garmin, &copy; OpenStreetMap';
-  const ESRI_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
-  baseDark = new GlGrund();
-  strLayer = L.tileLayer(ESRI_URL + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 22, maxNativeZoom: 19, crossOrigin: 'anonymous', attribution: ESRI
-  });
-  ortLayer = L.tileLayer(ESRI_URL + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 22, maxNativeZoom: 19, crossOrigin: 'anonymous', attribution: ESRI
-  });
+  /* Dunkle Karte, Straßen und Ortsnamen zeichnet MapLibre (GlGrund). Straßen
+   * und Namen kamen bis 30.09.2026 als Rasterkacheln von Esri, die dunkle
+   * Karte bis dahin ebenfalls (Dark Gray) — siehe den Abschnitt über glStil. */
+  glGrund = new GlGrund();
 
   /* Offene Dienste der Bayerischen Vermessungsverwaltung, alle CC BY 4.0 und mit
    * EPSG:3857, laufen also direkt in Leaflet. Als WMS haben sie keine natürliche
@@ -1926,7 +2073,7 @@ function initMap() {
    * Kachel beim Orthophoto, ohne sichtbaren Unterschied. Außerhalb Bayerns
    * antworten die Dienste mit einem leeren Bild und Status 200 — kein Fehler,
    * den man abfangen könnte, sondern weißer Grund. */
-  const BVV = 'DOP20/Relief/Parzellen: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0)';
+  const BVV = BVV_QUELLE;
 
   baseDop = L.tileLayer.wms('https://geoservices.bayern.de/od/wms/dop/v1/dop20', {
     layers: 'by_dop20c', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
@@ -1947,13 +2094,13 @@ function initMap() {
     version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
   });
 
-  baseLayers = { osm: baseOsm, dark: baseDark, sat: baseSat, dop: baseDop, relief: baseRelief };
+  // Die Leaflet-Grundkarten. „dark" hat keine: die zeichnet immer MapLibre.
+  baseLayers = { osm: baseOsm, sat: baseSat, dop: baseDop, relief: baseRelief };
   ormLayer = L.tileLayer('https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', {
     subdomains: 'abc', maxZoom: 22, maxNativeZoom: 19, opacity: 0.85, crossOrigin: 'anonymous',
     attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>'
   });
 
-  baseOsm.addTo(map);
   msLayer = L.layerGroup().addTo(map);
   trackLayer = L.layerGroup().addTo(map);
   pointLayer = L.layerGroup().addTo(map);
@@ -1968,10 +2115,9 @@ function initMap() {
   $('#quellenMass').appendChild(massstab.getContainer());
   quellenEinrichten();
 
-  overlayLayers = { orm: ormLayer, parz: parzLayer, str: strLayer, ort: ortLayer };
-  if (prefs.base && prefs.base !== 'osm') setBase(prefs.base, true);
+  overlayLayers = { orm: ormLayer, parz: parzLayer };
   for (const k of Object.keys(overlayLayers)) auflageSetzen(k);
-  ordneAuflagen();
+  setBase(prefs.base || 'osm', true);     // setzt auch Straßen und Ortsnamen (grundAnwenden)
   applyBaseOpacity();
   if (prefs.wms && prefs.wms.on) wmsApply(true);
 
@@ -2103,27 +2249,41 @@ function parzFarbeAnpassen() {
   if (parzLayer.wmsParams.layers !== wunsch) parzLayer.setParams({ layers: wunsch });
 }
 
-/** Reihenfolge der Auflagen, von unten: eigener WMS, Parzellen, Straßen,
- *  Bahn-Layer, Ortsnamen. Die Bahn liegt über den Straßen, weil es um sie geht;
- *  die Namen ganz oben, damit keine Linie durch die Schrift läuft. */
+/** Reihenfolge der Leaflet-Auflagen, von unten: eigener WMS, Parzellen,
+ *  Bahn-Layer. Straßen und Ortsnamen liegen darunter im MapLibre-Grund. */
 function ordneAuflagen() {
   if (wmsLayer) wmsLayer.bringToFront();
-  for (const layer of [parzLayer, strLayer, ormLayer, ortLayer]) {
+  for (const layer of [parzLayer, ormLayer]) {
     if (layer && map.hasLayer(layer)) layer.bringToFront();
   }
+}
+
+const GRUNDKARTEN = ['osm', 'dark', 'sat', 'dop', 'relief'];
+
+/** Wer zeichnet den Grund? Braucht die Wahl MapLibre (dunkle Karte, oder ein
+ *  Bild mit Straßen/Namen), zeichnet es MapLibre allein und die Leaflet-
+ *  Grundkarte ist aus — sonst läge das Bild doppelt übereinander. Sonst
+ *  zeichnet Leaflet die gewählte Karte wie immer. */
+function grundAnwenden() {
+  const mitGl = glGebraucht();
+  for (const [kennung, layer] of Object.entries(baseLayers)) {
+    const soll = !mitGl && kennung === prefs.base;
+    if (soll && !map.hasLayer(layer)) layer.addTo(map);
+    if (!soll && map.hasLayer(layer)) map.removeLayer(layer);
+  }
+  // Ohne MapLibre gibt es kein Dunkel — dann eben die Karte
+  if (!mitGl && !baseLayers[prefs.base] && !map.hasLayer(baseOsm)) baseOsm.addTo(map);
+  if (mitGl && !map.hasLayer(glGrund)) glGrund.addTo(map);
+  if (!mitGl && map.hasLayer(glGrund)) map.removeLayer(glGrund);
+  if (mitGl) { glDeckungSetzen(); glQuellenErneuern(); }
 }
 
 /** still: beim Start. Dort steht die Karte noch auf der Deutschlandansicht,
  *  die über Bayern hinausreicht — die Warnung käme bei jedem Öffnen. */
 function setBase(which, still = false) {
-  if (!baseLayers[which]) which = 'osm';
+  if (!GRUNDKARTEN.includes(which)) which = 'osm';
   prefs.base = which;
-
-  for (const [kennung, layer] of Object.entries(baseLayers)) {
-    if (kennung !== which && map.hasLayer(layer)) map.removeLayer(layer);
-  }
-  if (!map.hasLayer(baseLayers[which])) baseLayers[which].addTo(map);
-  for (const k of NUR_UEBER_BILD) auflageSetzen(k);
+  grundAnwenden();
 
   if (!still && (which === 'dop' || which === 'relief') && ausserhalbBayerns()) {
     toast('Dieser Dienst deckt nur Bayern ab — hier bleibt der Grund weiß.');
@@ -2140,6 +2300,7 @@ function setBase(which, still = false) {
 function applyBaseOpacity() {
   const o = (prefs.baseOpacity == null ? 100 : prefs.baseOpacity) / 100;
   for (const layer of Object.values(baseLayers)) layer.setOpacity(o);
+  if (glGrund) glGrund.setOpacity(o);
 
   // Sobald der Hintergrund durchscheinend wird, muss darunter Weiß liegen:
   // Bahn- und IVL-Pläne sind schwarze Strichzeichnungen und wären im
@@ -2151,29 +2312,29 @@ function applyBaseOpacity() {
   if (val) val.textContent = Math.round(o * 100) + ' %';
 }
 
-/* Straßen und Ortsnamen stecken in der OSM-Karte schon drin. Über ihr bleiben
- * sie eingeschaltet, werden aber nicht gezeichnet — sonst lägen Esri-Straßen
- * doppelt über den OSM-Straßen. Beim Wechsel auf ein Bild erscheinen sie. */
+/* Straßen und Ortsnamen zeichnet MapLibre, und nur über einem Bild: In Karte
+ * und Dunkel stecken sie schon drin. Dort bleiben sie eingeschaltet, werden
+ * aber nicht gezeichnet; beim Wechsel auf ein Bild erscheinen sie. */
 const NUR_UEBER_BILD = new Set(['str', 'ort']);
+const AUFLAGEN = ['orm', 'parz', 'str', 'ort'];
 
 /** Ist die Auflage gewählt? Der Bahn-Layer ist von Haus aus an, die übrigen aus. */
 function auflageGewaehlt(kennung) {
   return kennung === 'orm' ? prefs.orm !== false : !!prefs[kennung];
 }
 
-/** Die Auflage so auf die Karte bringen, wie Wahl und Grundkarte es verlangen. */
+/** Eine Leaflet-Auflage so auf die Karte bringen, wie die Wahl es verlangt. */
 function auflageSetzen(kennung) {
   const layer = overlayLayers[kennung];
   if (!layer) return;
-  const sichtbar = auflageGewaehlt(kennung) &&
-    !(NUR_UEBER_BILD.has(kennung) && (prefs.base || 'osm') === 'osm');
+  const sichtbar = auflageGewaehlt(kennung);
   if (sichtbar && kennung === 'parz') parzFarbeAnpassen();
   if (sichtbar && !map.hasLayer(layer)) layer.addTo(map);
   if (!sichtbar && map.hasLayer(layer)) map.removeLayer(layer);
 }
 
 function toggleOverlay(kennung) {
-  if (!overlayLayers[kennung]) return;
+  if (!AUFLAGEN.includes(kennung)) return;
   const an = !auflageGewaehlt(kennung);
   prefs[kennung] = an;
 
@@ -2181,10 +2342,10 @@ function toggleOverlay(kennung) {
     if (ausserhalbBayerns()) toast('Die Parzellarkarte deckt nur Bayern ab.');
     else if (map.getZoom() < 17) toast('Parzellen zeichnet der Dienst erst ab Zoomstufe 17 (1:5000).');
   }
-  if (an && NUR_UEBER_BILD.has(kennung) && (prefs.base || 'osm') === 'osm') {
-    toast('Über der Karte schon enthalten — erscheint über Luftbild, DOP20, Relief und Dunkel.');
+  if (an && NUR_UEBER_BILD.has(kennung) && !GL_BILDER[prefs.base || 'osm']) {
+    toast('In Karte und Dunkel schon enthalten — erscheint über Luftbild, DOP20 und Relief.');
   }
-  auflageSetzen(kennung);
+  if (NUR_UEBER_BILD.has(kennung)) grundAnwenden(); else auflageSetzen(kennung);
   ordneAuflagen();
   saveStore();
   syncButtons();
@@ -5744,6 +5905,8 @@ function applyTheme() {
   else el.setAttribute('data-theme', prefs.theme);
   applyPalette();
   syncButtons();
+  // Der Grund unter dem Bild nimmt die Hintergrundfarbe des Themas an (glStil)
+  if (gl && glAn) glStilSetzen();
 }
 
 /** Hell oder dunkel — bei 'auto' entscheidet das Betriebssystem. */
@@ -5799,7 +5962,7 @@ function syncButtons() {
   if (map) {
     // Nach der Wahl, nicht nach der Karte: Straßen und Ortsnamen sind über der
     // OSM-Karte gewählt, aber nicht gezeichnet
-    for (const kennung of Object.keys(overlayLayers)) {
+    for (const kennung of AUFLAGEN) {
       const btn = $('#' + kennung + 'Btn');
       if (btn) btn.classList.toggle('is-on', auflageGewaehlt(kennung));
     }

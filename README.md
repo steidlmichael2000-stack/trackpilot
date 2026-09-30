@@ -954,9 +954,10 @@ Karten- und Bahndaten: © OpenStreetMap-Mitwirkende
 unter `netz/` ein, die aus OSM abgeleitet sind und damit ebenfalls unter der ODbL stehen.
 Bahn-Layer von
 [OpenRailwayMap](https://www.openrailwaymap.org/) (CC-BY-SA 2.0), Luftbilder von Esri,
-dunkle Karte von [OpenFreeMap](https://openfreemap.org/) (© OpenMapTiles, Daten © OpenStreetMap).
+dunkle Karte, Straßen und Ortsnamen von [OpenFreeMap](https://openfreemap.org/) (© OpenMapTiles,
+Daten © OpenStreetMap).
 Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause),
 [leaflet-rotate](https://github.com/Raruto/leaflet-rotate) (GPL-3.0) und
 [MapLibre GL JS](https://maplibre.org/) 6.10.0 (BSD-3-Clause, `vendor/maplibre/`) bei, damit die
-App ohne CDN und offline läuft. MapLibre zeichnet nur die dunkle Karte und wird erst geladen, wenn
-sie gewählt ist.
+App ohne CDN und offline läuft. MapLibre zeichnet die dunkle Karte sowie Straßen und Ortsnamen
+über den Bildern und wird erst geladen, wenn eines davon gewählt ist.

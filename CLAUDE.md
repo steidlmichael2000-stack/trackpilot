@@ -62,19 +62,27 @@ zeigen — bei einem neuen Motiv den Wert ändern.
 `.card-rail`) — wer das eine ändert, ändert auch das andere, sonst fällt die
 Icon-Familie wieder auseinander.
 
-## Dunkle Karte: OpenFreeMap über MapLibre
+## Dunkle Karte, Straßen und Ortsnamen: OpenFreeMap über MapLibre
 
 OpenFreeMap gibt es nur als Vektorkarte. MapLibre GL (`vendor/maplibre/`) zeichnet sie in
 `#glKarte` **hinter** der Leaflet-Karte und folgt ihr nur (`glNachziehen` in `app.js`). Nicht
 als Leaflet-Ebene einbauen: leaflet-rotate dreht die Kachelebene per CSS, eine gedrehte
 bildschirmgroße Fläche hätte leere Ecken.
 
+MapLibre zeichnet zweierlei (`glStil`): die dunkle Karte als fertigen Stil, oder ein Bild
+(Luftbild, DOP20, Relief) mit **Straßen und Ortsnamen** als Vektoren darüber. Im zweiten Fall
+zeichnet MapLibre auch das Bild, und die Leaflet-Grundkarte ist aus (`grundAnwenden`) — nur so
+liegen die Straßen zwischen Bild und Bahn-Layer. Die Bilddienste stehen dafür zweimal im Code:
+als Leaflet-Ebene in `initMap` und in `GL_BILDER`. Wer einen Dienst ändert, ändert beide.
+Straßen und Ortsnamen kamen bis 30.09.2026 als Rasterkacheln von Esri: auf dem Land ab
+Zoomstufe 16 leer und auf dem Handy unscharf. Nicht zurückbauen.
+
 - Beide Karten liegen nachgemessen auf 0,000 px übereinander — verschoben, gezoomt, gedreht,
   mitten in der Zweifinger-Geste und nach animiertem Zoom. Wer an `glLage` oder den Ereignissen
   dreht, misst das nach (Punkte mit `map.project` ungerundet gegen `gl.project`).
   `map.getCenter()` taugt dafür nicht: Nach `setView` meldet es die gewünschte Mitte, gezeichnet
   ist die auf ganze Pixel gerundete (0,47 px daneben).
-- MapLibre wird erst beim Wählen der dunklen Karte geladen (rund 1,2 MB).
+- MapLibre wird erst geladen, wenn die Wahl es braucht (`glGebraucht`): rund 1,2 MB.
 - **Update nur bewusst:** Version aus der npm-Registry holen, gegen `dist.integrity` (SHA-512)
   prüfen, keine Version nehmen, die erst ein paar Tage alt ist. Am 30.09.2026 so mit 6.10.0
   gemacht. Kopiert werden `maplibre-gl.mjs`, `maplibre-gl-shared.mjs`, `maplibre-gl-worker.mjs`,
