@@ -37,7 +37,8 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   den nächsten Stein mit „x km daneben" zu zeigen.
 - **Grundkarte und Auflagen getrennt.** Als Grundkarte Karte, dunkle Karte (OpenFreeMap), Luftbild, DOP20
   oder Geländerelief; darüber beliebig kombinierbar Bahn-Layer, Flurstücksgrenzen, Straßennetz
-  und Ortsnamen — die beiden letzten für die Bildgrundkarten, auf denen sie sonst fehlen. Dazu
+  und Ortsnamen — die beiden letzten für die Bildgrundkarten, auf denen sie sonst fehlen, und
+  für die dunkle Karte, deren eigene sie durch deutlichere ersetzen. Dazu
   eigener Standort, Link zum Teilen, Betriebsstellensuche über Name, DS100 oder UIC.
 - **Eigene KML- und KMZ-Dateien** öffnen — beliebig viele, jede einzeln ein- und ausschaltbar wie
   in einer Ebenenliste, mit wählbarer Farbe, wählbarem Symbol und Namen auf der Karte. Sie bleiben

@@ -1744,8 +1744,9 @@ function drehSchwelleEinbauen() {
  *   Das Bild zeichnet dann MapLibre mit, nicht Leaflet: Nur so liegen die
  *   Straßen zwischen Bild und Bahn-Layer. Leaflet legt Parzellen, Bahn-Layer,
  *   eigenen WMS und Pins weiter obendrauf.
- * Über Karte und Dunkel braucht es keine Auflage, dort sind Straßen und Namen
- * schon drin; dann zeichnet Leaflet die Karte wie immer (glGebraucht).
+ * Über Dunkel ersetzen unsere Straßen und Namen die sehr zurückhaltenden der
+ * dunklen Karte (glDunkelErsetzt). Über der OSM-Karte braucht es sie nicht,
+ * dort zeichnet Leaflet wie immer (glGebraucht).
  *
  * Warum nicht als Leaflet-Ebene (maplibre-gl-leaflet): Die legt ihre Fläche in
  * die Kachelebene, und die dreht leaflet-rotate per CSS. Eine gedrehte
@@ -1810,12 +1811,18 @@ const glBreite = (fern, haupt, sonst) => ['interpolate', ['exponential', 1.5], [
   18, ['match', ['get', 'class'], ['motorway', 'trunk'], fern[1], ['primary', 'secondary'], haupt[1], sonst[1]]];
 const GL_UMRISS = glBreite([2.6, 14], [2.2, 11], [1.4, 7]);
 const GL_STRICH = glBreite([1.2, 10], [0.9, 7.5], [0.5, 4.5]);
-const GL_FARBE = ['match', ['get', 'class'], ['motorway', 'trunk'], '#ffd166',
-  ['primary', 'secondary'], '#fff1b8', 'rgba(255, 255, 255, 0.85)'];
+/* Kleine Straßen: auf dem Bild fast deckend weiß, damit sie gegen hellen Acker
+ * bestehen; auf der dunklen Karte gedämpft — dort war das volle Weiß ein
+ * grelles Netz über allem. */
+const glFarbe = dunkel => ['match', ['get', 'class'], ['motorway', 'trunk'], '#ffd166',
+  ['primary', 'secondary'], '#fff1b8', dunkel ? 'rgba(255, 255, 255, 0.42)' : 'rgba(255, 255, 255, 0.85)'];
 const GL_SCHRIFT_WEISS = { 'text-color': '#ffffff', 'text-halo-color': 'rgba(0, 0, 0, 0.8)', 'text-halo-width': 1.3 };
 
-function glStrassen() {
-  const quelle = { source: 'ofm', 'source-layer': 'transportation' };
+/* src: Name der OpenFreeMap-Quelle im Stil — im zusammengesetzten Bildstil
+ * „ofm", im dunklen Stil von OpenFreeMap selbst „openmaptiles". */
+function glStrassen(src = 'ofm') {
+  const quelle = { source: src, 'source-layer': 'transportation' };
+  const farbe = glFarbe(src === 'openmaptiles');
   const rund = { 'line-cap': 'round', 'line-join': 'round' };
   return [
     { id: 'str-umriss-klein', type: 'line', ...quelle, minzoom: 13, filter: glLinie(GL_KLEIN), layout: rund,
@@ -1823,10 +1830,10 @@ function glStrassen() {
     { id: 'str-umriss-gross', type: 'line', ...quelle, minzoom: 8, filter: glLinie(GL_GROSS), layout: rund,
       paint: { 'line-color': 'rgba(0, 0, 0, 0.45)', 'line-width': GL_UMRISS } },
     { id: 'str-klein', type: 'line', ...quelle, minzoom: 13, filter: glLinie(GL_KLEIN), layout: rund,
-      paint: { 'line-color': GL_FARBE, 'line-width': GL_STRICH } },
+      paint: { 'line-color': farbe, 'line-width': GL_STRICH } },
     { id: 'str-gross', type: 'line', ...quelle, minzoom: 8, filter: glLinie(GL_GROSS), layout: rund,
-      paint: { 'line-color': GL_FARBE, 'line-width': GL_STRICH } },
-    { id: 'str-namen', type: 'symbol', source: 'ofm', 'source-layer': 'transportation_name', minzoom: 13,
+      paint: { 'line-color': farbe, 'line-width': GL_STRICH } },
+    { id: 'str-namen', type: 'symbol', source: src, 'source-layer': 'transportation_name', minzoom: 13,
       filter: ['match', ['get', 'class'], [...GL_GROSS, ...GL_KLEIN], true, false],
       layout: { 'symbol-placement': 'line', 'text-field': GL_NAME, 'text-font': ['Noto Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 13, 10, 18, 13], 'text-max-angle': 30 },
@@ -1836,10 +1843,10 @@ function glStrassen() {
 
 /* Ortsnamen: Städte groß und fett, Dörfer kleiner, Weiler und Ortsteile erst
  * aus der Nähe. Welche bei Platzmangel zuerst stehen, entscheidet der Rang. */
-function glOrte() {
+function glOrte(src = 'ofm') {
   const groesse = f => ['match', ['get', 'class'], 'city', 16 * f, 'town', 14 * f, 'village', 12.5 * f, 11 * f];
   const ebene = (id, minzoom, klassen) => ({
-    id, type: 'symbol', source: 'ofm', 'source-layer': 'place', minzoom,
+    id, type: 'symbol', source: src, 'source-layer': 'place', minzoom,
     filter: ['match', ['get', 'class'], klassen, true, false],
     layout: { 'text-field': GL_NAME, 'text-font': ['Noto Sans Bold'], 'text-max-width': 8,
       'text-size': ['interpolate', ['linear'], ['zoom'], 8, groesse(0.85), 14, groesse(1.15)],
@@ -1852,12 +1859,47 @@ function glOrte() {
   ];
 }
 
-/** Der Stil für die aktuelle Wahl: die dunkle Karte als fertiger Stil, sonst
- *  Bild + Straßen/Namen, zusammengesetzt. Die Deckkraft wirkt nur aufs Bild;
+/* Die dunkle Karte bringt eigene Straßen und Namen mit, sehr zurückhaltend.
+ * Sind unsere eingeschaltet, ersetzen sie diese — sonst stünden die Namen
+ * doppelt. Die Bahnlinien der dunklen Karte (railway…) bleiben stehen. Dafür
+ * braucht es den Stil als Daten und nicht nur seine Adresse; er wird einmal
+ * geholt (Service Worker: „erst Netz", siehe sw.js). */
+let glDunkelJson = null;
+let glDunkelLaden = null;
+
+function glDunkelHolen() {
+  if (glDunkelLaden) return;
+  glDunkelLaden = fetch(OFM_DUNKEL)
+    .then(r => { if (!r.ok) throw new Error('Stil nicht geladen: ' + r.status); return r.json(); })
+    .then(stil => { glDunkelJson = stil; glStilSetzen(); })
+    .catch(err => { console.warn(err); glDunkelLaden = null; });   // beim nächsten Anlass neu
+}
+
+function glDunkelErsetzt(ebene) {
+  const quelle = ebene['source-layer'];
+  if (prefs.str && quelle === 'transportation_name') return true;
+  if (prefs.str && quelle === 'transportation' && !ebene.id.startsWith('railway')) return true;
+  return !!prefs.ort && quelle === 'place';
+}
+
+/** Der Stil für die aktuelle Wahl: die dunkle Karte (fertiger Stil, bei
+ *  eingeschalteten Straßen/Namen mit unseren statt ihren), sonst Bild +
+ *  Straßen/Namen, zusammengesetzt. Beim Bild wirkt die Deckkraft nur aufs Bild;
  *  verblasst liegt Weiß darunter wie bei den übrigen Grundkarten. */
 function glStil() {
   const b = prefs.base || 'osm';
-  if (b === 'dark' || !GL_BILDER[b]) return OFM_DUNKEL;
+  if (b === 'dark' || !GL_BILDER[b]) {
+    if (!prefs.str && !prefs.ort) return OFM_DUNKEL;
+    if (!glDunkelJson) { glDunkelHolen(); return OFM_DUNKEL; }   // bis dahin ohne unsere
+    return {
+      ...glDunkelJson,
+      layers: [
+        ...glDunkelJson.layers.filter(l => !glDunkelErsetzt(l)),
+        ...(prefs.str ? glStrassen('openmaptiles') : []),
+        ...(prefs.ort ? glOrte('openmaptiles') : [])
+      ]
+    };
+  }
   const bild = GL_BILDER[b];
   const grund = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#06070b';
   return {
@@ -2312,9 +2354,9 @@ function applyBaseOpacity() {
   if (val) val.textContent = Math.round(o * 100) + ' %';
 }
 
-/* Straßen und Ortsnamen zeichnet MapLibre, und nur über einem Bild: In Karte
- * und Dunkel stecken sie schon drin. Dort bleiben sie eingeschaltet, werden
- * aber nicht gezeichnet; beim Wechsel auf ein Bild erscheinen sie. */
+/* Straßen und Ortsnamen zeichnet MapLibre, über Dunkel und den Bildern. In der
+ * OSM-Karte stecken sie schon drin: Dort bleiben sie eingeschaltet, werden aber
+ * nicht gezeichnet, und beim Wechsel erscheinen sie. */
 const NUR_UEBER_BILD = new Set(['str', 'ort']);
 const AUFLAGEN = ['orm', 'parz', 'str', 'ort'];
 
@@ -2342,8 +2384,8 @@ function toggleOverlay(kennung) {
     if (ausserhalbBayerns()) toast('Die Parzellarkarte deckt nur Bayern ab.');
     else if (map.getZoom() < 17) toast('Parzellen zeichnet der Dienst erst ab Zoomstufe 17 (1:5000).');
   }
-  if (an && NUR_UEBER_BILD.has(kennung) && !GL_BILDER[prefs.base || 'osm']) {
-    toast('In Karte und Dunkel schon enthalten — erscheint über Luftbild, DOP20 und Relief.');
+  if (an && NUR_UEBER_BILD.has(kennung) && (prefs.base || 'osm') === 'osm') {
+    toast('In der Karte schon enthalten — erscheint über Dunkel, Luftbild, DOP20 und Relief.');
   }
   if (NUR_UEBER_BILD.has(kennung)) grundAnwenden(); else auflageSetzen(kennung);
   ordneAuflagen();

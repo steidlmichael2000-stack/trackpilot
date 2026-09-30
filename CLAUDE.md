@@ -76,6 +76,9 @@ liegen die Straßen zwischen Bild und Bahn-Layer. Die Bilddienste stehen dafür 
 als Leaflet-Ebene in `initMap` und in `GL_BILDER`. Wer einen Dienst ändert, ändert beide.
 Straßen und Ortsnamen kamen bis 30.09.2026 als Rasterkacheln von Esri: auf dem Land ab
 Zoomstufe 16 leer und auf dem Handy unscharf. Nicht zurückbauen.
+Über der dunklen Karte ersetzen unsere Straßen und Namen deren eigene (`glDunkelErsetzt`,
+Bahnlinien `railway…` bleiben). Dafür wird der dunkle Stil einmal als JSON geholt; bis er da
+ist, steht die dunkle Karte unverändert.
 
 - Beide Karten liegen nachgemessen auf 0,000 px übereinander — verschoben, gezoomt, gedreht,
   mitten in der Zweifinger-Geste und nach animiertem Zoom. Wer an `glLage` oder den Ereignissen
