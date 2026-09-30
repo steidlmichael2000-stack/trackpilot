@@ -22,7 +22,7 @@
      die schwebende Bedienung abgrenzen, ohne zu leuchten. */
   --shadow: 0 0 0 1px rgba(0, 0, 0, .45), 0 2px 0 rgba(0, 0, 0, .35);
   --r: 2px;
-  --bh: 0px;              /* Höhe der unteren Leiste, von JS gesetzt */
+  --bh: 6px;              /* Grundlinie der Knöpfe rechts, von JS gesetzt (updateBH) */
   --gap: 10px;
 }
 
@@ -95,15 +95,92 @@ body {
 
 .leaflet-container { font: inherit; font-size: .8rem; background: var(--bg); }
 
-/* Zoom, Maßstab und Attribution über der unteren Leiste halten */
-.leaflet-bottom { bottom: calc(var(--bh) + env(safe-area-inset-bottom)); }
-.leaflet-control-attribution { font-size: .62rem; opacity: .85; }
+/* Dunkle Grundkarte: MapLibre zeichnet hinter Leaflet, Leaflet wird dafür
+   durchsichtig. !important schlägt den Inline-Wert, den applyBaseOpacity
+   beim Verblassen setzt — das Weiß gehört dann unter die GL-Karte. */
+/* Über die ID: maplibre-gl.css setzt auf .maplibregl-map position: relative,
+   und damit hatte die Fläche die Höhe 0 */
+#glKarte { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--bg); }
+#glKarte[hidden] { display: none; }
+#map.gl-grund { background: transparent !important; }
 
-/* Nordknopf — sitzt frei über der Karte, links über der unteren Leiste */
+/* Maßstab und Attribution stehen nicht mehr in der Karte, sondern in der
+   Quellenzeile ganz unten. In den Kartenecken bleibt nichts. */
+
+/* Maßstab — links im Kasten unten. Innen die Zahl über einem Winkel ⊔, dessen
+   Breite Leaflet als Inline-Wert setzt. Alles auf ganzen Pixeln (Kasten:
+   Rahmen 1 + Inhalt 20 + 1): Zahl 3–13, Winkel 13–18, Unterkante 17–18.
+   text-shadow: none, weil leaflet.css der Zahl „1px 1px #fff" mitgibt — auf
+   dunklem Grund franste sie davon aus. Eine Kontur braucht es nicht, die
+   Fläche des Kastens deckt. */
+.quellen .leaflet-control-scale {
+  float: none; margin: 0; height: 20px; box-sizing: border-box;
+  padding: 0 8px; background: none; border: 0;
+}
+.quellen .leaflet-control-scale-line {
+  position: relative; box-sizing: border-box; height: 20px;
+  border: 0; background: none; text-shadow: none;
+  padding: 3px 0 0; color: var(--muted);
+  font-size: 10px; font-weight: 600; line-height: 10px; text-align: center;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.quellen .leaflet-control-scale-line::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 5px;
+  box-sizing: border-box; border: 1px solid currentColor; border-top: 0;
+}
+
+/* ---------- Quellenzeile: ein Kasten links ----------
+   Ohne Ergebnisleiste ganz unten, mit ihr 8 px darüber — auf derselben
+   Grundlinie wie Standort- und Messknopf rechts (updateBH). Im Quelltext
+   steht die Zeile hinter #bottom, damit „#bottom[hidden] + .quellen" greift;
+   order zieht sie im Bild über die Leiste.
+   Die Zeile ist immer 22 px hoch. Sie selbst nimmt keine Tipps an, nur der
+   Kasten darin — sonst schluckte der leere Streifen daneben jeden Griff auf
+   die Karte. Der aufgeklappte Quellentext legt sich 4 px darüber und lässt
+   rechts 50 px frei: Dort stehen Standort- und Messknopf (42 px + 8 Luft). */
+.quellen {
+  position: relative; flex: none; order: 1;
+  width: min(640px, calc(100% - 2 * var(--gap)));
+  height: 22px;
+  margin: auto auto 8px;
+  display: flex;
+}
+.bar-bottom { order: 2; }
+#bottom[hidden] + .quellen { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+.ui > .quellen { pointer-events: none; }
+.quellen-kasten, .quellen-text { pointer-events: auto; }
+.quellen-kasten {
+  display: flex; height: 22px; box-sizing: border-box;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 2px;
+}
+.quellen-text { position: absolute; left: 0; right: 50px; bottom: calc(100% + 4px); display: flex; }
+.quellen.zu .quellen-text { display: none; }
+/* Aus der Karte herausgehängt greifen die .leaflet-container-Regeln nicht mehr;
+   was von .leaflet-control bleibt, wird hier festgelegt. */
+.quellen .leaflet-control-attribution {
+  float: none; margin: 0; padding: 3px 7px;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 2px;
+  color: var(--muted); font-size: .62rem; line-height: 1.45; text-align: left;
+}
+.quellen .leaflet-control-attribution a { color: var(--muted); text-decoration: none; }
+/* Links im Kasten, vom Maßstab durch einen 1-px-Strich getrennt */
+.quellen-knopf {
+  flex: none; width: 21px; height: 20px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-right: 1px solid var(--line);
+  background: none; color: var(--muted-2);
+  font: inherit; font-size: .74rem; line-height: 1; cursor: pointer;
+}
+.quellen-knopf[aria-expanded="true"] { color: var(--text); }
+
+/* Nordknopf — oben auf der Knopfsäule rechts: Standort 0–42, Messen 48–90,
+   Nord 96–138 über der Grundlinie. Er erscheint nur bei gedrehter Karte und
+   sitzt dann oben auf, ohne dass die beiden darunter rutschen. Links unten
+   bleibt allein der Kasten mit © und Maßstab. */
 .north {
   position: fixed;
-  left: calc(var(--gap) + 4px);
-  bottom: calc(var(--bh) + 54px + env(safe-area-inset-bottom));
+  right: var(--gap);
+  bottom: calc(var(--bh) + 96px + env(safe-area-inset-bottom));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center; gap: 0;
@@ -121,9 +198,10 @@ body {
 /* Standortknopf — rechts, über den Zoomknöpfen */
 .maploc {
   position: fixed;
-  /* Knopfsäule rechts beginnt auf derselben Höhe wie der Nordknopf links */
+  /* Unterkante auf der Grundlinie des Kastens unten links, bei offener Leiste
+     8 px darüber (--bh aus updateBH) */
   right: var(--gap);
-  bottom: calc(var(--bh) + 54px + env(safe-area-inset-bottom));
+  bottom: calc(var(--bh) + env(safe-area-inset-bottom));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -143,7 +221,7 @@ body {
 .mapmess {
   position: fixed;
   right: var(--gap);
-  bottom: calc(var(--bh) + 102px + env(safe-area-inset-bottom));
+  bottom: calc(var(--bh) + 48px + env(safe-area-inset-bottom));      /* 42 px Knopf + 6 Luft */
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -180,8 +258,8 @@ body {
 .bar-top { margin-top: calc(var(--gap) + env(safe-area-inset-top)); flex: none; }
 .bar-bottom {
   position: relative;
-  margin-top: auto;
-  margin-bottom: calc(var(--gap) + env(safe-area-inset-bottom));
+  margin-top: 0;             /* den Abstand nach oben trägt die Quellenzeile darüber */
+  margin-bottom: calc(6px + env(safe-area-inset-bottom));
   padding: 12px 14px 13px;
   flex: none;
 }

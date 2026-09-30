@@ -24,6 +24,10 @@
 </head>
 <body>
 
+<!-- Grund für die dunkle Karte: OpenFreeMap als Vektorkarte über MapLibre. Liegt
+     hinter der Leaflet-Karte, nimmt keine Eingaben an und folgt ihr nur (glNachziehen
+     in app.js). Leer, solange eine andere Grundkarte gewählt ist. -->
+<div id="glKarte" class="glkarte" aria-hidden="true" hidden></div>
 <div id="map" role="application" aria-label="Karte mit Kilometersteinen der Strecke"></div>
 
 <!-- Erscheint nur, wenn die Karte gedreht ist: zurück auf Nordausrichtung.
@@ -171,8 +175,9 @@
       Steinen, an dem gerechnet wurde. <strong>Steinlinie</strong> ist die dünne blaue Verbindung durch
       die Kilometersteine, die zeigt, welcher Strang gemeint ist. Beide belegen die Rechnung und lassen
       sich hier abschalten, wenn sie die Karte verdecken — die Steine selbst bleiben stehen.</p>
-      <p class="fine"><strong>Dunkel</strong> ist die dunkelgraue Karte von Esri. Sie hat bis
-      Zoomstufe 16 eigene Kacheln und wird darüber vergrößert, ganz nah also etwas unscharf.</p>
+      <p class="fine"><strong>Dunkel</strong> ist die dunkle Karte von OpenFreeMap. Sie wird
+      als Vektorkarte gezeichnet und bleibt deshalb auch ganz nah scharf. Beim ersten Wählen
+      lädt die App dafür einmal rund 1&nbsp;MB nach.</p>
       <p class="fine"><strong>Straßen</strong> und <strong>Ortsnamen</strong> sind durchsichtige
       Auflagen von Esri, gemacht für Luftbild, DOP20, Relief und die dunkle Karte. Über der
       normalen <em>Karte</em> sind beide schon enthalten. Ortsnamen erscheinen vor allem bei
@@ -282,8 +287,9 @@
       Vermessung, Disposition oder sicherheitsrelevante Entscheidungen. Zwischen zwei Steinen
       wird geradlinig interpoliert; im Bogen weicht das ab.</p>
       <p class="fine">Daten © OpenStreetMap-Mitwirkende · Abfrage über die OpenRailwayMap-API ·
-      Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild, dunkle Karte, Straßen und Ortsnamen
-      Esri, HERE, Garmin, © OpenStreetMap-Mitwirkende · DOP20, Geländerelief und
+      Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild, Straßen und Ortsnamen Esri, HERE,
+      Garmin, © OpenStreetMap-Mitwirkende · Dunkle Karte OpenFreeMap © OpenMapTiles, Daten ©
+      OpenStreetMap, gezeichnet mit MapLibre GL (BSD-3) · DOP20, Geländerelief und
       Parzellarkarte: Bayerische Vermessungsverwaltung (CC BY 4.0)</p>
       <p class="fine"><a href="https://github.com/steidlmichael2000-stack/trackpilot" target="_blank" rel="noopener">Quellcode auf GitHub</a></p>
     </details>
@@ -292,6 +298,24 @@
 
   <!-- ---------- untere Leiste ---------- -->
   <div id="bottom" class="bar bar-bottom" hidden></div>
+
+  <!-- Quellenangaben ganz unten, unter allen Leisten. Leaflet schreibt sie in seine
+       Attribution, die beim Start hierher umgehängt wird (quellenEinrichten). Nach
+       5 s oder beim ersten Griff auf die Karte klappt sie zum ©-Knopf zusammen — so
+       erlauben es die Attributionsrichtlinien der OSM Foundation; auffindbar bleibt
+       sie über den Knopf. Ganz weglassen darf man sie nicht. -->
+  <div id="quellen" class="quellen">
+    <!-- Ein Kasten links: der ©-Knopf und der Maßstab (aus der Karte hierher
+         umgehängt), durch einen Strich geteilt. Seine Unterkante ist die
+         Grundlinie, auf der rechts auch Standort- und Messknopf stehen — ganz
+         unten, oder bei offener Ergebnisleiste 8 px darüber. -->
+    <div class="quellen-kasten">
+      <button id="quellenBtn" class="quellen-knopf" type="button" aria-controls="quellenText"
+              aria-expanded="true" aria-label="Quellen und Lizenzen" title="Quellen und Lizenzen">©</button>
+      <div id="quellenMass" class="quellen-mass"></div>
+    </div>
+    <div id="quellenText" class="quellen-text"></div>
+  </div>
 
 </div>
 

@@ -35,7 +35,7 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   die Gerade zwischen ihnen nichts mehr taugt. Klafft zwischen zwei Steinen eine Lücke von 8 bis
   25 km, wird auch in der Richtung km → Position von selbst am Gleis entlang abgetragen, statt
   den nächsten Stein mit „x km daneben" zu zeigen.
-- **Grundkarte und Auflagen getrennt.** Als Grundkarte Karte, dunkle Karte, Luftbild, DOP20
+- **Grundkarte und Auflagen getrennt.** Als Grundkarte Karte, dunkle Karte (OpenFreeMap), Luftbild, DOP20
   oder Geländerelief; darüber beliebig kombinierbar Bahn-Layer, Flurstücksgrenzen, Straßennetz
   und Ortsnamen — die beiden letzten für die Bildgrundkarten, auf denen sie sonst fehlen. Dazu
   eigener Standort, Link zum Teilen, Betriebsstellensuche über Name, DS100 oder UIC.
@@ -47,10 +47,11 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   Punkt bleibt von allein aktuell. Die Karte fährt dabei nur beim ersten Fix hin und bewegt sich
   danach **nie von selbst**: Beim Zielen und Messen würde eine nachziehende Karte gegen die eigene
   Hand arbeiten. Ein Tipp auf den Knopf holt die Karte zum Standort zurück, der nächste beendet die
-  Verfolgung. Darüber erscheint eine Zeile mit der Ortungsgenauigkeit, dem **eigenen Kilometer**
-  (sobald man den Punkt angetippt hat), dem
-  Abstand zum letzten Messpunkt und **Entfernung samt Richtungspfeil zum nächsten Objekt der
-  geladenen KML-Dateien** — damit lassen sich Punkte im Gelände ablaufen.
+  Verfolgung. Die Ortungsgenauigkeit zeigt der Kreis um den Punkt. Darüber erscheint eine Zeile,
+  sobald es etwas zu zeigen gibt: der **eigene Kilometer** (nach einem Tipp auf den Punkt, mit
+  der Ortungsgenauigkeit als Zahl), der Abstand zum letzten Messpunkt und **Entfernung samt
+  Richtungspfeil zum nächsten Objekt der geladenen KML-Dateien** — damit lassen sich Punkte im
+  Gelände ablaufen. Nur zum Verfolgen bleibt die Zeile weg.
 - **Messen** — Punkte auf der Karte antippen, die Luftlinie steht als Maßzahl an jedem Abschnitt
   und als Summe in der Leiste. Liegen Anfang und Ende auf der geladenen Strecke, steht die
   Differenz **nach Kilometrierung** daneben; die Abweichung zwischen beiden Zahlen zeigt gleich,
@@ -59,7 +60,7 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   Bahn- bzw. WMS-Layer stehen; darunter liegt Weiß, damit schwarze Strichzeichnungen auch im
   Dunkelmodus lesbar bleiben.
 - **Karte drehen** mit zwei Fingern — erst ab 15° Verdrehung der Finger, vorher bleibt sie
-  genordet, damit ein Zweifinger-Zoom sie nicht nebenbei kippt; sobald sie verdreht ist, erscheint links unten ein Kompass,
+  genordet, damit ein Zweifinger-Zoom sie nicht nebenbei kippt; sobald sie verdreht ist, erscheint rechts oben auf der Knopfsäule ein Kompass,
   dessen Nadel samt N mitdreht und nach Norden zeigt — ein Tipp darauf stellt die Karte gerade.
 - **Das Gleisnetz liegt bei.** Welche Strecke an einer Stelle liegt und wie das Gleis dort
   verläuft, beantwortet die App aus mitgelieferten Kacheln statt über eine Fremdabfrage —
@@ -397,8 +398,8 @@ darüber unverändert. Hinzu kommt allein die Ortungsungenauigkeit des Geräts �
 Punkt auch **längs** der Strecke und wirkt damit unmittelbar auf den Kilometer. Festgehalten steht
 deshalb `±X m` in der Marke, mit X als Summe beider Anteile — auch bei der Rechnung am Gleis
 entlang: die obere Schranke, denn ohne die Richtung des Ortungsfehlers zu kennen geht es nicht
-enger. In der Zeile oben heißt die Ortungsgenauigkeit allein `GPS ±X m`, damit sie nicht wie die
-Genauigkeit des Kilometers daneben aussieht.
+enger. In der Zeile oben steht die Ortungsgenauigkeit allein als `GPS ±X m` unter dem Kilometer,
+damit sie nicht wie dessen Genauigkeit aussieht.
 
 **Ohne Netz, sonst wäre es nicht brauchbar.** Eine Abfrage im Sekundentakt kommt nicht in Frage,
 also kommen die Steine aus der geladenen Strecke oder aus den mitgelieferten Kacheln. Letzteres ist
@@ -952,7 +953,10 @@ Karten- und Bahndaten: © OpenStreetMap-Mitwirkende
 ([ODbL](https://www.openstreetmap.org/copyright)) — das schließt die mitgelieferten Netzkacheln
 unter `netz/` ein, die aus OSM abgeleitet sind und damit ebenfalls unter der ODbL stehen.
 Bahn-Layer von
-[OpenRailwayMap](https://www.openrailwaymap.org/) (CC-BY-SA 2.0), Luftbilder von Esri.
-Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause) und
-[leaflet-rotate](https://github.com/Raruto/leaflet-rotate) (GPL-3.0) bei, damit die App ohne CDN
-und offline läuft.
+[OpenRailwayMap](https://www.openrailwaymap.org/) (CC-BY-SA 2.0), Luftbilder von Esri,
+dunkle Karte von [OpenFreeMap](https://openfreemap.org/) (© OpenMapTiles, Daten © OpenStreetMap).
+Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause),
+[leaflet-rotate](https://github.com/Raruto/leaflet-rotate) (GPL-3.0) und
+[MapLibre GL JS](https://maplibre.org/) 6.10.0 (BSD-3-Clause, `vendor/maplibre/`) bei, damit die
+App ohne CDN und offline läuft. MapLibre zeichnet nur die dunkle Karte und wird erst geladen, wenn
+sie gewählt ist.

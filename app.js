@@ -1726,6 +1726,136 @@ function drehSchwelleEinbauen() {
   };
 }
 
+/* ---- Dunkle Grundkarte: OpenFreeMap über MapLibre ----
+ *
+ * OpenFreeMap gibt es nur als Vektorkarte, und die zeichnet Leaflet nicht.
+ * Deshalb läuft dafür eine zweite Karte (MapLibre GL, vendor/maplibre/, BSD-3)
+ * in #glKarte hinter der Leaflet-Karte. Sie nimmt keine Eingaben an; Leaflet
+ * bleibt die eine Karte, die bedient wird, und MapLibre zieht bei jeder
+ * Bewegung, jedem Zoom und jeder Drehung nach (glNachziehen).
+ *
+ * Warum nicht als Leaflet-Ebene (maplibre-gl-leaflet): Die legt ihre Fläche in
+ * die Kachelebene, und die dreht leaflet-rotate per CSS. Eine gedrehte
+ * bildschirmgroße Fläche lässt an den Ecken Lücken. Hinter der Karte dreht
+ * MapLibre selbst und füllt das Bild immer ganz.
+ *
+ * Geladen wird MapLibre erst, wenn jemand die dunkle Karte wählt: rund 1,2 MB,
+ * die sonst jeder Start mitschleppen müsste. Version 6.10.0, am 30.09.2026 aus
+ * der npm-Registry geholt und gegen deren SHA-512-Prüfsumme geprüft; bewusst
+ * nicht die damals sechs Tage alte 6.11.2. Der Worker startet als eigene Datei
+ * vom selben Ort, die CSP (script-src/worker-src 'self') bleibt dadurch streng.
+ *
+ * Zoom: Leaflet rechnet mit 256-px-Kacheln, MapLibre mit 512 px — dieselbe
+ * Ansicht ist in MapLibre eine Stufe kleiner. */
+const OFM_STIL = 'https://tiles.openfreemap.org/styles/dark';
+const OFM_QUELLE = '<a href="https://openfreemap.org/">OpenFreeMap</a> &copy; OpenMapTiles, Daten &copy; OpenStreetMap';
+
+let gl = null;            // die MapLibre-Karte, sobald geladen
+let glVersprechen = null; // läuft das Laden schon?
+let glAn = false;         // ist die dunkle Karte gerade die Grundkarte?
+let glDeckung = 1;
+
+function glLage() {
+  /* Die Mitte, wie sie gezeichnet ist, nicht getCenter(): Nach setView meldet
+   * Leaflet die gewünschte Mitte, legt das Pixelraster aber auf ganze Pixel —
+   * gemessen 0,47 px Versatz zwischen beiden Karten, nach dem ersten
+   * Verschieben 0. Über die Bildmitte sind es in jeder Lage 0. */
+  const c = map.containerPointToLatLng(map.getSize().divideBy(2));
+  // leaflet-rotate dreht im Uhrzeigersinn, MapLibre gegen ihn
+  return { center: [c.lng, c.lat], zoom: map.getZoom() - 1, bearing: -(map.getBearing ? map.getBearing() : 0) };
+}
+
+function glNachziehen() {
+  if (gl && glAn) gl.jumpTo(glLage());
+}
+
+/* Beim animierten Zoom (Doppeltipp, Mausrad, Ende einer Zweifingergeste) gleitet
+ * Leaflet 0,25 s per CSS zum Ziel und meldet sich erst am Ende. MapLibre gleitet
+ * mit, in Leaflets Kurve cubic-bezier(0, 0, .25, 1) — sonst stünde der Grund
+ * eine Viertelsekunde still und spränge dann. */
+function glZoomGleiten(ev) {
+  if (!gl || !glAn) return;
+  gl.easeTo({
+    center: [ev.center.lng, ev.center.lat], zoom: ev.zoom - 1,
+    bearing: -(map.getBearing ? map.getBearing() : 0),
+    duration: 250, easing: t => 1 - Math.pow(1 - t, 3)
+  });
+}
+
+function glDeckungSetzen() {
+  const flaeche = $('#glKarte');
+  // Verblasst liegt Weiß darunter, wie bei den übrigen Grundkarten
+  if (flaeche) flaeche.style.background = glDeckung < 1 ? '#ffffff' : '';
+  if (gl) gl.getCanvas().style.opacity = String(glDeckung);
+}
+
+async function glLaden() {
+  if (!glVersprechen) {
+    glVersprechen = (async () => {
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = 'vendor/maplibre/maplibre-gl.css';
+      document.head.appendChild(css);
+      const maplibregl = await import('./vendor/maplibre/maplibre-gl.mjs');
+      gl = new maplibregl.Map({
+        container: 'glKarte', style: OFM_STIL,
+        interactive: false, attributionControl: false,
+        fadeDuration: 0, maxZoom: 21,
+        ...glLage()
+      });
+      glDeckungSetzen();
+      return gl;
+    })();
+    // Scheitert es, beim nächsten Versuch neu laden statt am alten Fehler hängen
+    glVersprechen.catch(() => { glVersprechen = null; gl = null; });
+  }
+  return glVersprechen;
+}
+
+/* moveend und zoomend zusätzlich: Am Ende eines animierten Zooms meldet
+ * Leaflet kein move, nur die beiden. Ohne sie bliebe es beim Gleiten aus
+ * glZoomGleiten — und wird das unterbrochen (Fenster kurz verdeckt, dann
+ * läuft keine Animation), stünden die Karten versetzt. */
+const GL_EREIGNISSE = 'move zoom rotate viewreset resize moveend zoomend';
+
+/** Die dunkle Karte als Leaflet-Ebene — nur ein Schalter für #glKarte, damit
+ *  setBase, Deckkraft und Quellenangabe sie wie jede andere Grundkarte führen. */
+const GlGrund = L.Layer.extend({
+  getAttribution() { return OFM_QUELLE; },
+
+  onAdd(m) {
+    glAn = true;
+    $('#glKarte').hidden = false;
+    $('#map').classList.add('gl-grund');
+    m.on(GL_EREIGNISSE, glNachziehen);
+    m.on('zoomanim', glZoomGleiten);
+    glLaden().then(() => {
+      glNachziehen();
+      gl.resize();     // war das Feld beim Anlegen noch verborgen, stimmt die Größe sonst nicht
+    }).catch(err => {
+      console.warn('Dunkle Karte nicht verfügbar:', err);
+      toast('Dunkle Karte nicht verfügbar — zurück auf die normale Karte.');
+      if (glAn) setBase('osm');
+    });
+    return this;
+  },
+
+  onRemove(m) {
+    glAn = false;
+    $('#glKarte').hidden = true;
+    $('#map').classList.remove('gl-grund');
+    m.off(GL_EREIGNISSE, glNachziehen);
+    m.off('zoomanim', glZoomGleiten);
+    return this;
+  },
+
+  setOpacity(o) {
+    glDeckung = o;
+    glDeckungSetzen();
+    return this;
+  }
+});
+
 function initMap() {
   drehSchwelleEinbauen();
   map = L.map('map', {
@@ -1768,23 +1898,19 @@ function initMap() {
     maxZoom: 22, maxNativeZoom: 18, crossOrigin: 'anonymous', attribution: 'Luftbild: Esri, Maxar'
   });
 
-  /* Dunkle Karte und die beiden Esri-Auflagen. Nachgemessen am 29.09.2026 über
-   * Nürnberg: Dark Gray liefert bis Zoomstufe 16 echte Kacheln, darüber nur einen
-   * immer gleichen Platzhalter von 2521 Byte — daher maxNativeZoom 16, sonst
-   * stünde ab 17 die Meldung „Map data not yet available" auf der Karte. Das
+  /* Die beiden Esri-Auflagen. Nachgemessen am 29.09.2026 über Nürnberg: Das
    * Straßennetz zeichnet bis 19. Die Ortsnamen liefern auch darüber Kacheln, nur
    * leere (872 Byte, durchsichtig): Ganz nah gibt es keine Ortsnamen mehr, und
-   * vergrößerte Schrift aus Stufe 16 wäre unscharf und riesig. Alle drei senden
+   * vergrößerte Schrift aus Stufe 16 wäre unscharf und riesig. Beide senden
    * CORS, und der Dienst steht bei Esri auf „mature support": Er läuft weiter,
-   * wird aber nicht mehr aktualisiert. */
-  /* Ein Wortlaut für alle drei: Leaflet führt gleiche Quellenangaben nur einmal,
-   * sonst stünde die Zeile bei Dunkel mit Straßen und Namen dreifach da und
-   * läge auf dem Handy über drei Zeilen. */
+   * wird aber nicht mehr aktualisiert.
+   *
+   * Ein Wortlaut für beide: Leaflet führt gleiche Quellenangaben nur einmal.
+   * Die dunkle Karte kam bis 30.09.2026 ebenfalls von Esri (Dark Gray) — zu
+   * grau und flau; sie ist jetzt OpenFreeMap, siehe GlGrund. */
   const ESRI = 'Esri, HERE, Garmin, &copy; OpenStreetMap';
   const ESRI_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
-  baseDark = L.tileLayer(ESRI_URL + 'Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 22, maxNativeZoom: 16, crossOrigin: 'anonymous', attribution: ESRI
-  });
+  baseDark = new GlGrund();
   strLayer = L.tileLayer(ESRI_URL + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 22, maxNativeZoom: 19, crossOrigin: 'anonymous', attribution: ESRI
   });
@@ -1837,7 +1963,10 @@ function initMap() {
 
   /* Keine Zoomknöpfe: Am Rechner zoomt das Mausrad, am Gerät zwei Finger oder
    * ein Doppeltipp. Der Platz rechts unten gehört damit den eigenen Knöpfen. */
-  L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
+  // Leaflet rechnet ihn weiter selbst nach; gezeigt wird er in der Quellenzeile
+  const massstab = L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
+  $('#quellenMass').appendChild(massstab.getContainer());
+  quellenEinrichten();
 
   overlayLayers = { orm: ormLayer, parz: parzLayer, str: strLayer, ort: ortLayer };
   if (prefs.base && prefs.base !== 'osm') setBase(prefs.base, true);
@@ -1854,6 +1983,20 @@ function initMap() {
   map.on('moveend rotateend', liveLeiste);
   map.on('zoomend', drawMilestones);
   map.on('rotate rotateend', syncNorth);
+
+  /* leaflet-rotate lädt die Kacheln für die gedrehten Ecken erst am Ende einer
+   * Bewegung (moveend). Am PC dreht Umschalt + Mausrad aber nur, ohne jede
+   * Bewegung — nachgestellt am 30.09.2026: bei 30° blieben die Ecken schwarz,
+   * bis man die Karte verschob. Deshalb die Kachelebenen nachladen, sobald eine
+   * Drehung 120 ms ruht. Mit zwei Fingern kam das nicht vor, weil die Geste
+   * dort immer mit einem Zoom-Ende schließt. */
+  let drehRuhe = null;
+  map.on('rotate', () => {
+    clearTimeout(drehRuhe);
+    drehRuhe = setTimeout(() => map.eachLayer(l => {
+      if (l instanceof L.GridLayer && l._map) l._update();
+    }), 120);
+  });
   syncNorth();
   syncButtons();
 }
@@ -4544,10 +4687,51 @@ function closeBottom() {
 }
 
 /** Leaflet-Bedienelemente über der unteren Leiste halten */
+/* Wo die Kartenknöpfe über dem unteren Rand stehen.
+ *
+ * Die Grundlinie ist die Unterkante des Kastens mit © und Maßstab: ohne
+ * Leiste 6 px über dem Rand, mit Leiste 8 px über ihr (die Leiste selbst
+ * 6 px über dem Rand). Die Knopfsäule rechts — Standort, Messen, Nord —
+ * steht auf dieser Grundlinie (--bh). Die Zeile wächst beim Aufklappen der
+ * Quellen nicht, die Zahl bleibt dabei stehen. */
+const UNTEN_RAND = 6;
 function updateBH() {
   const b = $('#bottom');
-  const h = b.hidden ? 0 : Math.round(b.getBoundingClientRect().height) + 18;
-  document.documentElement.style.setProperty('--bh', h + 'px');
+  const grundlinie = b.hidden
+    ? UNTEN_RAND
+    : UNTEN_RAND + Math.round(b.getBoundingClientRect().height) + 8;
+  document.documentElement.style.setProperty('--bh', grundlinie + 'px');
+}
+
+/* ---- Quellenangaben ----
+ * Leaflet pflegt die Attribution weiter selbst (sie wechselt mit Grundkarte und
+ * Auflagen); hier wird nur ihr Kasten aus der Kartenecke nach ganz unten
+ * umgehängt. Ohne das „Leaflet"-Präfix samt Fahne: Das ist keine Lizenzpflicht,
+ * nur eine Voreinstellung der Bibliothek (BSD-2 verlangt es nicht im Bild).
+ *
+ * Zuklappen nach 5 s oder beim ersten Griff auf die Karte — genau die beiden
+ * Fälle, die die Attributionsrichtlinie der OSM Foundation nennt. Ein
+ * programmgesteuertes Verschieben (Link, Suche) zählt nicht als Griff, deshalb
+ * die Zeiger- und Radereignisse statt movestart. */
+const QUELLEN_OFFEN_MS = 5000;
+let quellenTimer = null;
+
+function quellenSetzen(offen) {
+  $('#quellen').classList.toggle('zu', !offen);
+  $('#quellenBtn').setAttribute('aria-expanded', String(offen));
+  clearTimeout(quellenTimer);
+  if (offen) quellenTimer = setTimeout(() => quellenSetzen(false), QUELLEN_OFFEN_MS);
+}
+
+function quellenEinrichten() {
+  map.attributionControl.setPrefix(false);
+  $('#quellenText').appendChild(map.attributionControl.getContainer());
+  $('#quellenBtn').addEventListener('click', () => quellenSetzen($('#quellen').classList.contains('zu')));
+  const zuBeimGriff = () => { if (!$('#quellen').classList.contains('zu')) quellenSetzen(false); };
+  map.getContainer().addEventListener('pointerdown', zuBeimGriff, { passive: true });
+  map.getContainer().addEventListener('wheel', zuBeimGriff, { passive: true });
+  quellenSetzen(true);
+  updateBH();
 }
 
 function setBusy(on) {
@@ -5158,33 +5342,38 @@ function liveKmFest() {
   toast(`km ${fmtKm(liveKm.km)} festgehalten — die Anzeige unten bleibt stehen.`);
 }
 
-/* Schmale Zeile unter der Suchleiste, nur solange verfolgt wird: der Kilometer
- * an der eigenen Stelle, die Ortungsgenauigkeit, der Abstand zum letzten
- * Messpunkt und das nächste KML-Objekt mit Richtungspfeil. Der Pfeil rechnet
- * die Kartendrehung heraus, zeigt also auf dem Schirm dorthin, wo das Ziel
- * wirklich liegt. */
+/* Schmale Zeile unter der Suchleiste, solange verfolgt wird — aber nur, wenn
+ * sie etwas zu sagen hat: den Kilometer an der eigenen Stelle, den Abstand zum
+ * letzten Messpunkt oder das nächste KML-Objekt mit Richtungspfeil. Der Pfeil
+ * rechnet die Kartendrehung heraus, zeigt also auf dem Schirm dorthin, wo das
+ * Ziel wirklich liegt.
+ *
+ * Die Ortungsgenauigkeit allein ist kein Grund für die Zeile: Die Karte zeigt
+ * sie schon als Kreis um den blauen Punkt, und beim ersten Fix steht sie im
+ * Hinweis. Als Zahl erscheint sie nur beim Kilometer, der von ihr abhängt.
+ * Vorher stand beim bloßen Verfolgen eine volle Zeile mit nichts als „±8 m". */
 function liveLeiste() {
   const el = $('#live');
   if (!el) return;
-  if (!ortLetzt) { el.hidden = true; el.innerHTML = ''; updateBH(); return; }
+  const leer = () => { el.hidden = true; el.innerHTML = ''; updateBH(); };
+  if (!ortLetzt) { leer(); return; }
 
   /* Der Kilometer steht vorn: Er ist der Grund, warum die Zeile da ist. Ein
    * Tipp darauf hält ihn fest, damit Koordinate, Herkunft, Google Maps und
    * Teilen zur Verfügung stehen wie bei jedem anderen Punkt. */
+  const gps = `GPS ±${nfM.format(ortLetzt.genau)} m`;
   const stuecke = [];
   if (liveKm) {
     const quer = liveKm.punkt.offset > 20 ? ` · ${nfM.format(liveKm.punkt.offset)} m querab` : '';
     stuecke.push(`<button type="button" class="live-teil live-km" data-livekm ` +
       `title="Kilometer festhalten"><b>km ${esc(fmtKm(liveKm.km))}</b>` +
-      `<small>Strecke ${esc(liveKm.ref)}${esc(quer)}</small></button>`);
+      `<small>Strecke ${esc(liveKm.ref)}${esc(quer)} · ${esc(gps)}</small></button>`);
   } else if (liveKmAn) {
     stuecke.push(`<button type="button" class="live-teil live-km live-km-aus" data-livekm ` +
       `title="Kilometer hier bestimmen"><b>km —</b>` +
       `<small>${esc(liveGrund || 'wird gerechnet …')}</small></button>`);
   }
   // Ohne Rechnung steht kein Kilometer da: Den wirft der Tipp auf den Punkt an.
-  // „GPS" davor: Sonst las sich die Zahl neben dem Kilometer wie dessen Genauigkeit
-  stuecke.push(`<span class="tag" title="Ortungsgenauigkeit des Geräts">GPS ±${nfM.format(ortLetzt.genau)} m</span>`);
 
   if (messModus && messPunkte.length) {
     const p = messPunkte[messPunkte.length - 1];
@@ -5201,6 +5390,7 @@ function liveLeiste() {
       `<b>${esc(messText(nah.d))}</b><small>${esc(nah.name)}</small></span>`);
   }
 
+  if (!stuecke.length) { leer(); return; }
   el.innerHTML = stuecke.join('');
   el.hidden = false;
   const knopf = el.querySelector('[data-livekm]');

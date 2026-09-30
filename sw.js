@@ -5,7 +5,7 @@
  * neue Version sofort ankommt statt hinter einem alten Cache zu hängen.
  */
 
-const VERSION = 'v31';
+const VERSION = 'v32';
 const SHELL = `trackpilot-shell-${VERSION}`;
 const TILES = `trackpilot-tiles-${VERSION}`;
 const DATA = `trackpilot-data-${VERSION}`;
@@ -125,6 +125,17 @@ self.addEventListener('fetch', event => {
     event.respondWith(url.pathname.includes('/netz/')
       ? cacheFirst(request, NETZ, MAX_NETZ)
       : networkFirst(request, SHELL, true));
+  } else if (url.hostname === 'tiles.openfreemap.org') {
+    /* Die dunkle Karte. Stil (/styles/dark) und Kachelbeschreibung (/planet)
+     * haben feste Adressen, zeigen aber jede Woche auf einen neuen Datenstand
+     * (/planet/20260927_080001_pt/…). Aus dem Cache zuerst hielte ein Gerät den
+     * alten Verweis fest, bis die Kacheln dahinter gelöscht sind — deshalb diese
+     * beiden "erst Netz". Kacheln, Schriften und Symbole liegen unter
+     * versionierten Pfaden und ändern sich nie: "erst Cache". */
+    const beschreibung = url.pathname.startsWith('/styles/') || url.pathname === '/planet';
+    event.respondWith(beschreibung
+      ? networkFirst(request, DATA, false, MAX_DATA)
+      : cacheFirst(request, TILES, MAX_TILES));
   } else if (TILE_HOSTS.some(h => url.hostname === h || url.hostname.endsWith('.' + h))) {
     event.respondWith(cacheFirst(request, TILES, MAX_TILES));
   } else if (url.hostname === 'api.openrailwaymap.org') {

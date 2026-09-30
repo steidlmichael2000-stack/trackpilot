@@ -62,6 +62,29 @@ zeigen — bei einem neuen Motiv den Wert ändern.
 `.card-rail`) — wer das eine ändert, ändert auch das andere, sonst fällt die
 Icon-Familie wieder auseinander.
 
+## Dunkle Karte: OpenFreeMap über MapLibre
+
+OpenFreeMap gibt es nur als Vektorkarte. MapLibre GL (`vendor/maplibre/`) zeichnet sie in
+`#glKarte` **hinter** der Leaflet-Karte und folgt ihr nur (`glNachziehen` in `app.js`). Nicht
+als Leaflet-Ebene einbauen: leaflet-rotate dreht die Kachelebene per CSS, eine gedrehte
+bildschirmgroße Fläche hätte leere Ecken.
+
+- Beide Karten liegen nachgemessen auf 0,000 px übereinander — verschoben, gezoomt, gedreht,
+  mitten in der Zweifinger-Geste und nach animiertem Zoom. Wer an `glLage` oder den Ereignissen
+  dreht, misst das nach (Punkte mit `map.project` ungerundet gegen `gl.project`).
+  `map.getCenter()` taugt dafür nicht: Nach `setView` meldet es die gewünschte Mitte, gezeichnet
+  ist die auf ganze Pixel gerundete (0,47 px daneben).
+- MapLibre wird erst beim Wählen der dunklen Karte geladen (rund 1,2 MB).
+- **Update nur bewusst:** Version aus der npm-Registry holen, gegen `dist.integrity` (SHA-512)
+  prüfen, keine Version nehmen, die erst ein paar Tage alt ist. Am 30.09.2026 so mit 6.10.0
+  gemacht. Kopiert werden `maplibre-gl.mjs`, `maplibre-gl-shared.mjs`, `maplibre-gl-worker.mjs`,
+  `maplibre-gl.css` und `LICENSE.txt`.
+- Der Worker startet als eigene Datei vom selben Ort. Die CSP bleibt dadurch bei
+  `script-src 'self'` und `worker-src 'self'` — nicht auf `blob:` oder `unsafe-eval` lockern.
+- Im Service Worker: Stil (`/styles/…`) und Kachelbeschreibung (`/planet`) von OpenFreeMap
+  „erst Netz", weil sie auf den wöchentlich neuen Datenstand zeigen; Kacheln, Schriften und
+  Symbole „erst Cache".
+
 ## Beim Deployen
 
 `VERSION` in `sw.js` hochzählen. Der Worker arbeitet zwar „erst Netz, dann
