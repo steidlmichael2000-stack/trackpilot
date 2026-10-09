@@ -96,6 +96,23 @@ ist, steht die dunkle Karte unverändert.
   „erst Netz", weil sie auf den wöchentlich neuen Datenstand zeigen; Kacheln, Schriften und
   Symbole „erst Cache".
 
+## Abstecken, Parzellenfarbe, Regenradar (Oktober 2026)
+
+- **Abstecken** (`ab…` in `app.js`): Die Zeile oben zeigt beim Standort **kein** KML-Objekt
+  mehr von selbst — das war ausdrücklich nicht gewünscht. Ansteuern nur über das Fähnchen bzw. die
+  Sprechblase. Eigene Leiste `#ziel` über `#bottom`; `updateBH` zählt beide, gerundet wird erst die
+  Summe (einzeln gerundet lag der Standortknopf 1 px unter dem ©-Kasten). Pfeil nach Karte über
+  `map.project` (ungerundet) plus Kartendrehung, nach Kompass über `peilung` minus Gerätekurs.
+  Antippen des Pfeils schaltet um.
+- **Parzellen** (`ParzWms`): immer `…_umr_schwarz` holen und auf Canvas umfärben, Gelb ist
+  bitgleich zum Dienst. `farbe` muss in `options` deklariert bleiben, sonst hängt Leaflet es als
+  WMS-Parameter an. `tile.complete` wird von Hand gesetzt, sonst räumt `_abortLoading` beim Zoomen
+  auch fertige Canvas-Kacheln weg. Farbwahl: lange drücken oder Rechtsklick auf *Parzellen*.
+- **Regenradar** (`radar…`): Ebene erst anlegen, wenn die Zeitachse da ist, und **nie ohne
+  `TIME`** — die Vorgabe „current" des DWD ist der Uhr am nächsten, meist schon Vorhersage; das gab
+  eine Naht an der Kachelkante. Bildwechsel über eine zweite, unsichtbar ladende Ebene.
+  `maps.dwd.de` bleibt aus dem Service Worker draußen.
+
 ## Beim Deployen
 
 `VERSION` in `sw.js` hochzählen. Der Worker arbeitet zwar „erst Netz, dann

@@ -132,8 +132,8 @@ body {
 /* ---------- Quellenzeile: ein Kasten links ----------
    Ohne Ergebnisleiste ganz unten, mit ihr 8 px darüber — auf derselben
    Grundlinie wie Standort- und Messknopf rechts (updateBH). Im Quelltext
-   steht die Zeile hinter #bottom, damit „#bottom[hidden] + .quellen" greift;
-   order zieht sie im Bild über die Leiste.
+   steht die Zeile hinter #ziel und #bottom, damit „#ziel[hidden] +
+   #bottom[hidden] + .quellen" greift; order zieht sie im Bild über beide.
    Die Zeile ist immer 22 px hoch. Sie selbst nimmt keine Tipps an, nur der
    Kasten darin — sonst schluckte der leere Streifen daneben jeden Griff auf
    die Karte. Der aufgeklappte Quellentext legt sich 4 px darüber und lässt
@@ -145,8 +145,8 @@ body {
   margin: auto auto 8px;
   display: flex;
 }
-.bar-bottom { order: 2; }
-#bottom[hidden] + .quellen { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+.bar-bottom, .bar-ziel { order: 2; }
+#ziel[hidden] + #bottom[hidden] + .quellen { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
 .ui > .quellen { pointer-events: none; }
 .quellen-kasten, .quellen-text { pointer-events: auto; }
 .quellen-kasten {
@@ -179,9 +179,10 @@ body {
 }
 
 /* Nordknopf — oben auf der Knopfsäule rechts: Standort 0–42, Messen 48–90,
-   Nord 96–138 über der Grundlinie. Er erscheint nur bei gedrehter Karte und
-   sitzt dann oben auf, ohne dass die beiden darunter rutschen. Links unten
-   bleibt allein der Kasten mit © und Maßstab. */
+   Abstecken 96–138, Nord darüber über der Grundlinie. Er erscheint nur bei
+   gedrehter Karte und sitzt dann oben auf, ohne dass die darunter rutschen.
+   Fehlt der Absteckknopf (keine Punkte geladen), rückt Nord auf 96 herunter.
+   Links unten bleibt allein der Kasten mit © und Maßstab. */
 .north {
   position: fixed;
   right: var(--gap);
@@ -239,6 +240,26 @@ body {
 .mapmess svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
 .mapmess.is-on { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 
+/* Abstecken — über dem Messen. Nur da, wenn eine sichtbare KML-Datei Punkte
+   hat; dann rückt der Nordknopf eine Stufe höher. Der Knopf steht im Quelltext
+   vor dem Nordknopf, sonst griffe der Geschwisterwähler nicht. */
+.mapziel {
+  position: fixed;
+  right: var(--gap);
+  bottom: calc(var(--bh) + 96px + env(safe-area-inset-bottom));
+  z-index: 450;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border-radius: 50%; border: 1px solid var(--line);
+  background: var(--glass); color: var(--muted-2);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  cursor: pointer;
+}
+.mapziel svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.mapziel.is-on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.mapziel:not([hidden]) ~ .north { bottom: calc(var(--bh) + 144px + env(safe-area-inset-bottom)); }
+
 /* ---------- schwebende Bedienung ---------- */
 
 .ui {
@@ -268,6 +289,15 @@ body {
   padding: 12px 14px 13px;
   flex: none;
 }
+/* Abstecken: über der unteren Leiste, 8 px Luft dazwischen. Ist die untere zu,
+   steht sie selbst ganz unten. */
+.bar-ziel {
+  position: relative;
+  margin-top: 0; margin-bottom: 8px;
+  padding: 12px 14px 13px;
+  flex: none;
+}
+.bar-ziel:has(+ #bottom[hidden]) { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
 
 /* ---------- Suchzeile ---------- */
 
@@ -402,8 +432,6 @@ body {
 .live-teil { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
 .live-teil b { font-weight: 650; font-variant-numeric: tabular-nums; }
 .live-teil small { color: var(--muted); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-ziel { margin-left: auto; }
-.live-ziel svg { width: 17px; height: 17px; flex: none; fill: var(--accent); align-self: center; }
 
 /* Der Kilometer an der eigenen Stelle ist ein Knopf -- ein Tipp haelt ihn fest.
    Er soll aber wie die uebrigen Stuecke der Zeile aussehen und nicht wie eine
@@ -416,6 +444,98 @@ body {
 }
 .live-km b { font-size: 1.02rem; letter-spacing: -.01em; }
 .live-km-aus b { color: var(--muted-2); font-weight: 600; }
+
+/* ---------- Regenradar ---------- */
+
+.radar {
+  flex: none;
+  width: min(640px, calc(100% - 2 * var(--gap)));
+  margin: 8px auto 0;
+  padding: 6px 8px 7px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+/* Bei offenem Menü steht sie nicht zwischen Suchzeile und Menü */
+.ui:has(> .sheet:not([hidden])) > .radar { display: none; }
+
+.radar-zeile { display: flex; align-items: center; gap: 8px; }
+.radar-knopf {
+  flex: none; width: 30px; height: 30px; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 2px;
+  background: var(--panel-2); color: var(--muted); cursor: pointer;
+}
+.radar-knopf svg { width: 14px; height: 14px; fill: currentColor; }
+.radar-knopf .strich { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.radar-knopf .pause { display: none; }
+.radar-knopf.is-on {
+  border-color: var(--accent); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  background-clip: padding-box;
+}
+.radar-knopf.is-on .spiel { display: none; }
+.radar-knopf.is-on .pause { display: inline; }
+#radarZu { border-color: transparent; background: none; color: var(--muted-2); }
+#radarZu svg { width: 15px; height: 15px; }
+
+.radar-text { flex: none; width: 6.6em; margin: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.radar-text b { font-size: .92rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.radar-text small { font-size: .66rem; color: var(--muted); white-space: nowrap; }
+.radar-text.vorhersage small { color: var(--warn); }
+.radar-text.laedt b { color: var(--muted); }
+
+/* Zeitleiste. Links eine Stunde Messung (durchgezogen), rechts zwei Stunden
+   Vorhersage (gestrichelt), dazwischen die Marke der letzten Messung. Die Marke
+   steht dort, wo die Mitte des Läufers bei 0 steht: Der Läufer (10 px) läuft
+   von 5 px bis Breite − 5 px, nicht über die ganze Breite. */
+.radar-zeit {
+  --jetzt: calc(5px + (100% - 10px) / 3);
+  flex: 1; min-width: 0; height: 26px; margin: 0;
+  -webkit-appearance: none; appearance: none; cursor: pointer;
+  background: linear-gradient(90deg, transparent calc(var(--jetzt) - 1px), var(--muted) calc(var(--jetzt) - 1px)
+    calc(var(--jetzt) + 1px), transparent calc(var(--jetzt) + 1px)) center / 100% 14px no-repeat;
+}
+/* Die beiden Teile liegen nebeneinander, nicht übereinander: --muted-2 ist
+   halb durchsichtig, und über der Strichelung deckte die Fläche doppelt — die
+   Striche schienen links durch. */
+.radar-zeit::-webkit-slider-runnable-track {
+  height: 4px;
+  background:
+    linear-gradient(var(--muted-2), var(--muted-2)) left / var(--jetzt) 100% no-repeat,
+    repeating-linear-gradient(90deg, var(--muted-2) 0 5px, transparent 5px 8px) right / calc(100% - var(--jetzt)) 100% no-repeat;
+}
+.radar-zeit::-moz-range-track {
+  height: 4px;
+  background:
+    linear-gradient(var(--muted-2), var(--muted-2)) left / var(--jetzt) 100% no-repeat,
+    repeating-linear-gradient(90deg, var(--muted-2) 0 5px, transparent 5px 8px) right / calc(100% - var(--jetzt)) 100% no-repeat;
+}
+.radar-zeit::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 10px; height: 20px; margin-top: -8px;
+  border: 0; border-radius: 0; background: var(--accent);
+  box-shadow: 0 0 0 1px var(--bg);
+}
+.radar-zeit::-moz-range-thumb {
+  width: 10px; height: 20px; border: 0; border-radius: 0;
+  background: var(--accent); box-shadow: 0 0 0 1px var(--bg);
+}
+.radar-zeit:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* Farbskala in mm/h — die Stufen des Dienstes, je ein gleich breites Feld */
+.radar-legende { display: flex; align-items: flex-end; gap: 6px; margin-top: 5px; }
+.radar-skala { flex: 1; min-width: 0; }
+.radar-stufen { display: flex; height: 6px; }
+.radar-stufen i { flex: 1; }
+.radar-werte { position: relative; height: 12px; margin-top: 2px; }
+.radar-werte span, .radar-einheit {
+  font-size: .6rem; line-height: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.radar-werte span { position: absolute; top: 0; }
+.radar-einheit { flex: none; }
 
 /* Fadenkreuz in der Kartenmitte beim Messen */
 .mittekreuz {
@@ -612,6 +732,49 @@ body {
 }
 .pal-btn.is-on { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 3px var(--text); }
 .pal-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* Parzellen: Das Feld im Knopf zeigt die Farbe, in der sie gerade gezeichnet
+ * werden. Lange drücken öffnet die Wahl — dabei darf das Handy weder Text
+ * markieren noch sein Kontextmenü zeigen. */
+.parz-knopf { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.parz-jetzt {
+  display: inline-block; width: 9px; height: 9px; margin-right: 7px;
+  border: 1px solid var(--muted-2); background: var(--parz, #000);
+}
+.parz-pal { gap: 6px; }
+/* Zwischen zwei Knopfreihen oben und unten je 10 px. Unten fällt der Rand mit
+   den 7 px der nächsten Reihe zusammen — es gilt der größere, nicht die Summe. */
+.parz-wahl { margin-bottom: 10px; }
+.parz-wahl .pal-label { margin-top: 10px; }
+.parz-btn {
+  position: relative; width: 30px; height: 30px; padding: 0;
+  border: 1px solid var(--line); border-radius: 2px;
+  background: var(--parz); cursor: pointer;
+}
+.parz-btn.is-on { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 3px var(--text); }
+.parz-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+/* Auto ist ein Wort, kein Farbfeld — eingeschaltet wie die Knöpfe darüber */
+.parz-auto {
+  width: auto; padding: 0 9px;
+  background: var(--panel-2); color: var(--muted);
+  font: inherit; font-size: .76rem; font-weight: 600;
+}
+.parz-auto.is-on {
+  border-color: var(--accent); color: var(--accent); box-shadow: none;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  background-clip: padding-box;
+}
+/* Eigene Farbe: das Farbfeld des Systems liegt unsichtbar über dem Plus */
+.parz-eigen {
+  display: grid; place-items: center; overflow: hidden;
+  background: var(--parz, var(--panel-2)); color: var(--muted);
+  font-size: 1.05rem; font-weight: 500; line-height: 1;
+}
+.parz-eigen.is-on span { visibility: hidden; }
+.parz-eigen input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer;
+}
 
 .fac-out:not(:empty) { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .fac-item {
@@ -901,6 +1064,95 @@ body {
   font-variant-numeric: tabular-nums; cursor: pointer; white-space: nowrap;
 }
 .bb-chip.is-on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+
+.bb-actions button:disabled { color: var(--muted-2); cursor: default; }
+
+/* ---------- Abstecken ---------- */
+
+/* Anzeige zum Ziel: Pfeil, Entfernung groß, darunter der Punkt. Der Pfeil zeigt
+   auf dem Bildschirm dorthin, wo der Punkt liegt — die Kartendrehung ist drin. */
+.ab-kopf { display: flex; align-items: center; gap: 12px; padding-right: 30px; }
+/* Der Pfeil ist der Schalter Karte/Kompass. Ein Rahmen zeigt, dass man ihn
+   antippen kann; darunter steht, wonach er sich gerade richtet. */
+.ab-richtung {
+  flex: none; width: 50px; padding: 4px 0 3px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  border: 1px solid var(--line); border-radius: 2px;
+  background: var(--panel-2); color: var(--muted-2); cursor: pointer;
+  font: inherit;
+}
+.ab-richtung svg { display: block; width: 30px; height: 30px; fill: var(--accent); }
+.ab-richtung span {
+  font-size: .56rem; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; line-height: 1.2;
+}
+.ab-richtung.is-on {
+  border-color: var(--accent); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  background-clip: padding-box;
+}
+.ab-kopf-txt { flex: 1; min-width: 0; }
+.ab-weite {
+  margin: 0; font-size: 1.75rem; font-weight: 700; line-height: 1.05;
+  letter-spacing: -.01em; font-variant-numeric: tabular-nums;
+}
+.ab-name {
+  margin: 2px 0 0; font-size: .86rem; font-weight: 650;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ab-name small { margin-left: 7px; font-size: .74rem; font-weight: 400; color: var(--muted); }
+.ab-kopf .tag { flex: none; align-self: flex-start; }
+
+/* Zurück aus der Liste zur Anzeige, ohne neu zu wählen — wie „Fertig" an der Farbwahl */
+.ab-zur {
+  flex: none; margin-left: auto; padding: 3px 9px;
+  border: 1px solid var(--line); border-radius: 2px;
+  background: var(--panel-2); color: var(--muted);
+  font: inherit; font-size: .74rem; font-weight: 600; cursor: pointer;
+}
+
+.ab-filter {
+  display: block; width: 100%; margin-top: 10px; padding: 9px 12px;
+  font: inherit; font-size: .92rem;
+  border: 1px solid var(--line); border-radius: 2px;
+  background: var(--panel-2); color: var(--text); outline: none;
+}
+.ab-filter:focus { border-color: var(--accent); }
+.ab-filter::placeholder { color: var(--muted-2); opacity: 1; }
+.ab-sort { margin-top: 8px; }
+.ab-sort .seg-btn { padding: 7px 10px; font-size: .8rem; }
+
+.ab-liste {
+  margin-top: 8px; max-height: min(34vh, 300px); overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+.ab-zeile {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 6px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.ab-zeile:hover, .ab-zeile:focus-visible { background: var(--panel-2); }
+.ab-zeile.is-on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.ab-zeile.war .ab-txt b { color: var(--muted); font-weight: 600; }
+.ab-sym { flex: none; width: 16px; display: grid; place-items: center; }
+.ab-sym svg { display: block; }
+.ab-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ab-txt b, .ab-txt small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-txt b { font-size: .9rem; font-weight: 650; }
+.ab-txt small { font-size: .74rem; color: var(--muted); }
+.ab-weit { flex: none; font-size: .84rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ab-pfeil { flex: none; width: 15px; height: 15px; fill: var(--accent); }
+.ab-mehr { margin: 0; padding: 8px 6px; font-size: .76rem; color: var(--muted); }
+
+/* Auf der Karte: Ring um den Zielpunkt und die Linie vom Standort dorthin, beide
+   in der Signalfarbe. Die Linie nimmt sie über die Klasse, weil Leaflet sonst
+   eine feste Farbe als Attribut setzt — CSS schlägt das Attribut. */
+.ab-linie { stroke: var(--accent); }
+.ab-marke svg { display: block; overflow: visible; }
+.ab-marke .halo { stroke: #fff; stroke-width: 5; opacity: .9; }
+.ab-marke .ring { stroke: var(--accent); stroke-width: 2.5; }
 
 /* ---------- Marker ---------- */
 

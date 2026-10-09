@@ -1644,6 +1644,9 @@ const PALETTEN = {
 let prefs = {
   theme: 'auto', palette: 'lapis', base: 'osm', orm: true, baseOpacity: 100,
   wegLinie: true, steinLinie: true,      // die beiden Rechenhilfen auf der Karte
+  abSort: 'nah',                         // Abstecken: Punktliste nach Entfernung, Name oder Datei
+  abKompass: false,                      // Abstecken: Pfeil nach dem Handy statt nach der Karte
+  parzFarbe: 'auto',                     // 'auto' (nach Grundkarte) oder '#rrggbb'
   wms: { url: '', layers: '', opacity: 75, on: false }   // nur Adresse und Layer, nie Zugangsdaten
 };
 let recent = [];   // nicht "history" nennen — das ist window.history
@@ -2130,10 +2133,12 @@ function initMap() {
 
   /* Parzellarkarte nur als Umring: Die Farbfassung bringt einen deckend weißen
    * Grund mit (gemessen 0 % durchsichtig) und würde alles darunter verdecken.
-   * Der Dienst zeichnet erst unterhalb 1:5000, also etwa ab Zoomstufe 17. */
-  parzLayer = L.tileLayer.wms('https://geoservices.bayern.de/od/wms/alkis/v1/parzellarkarte', {
+   * Der Dienst zeichnet erst unterhalb 1:5000, also etwa ab Zoomstufe 17.
+   * Immer die schwarze Fassung — gefärbt wird in der App (ParzWms). */
+  parzLayer = new ParzWms('https://geoservices.bayern.de/od/wms/alkis/v1/parzellarkarte', {
     layers: 'by_alkis_parzellarkarte_umr_schwarz', format: 'image/png', transparent: true,
-    version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
+    version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV,
+    farbe: hexRgb(parzFarbe())
   });
 
   // Die Leaflet-Grundkarten. „dark" hat keine: die zeichnet immer MapLibre.
@@ -2159,6 +2164,7 @@ function initMap() {
 
   overlayLayers = { orm: ormLayer, parz: parzLayer };
   for (const k of Object.keys(overlayLayers)) auflageSetzen(k);
+  auflageSetzen('radar');
   setBase(prefs.base || 'osm', true);     // setzt auch Straßen und Ortsnamen (grundAnwenden)
   applyBaseOpacity();
   if (prefs.wms && prefs.wms.on) wmsApply(true);
@@ -2168,7 +2174,7 @@ function initMap() {
   map.on('zoom rotate', gesteBild);
   map.on('zoomend rotateend moveend', gesteEnde);
   map.on('move zoom rotate', messLiveZeichnen);
-  map.on('moveend rotateend', liveLeiste);
+  map.on('rotate rotateend', abNachziehen);      // die Pfeile beim Abstecken zeigen auf den Bildschirm
   map.on('zoomend', drawMilestones);
   map.on('rotate rotateend', syncNorth);
 
@@ -2281,21 +2287,185 @@ function ausserhalbBayerns() {
   return c.lat < BAYERN.s || c.lat > BAYERN.n || c.lng < BAYERN.w || c.lng > BAYERN.o;
 }
 
-/* Schwarze Umringe verschwinden auf dem Luftbild, gelbe auf der hellen Karte —
- * deshalb richtet sich die Farbe nach dem gewählten Hintergrund. */
-function parzFarbeAnpassen() {
-  if (!parzLayer) return;
-  const wunsch = (prefs.base || 'osm') === 'osm'
-    ? 'by_alkis_parzellarkarte_umr_schwarz'
-    : 'by_alkis_parzellarkarte_umr_gelb';
-  if (parzLayer.wmsParams.layers !== wunsch) parzLayer.setParams({ layers: wunsch });
+/* ---- Parzellen in wählbarer Farbe ----
+ *
+ * Der Dienst liefert die Umringe nur in Schwarz und in Gelb. Die schwarze
+ * Fassung ist reines Schwarz, geglättet über den Alphakanal, dazu einzelne
+ * weiße Pixel; die gelbe ist Pixel für Pixel dieselbe Kachel mit Schwarz durch
+ * Gelb ersetzt (nachgemessen am 09.10.2026, 131 Farbwerte, alle Paare gleich).
+ * Damit lässt sich aus der schwarzen jede Farbe selbst machen: Grauwert 0 wird
+ * die gewählte Farbe, 255 bleibt Weiß, der Alphakanal bleibt, wie er ist. Gelb
+ * kommt so bitgleich zu dem heraus, was der Dienst liefert.
+ *
+ * Die Kachel ist deshalb ein Canvas statt eines Bildes. Das Quellbild bleibt an
+ * ihr hängen, damit ein Farbwechsel ohne neue Abfrage umfärbt. Geht nur, weil
+ * der Dienst CORS freigibt — ohne wäre das Canvas für getImageData gesperrt.
+ *
+ * `complete` steht von Hand an der Kachel: Leaflet räumt beim Zoomen alle
+ * Kacheln der alten Stufe weg, die nicht `complete` sind (_abortLoading). Ein
+ * Canvas hat das Feld nicht, ohne diese Zeile verschwänden auch die fertigen
+ * Kacheln mitten in der Zoombewegung. */
+const ParzWms = L.TileLayer.WMS.extend({
+  // Hier deklariert, sonst hängte Leaflet „farbe" als WMS-Parameter an jede Abfrage
+  options: { farbe: [0, 0, 0] },
+
+  createTile(coords, done) {
+    const tile = document.createElement('canvas');
+    tile.complete = false;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      tile.width = img.naturalWidth;
+      tile.height = img.naturalHeight;
+      tile._quelle = img;
+      this._faerben(tile);
+      tile.complete = true;
+      done(null, tile);
+    };
+    img.onerror = err => done(err, tile);
+    img.src = this.getTileUrl(coords);
+    return tile;
+  },
+
+  _faerben(tile) {
+    const g = tile.getContext('2d', { willReadFrequently: true });
+    g.clearRect(0, 0, tile.width, tile.height);
+    g.drawImage(tile._quelle, 0, 0);
+    const bild = g.getImageData(0, 0, tile.width, tile.height);
+    const d = bild.data;
+    const [r, gr, b] = this.options.farbe;
+    for (let i = 0; i < d.length; i += 4) {
+      if (!d[i + 3]) continue;
+      const t = d[i] / 255;          // 0 = Linie, 1 = Weiß
+      d[i] = r + (255 - r) * t;
+      d[i + 1] = gr + (255 - gr) * t;
+      d[i + 2] = b + (255 - b) * t;
+    }
+    g.putImageData(bild, 0, 0);
+  },
+
+  farbeSetzen(rgb) {
+    const alt = this.options.farbe;
+    if (alt && alt.every((v, i) => v === rgb[i])) return;
+    this.options.farbe = rgb;
+    for (const k in this._tiles) {
+      const tile = this._tiles[k].el;
+      if (tile._quelle) this._faerben(tile);
+    }
+  }
+});
+
+function hexRgb(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
 }
 
-/** Reihenfolge der Leaflet-Auflagen, von unten: eigener WMS, Parzellen,
- *  Bahn-Layer. Straßen und Ortsnamen liegen darunter im MapLibre-Grund. */
+/* Zur Wahl. Gelb ist der Ton des Dienstes. Kräftige, reine Farben, weil die
+ * Umringe nur einen Pixel breit sind — ein gedeckter Ton verschwindet im Luftbild. */
+const PARZ_FARBEN = [
+  { wert: '#ffff00', name: 'Gelb' },
+  { wert: '#ffffff', name: 'Weiß' },
+  { wert: '#ff3030', name: 'Rot' },
+  { wert: '#ff40ff', name: 'Magenta' },
+  { wert: '#00e5ff', name: 'Cyan' },
+  { wert: '#000000', name: 'Schwarz' }
+];
+
+/* „auto": schwarze Umringe verschwinden auf dem Luftbild, gelbe auf der hellen
+ * Karte — deshalb richtet sich die Farbe dann nach dem gewählten Hintergrund. */
+function parzFarbe() {
+  const f = prefs.parzFarbe;
+  if (/^#[0-9a-f]{6}$/i.test(f || '')) return f.toLowerCase();
+  return (prefs.base || 'osm') === 'osm' ? '#000000' : '#ffff00';
+}
+
+function parzFarbeAnpassen() {
+  if (parzLayer) parzLayer.farbeSetzen(hexRgb(parzFarbe()));
+}
+
+/* Die Wahl bleibt nach einem Tipp offen — man probiert meist mehrere Farben,
+ * bis eine auf dem Grund steht. Zu geht sie mit dem Menü oder einem zweiten
+ * langen Druck. */
+function parzFarbeWaehlen(wert) {
+  prefs.parzFarbe = wert;
+  parzFarbeAnpassen();
+  saveStore();
+  syncButtons();
+  /* Wer eine Farbe wählt, will sie sehen — bei ausgeschalteter Auflage sähe er
+   * nichts und hielte die Wahl für wirkungslos. */
+  if (!auflageGewaehlt('parz')) toggleOverlay('parz');
+}
+
+function parzWahlZeigen(an) {
+  const box = $('#parzWahl'), btn = $('#parzBtn');
+  if (box) box.hidden = !an;
+  if (btn) btn.setAttribute('aria-expanded', an ? 'true' : 'false');
+}
+
+/* Tippen schaltet die Parzellen, lange drücken oder Rechtsklick öffnet die
+ * Farbwahl — die Farbe braucht man selten, eine ständig offene Reihe von
+ * Farbfeldern wäre im Menü nur im Weg. Nach dem langen Druck darf das folgende
+ * click nicht auch noch umschalten, und Android meldet zum langen Druck
+ * zusätzlich contextmenu: Beides zusammen ist ein einziger Griff. */
+function parzKnopfBinden() {
+  const btn = $('#parzBtn');
+  if (!btn) return;
+  let timer = 0, lang = false, zuletzt = 0;
+  const wahl = () => {
+    clearTimeout(timer);
+    if (Date.now() - zuletzt < 700) return;
+    zuletzt = Date.now();
+    lang = true;
+    parzWahlZeigen($('#parzWahl').hidden);
+  };
+  btn.addEventListener('pointerdown', ev => {
+    lang = false;
+    clearTimeout(timer);
+    if (ev.button === 0) timer = setTimeout(wahl, MERK_DAUER);    // rechts: contextmenu
+  });
+  for (const t of ['pointerup', 'pointerleave', 'pointercancel']) {
+    btn.addEventListener(t, () => clearTimeout(timer));
+  }
+  btn.addEventListener('contextmenu', ev => { ev.preventDefault(); wahl(); });
+  btn.addEventListener('click', () => {
+    if (lang) { lang = false; return; }
+    toggleOverlay('parz');
+  });
+}
+
+function buildParzRow() {
+  const box = $('#parzRow');
+  if (!box) return;
+  const knoepfe = [
+    `<button type="button" class="parz-btn parz-auto" data-parz="auto" title="Schwarz über der Karte, Gelb über Bildern"` +
+      ` aria-label="Parzellenfarbe automatisch">Auto</button>`,
+    ...PARZ_FARBEN.map(f =>
+      `<button type="button" class="parz-btn" data-parz="${f.wert}" style="--parz:${f.wert}"` +
+      ` title="${f.name}" aria-label="Parzellenfarbe ${f.name}"></button>`),
+    // Eigene Farbe: das Farbfeld des Systems, als Feld derselben Größe
+    `<label class="parz-btn parz-eigen" title="Eigene Farbe"><span aria-hidden="true">+</span>` +
+      `<input id="parzEigen" type="color" value="#ff8c1a" aria-label="Eigene Parzellenfarbe"></label>`
+  ];
+  box.innerHTML = knoepfe.join('');
+  box.querySelectorAll('[data-parz]').forEach(b =>
+    b.addEventListener('click', () => parzFarbeWaehlen(b.dataset.parz)));
+  const eigen = $('#parzEigen');
+  // input: beim Ziehen im Farbfeld gleich mitfärben; gespeichert wird bei change
+  eigen.addEventListener('input', () => {
+    prefs.parzFarbe = eigen.value;
+    parzFarbeAnpassen();
+    syncButtons();
+  });
+  eigen.addEventListener('change', () => parzFarbeWaehlen(eigen.value));
+}
+
+/** Reihenfolge der Leaflet-Auflagen, von unten: eigener WMS, Regenradar,
+ *  Parzellen, Bahn-Layer. Straßen und Ortsnamen liegen darunter im MapLibre-
+ *  Grund. Das Radar unter den Linien: Es ist eine Fläche, und über ihr bleiben
+ *  Grenzen und Gleise scharf, statt eingefärbt zu werden. */
 function ordneAuflagen() {
   if (wmsLayer) wmsLayer.bringToFront();
-  for (const layer of [parzLayer, ormLayer]) {
+  for (const layer of [radarVorn, radarHinten, parzLayer, ormLayer]) {
     if (layer && map.hasLayer(layer)) layer.bringToFront();
   }
 }
@@ -2358,7 +2528,7 @@ function applyBaseOpacity() {
  * OSM-Karte stecken sie schon drin: Dort bleiben sie eingeschaltet, werden aber
  * nicht gezeichnet, und beim Wechsel erscheinen sie. */
 const NUR_UEBER_BILD = new Set(['str', 'ort']);
-const AUFLAGEN = ['orm', 'parz', 'str', 'ort'];
+const AUFLAGEN = ['orm', 'parz', 'str', 'ort', 'radar'];
 
 /** Ist die Auflage gewählt? Der Bahn-Layer ist von Haus aus an, die übrigen aus. */
 function auflageGewaehlt(kennung) {
@@ -2367,6 +2537,7 @@ function auflageGewaehlt(kennung) {
 
 /** Eine Leaflet-Auflage so auf die Karte bringen, wie die Wahl es verlangt. */
 function auflageSetzen(kennung) {
+  if (kennung === 'radar') { radarSetzen(); return; }      // zwei Ebenen und eine Zeitleiste
   const layer = overlayLayers[kennung];
   if (!layer) return;
   const sichtbar = auflageGewaehlt(kennung);
@@ -2547,6 +2718,241 @@ function wmsLogin() {
   const sep = url.includes('?') ? '&' : '?';
   window.open(url + sep + 'SERVICE=WMS&REQUEST=GetCapabilities', '_blank', 'noopener');
   toast('Im neuen Tab anmelden und speichern lassen, dann hierher zurück.');
+}
+
+/* -------- Regenradar -------- */
+
+/* Niederschlagsradar des DWD über dessen GeoServer: Layer „Niederschlagsradar",
+ * das RV-Produkt, 1 km, alle 5 Minuten, in mm/h. Der Dienst gibt CORS frei und
+ * rechnet in EPSG:3857, läuft also direkt als Leaflet-WMS (geprüft 09.10.2026).
+ *
+ * Zeit: Die Zeitachse reicht drei Tage zurück und zwei Stunden über die letzte
+ * Messung hinaus. TIME allein genügt — für einen vergangenen Zeitpunkt liefert
+ * der Dienst die Messung, für einen künftigen die Vorhersage des neuesten Laufs
+ * (nachgeprüft: dasselbe Bild mit und ohne REFERENCE_TIME). Weglassen darf man
+ * TIME aber nicht, siehe radarSetzen. Die letzte Messung steht als Vorgabe von
+ * REFERENCE_TIME in den Capabilities der Ebene; die sind über den Ebenenpfad
+ * 38 KB klein statt 875 KB für den ganzen Dienst. Gemessen lag sie 6 Minuten
+ * hinter der Uhr.
+ *
+ * Bilder ab Zoomstufe 12 nur noch vergrößert: Die Daten haben 1 km Raster, eine
+ * Kachel der Stufe 12 ist rund 6 km breit. Tiefer zu fragen kostete Abfragen und
+ * brächte nichts als größere einfarbige Flächen.
+ *
+ * Gewechselt wird das Bild über eine zweite Ebene: Die lädt unsichtbar, und erst
+ * wenn alle Kacheln da sind, wird getauscht. Sonst stünde zwischen zwei Bildern
+ * jedes Mal die leere Karte — beim Abspielen ein Flackern im Takt.
+ *
+ * Der Service Worker lässt maps.dwd.de durch (nicht in TILE_HOSTS): Ein Radarbild
+ * ist nach fünf Minuten alt und gehört nicht in den Offlinevorrat. */
+const RADAR_WMS = 'https://maps.dwd.de/geoserver/dwd/wms';
+const RADAR_CAPS = 'https://maps.dwd.de/geoserver/dwd/Niederschlagsradar/wms?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0';
+const RADAR_ZURUECK = 60;      // Minuten Messung vor der letzten
+const RADAR_VOR = 120;         // Minuten Vorhersage — so weit rechnet der DWD
+const RADAR_SPIEL = 15;        // Schritt beim Abspielen, Minuten
+const RADAR_DECKUNG = 0.7;
+const RADAR_FRISCH = 5 * 60000;
+
+/* Farbstufen des Dienstes, aus GetLegendGraphic (application/json), mm/h */
+const RADAR_STUFEN = [
+  ['#33ffff', 0.1], ['#1acc9a', 0.2], ['#019934', 0.4], ['#4db31b', 1], ['#99cc01', 2],
+  ['#cce601', 3], ['#ffff01', 5], ['#ffc401', 7.5], ['#ff8901', 10], ['#ff4501', 15],
+  ['#fe0000', 30], ['#e5004c', 45], ['#cc0098', 75], ['#6600cb', 100], ['#0000fe', 150]
+];
+
+let radarRef = null;           // letzte Messung, ms
+let radarRefGeholt = 0;
+let radarVersatz = 0;          // gezeigt: Minuten zur letzten Messung
+let radarVorn = null;          // die sichtbare Ebene
+let radarHinten = null;        // die gerade unsichtbar ladende
+let radarSpielt = false;
+let radarSpielTimer = 0;
+let radarFrischTimer = 0;
+let radarZiehTimer = 0;
+let radarHolt = false;         // die Zeitachse wird gerade erfragt
+
+const radarUhr = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
+const radarIso = ms => new Date(ms).toISOString().replace('.000Z', 'Z');
+
+function radarEbene(zeit) {
+  const l = L.tileLayer.wms(RADAR_WMS, {
+    layers: 'Niederschlagsradar', format: 'image/png', transparent: true, version: '1.3.0',
+    opacity: RADAR_DECKUNG, maxZoom: 22, maxNativeZoom: 12, crossOrigin: 'anonymous',
+    attribution: 'Regenradar: Quelle <a href="https://www.dwd.de/">Deutscher Wetterdienst</a>'
+  });
+  if (zeit) l.setParams({ time: zeit }, true);
+  return l;
+}
+
+/** Die letzte Messung beim Dienst erfragen. Liefert true, wenn sie neu ist. */
+async function radarRefHolen() {
+  try {
+    const r = await fetch(RADAR_CAPS, { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const m = /name="REFERENCE_TIME"[^>]*default="([^"]+)"/.exec(await r.text());
+    const t = m && Date.parse(m[1]);
+    if (!t) throw new Error('keine Zeitangabe');
+    radarRefGeholt = Date.now();
+    const neu = t !== radarRef;
+    /* Rückt die letzte Messung weiter, bleibt ein gewählter Zeitpunkt stehen,
+     * wo er war — nur „jetzt" geht mit. */
+    if (neu && radarRef != null && radarVersatz !== 0) {
+      radarVersatz = Math.max(-RADAR_ZURUECK, radarVersatz - Math.round((t - radarRef) / 60000));
+    }
+    radarRef = t;
+    return neu;
+  } catch (err) {
+    console.warn('Regenradar:', err);
+    return false;
+  }
+}
+
+/** Auflage an oder aus, wie prefs.radar es sagt. */
+function radarSetzen() {
+  const an = auflageGewaehlt('radar');
+  const leiste = $('#radar');
+  if (!an) {
+    radarSpielen(false);
+    clearInterval(radarFrischTimer);
+    for (const l of [radarVorn, radarHinten]) if (l) map.removeLayer(l);
+    radarVorn = radarHinten = null;
+    if (leiste) leiste.hidden = true;
+    return;
+  }
+  if (leiste) leiste.hidden = false;
+  radarLeisteWerte();
+  clearInterval(radarFrischTimer);
+  radarFrischTimer = setInterval(radarFrisch, 60000);
+  if (radarVorn || radarHolt) return;
+
+  /* Die Ebene erst anlegen, wenn die Zeitachse da ist, und dann immer mit fester
+   * Zeit. Ohne TIME nimmt der Dienst „current", und das ist nicht die letzte
+   * Messung, sondern der Zeitschritt, der der Uhr am nächsten liegt — meist
+   * schon einer der Vorhersage. Am 09.10.2026 lag so eine Kachel ohne Zeit neben
+   * einer mit: Das Regengebiet endete an der Kachelkante. */
+  radarHolt = true;
+  radarRefHolen().then(() => {
+    radarHolt = false;
+    if (!auflageGewaehlt('radar') || radarVorn) return;
+    // Ist der Dienst nicht zu erreichen, bleibt nur seine Vorgabe — dann einheitlich
+    radarVorn = radarEbene(radarRef != null ? radarIso(radarRef + radarVersatz * 60000) : null).addTo(map);
+    ordneAuflagen();
+    radarLeisteWerte();
+  });
+}
+
+/* Jede Minute nachsehen, ob es eine neue Messung gibt — aber nur, wenn die
+ * letzte Nachfrage fünf Minuten her ist und die App gerade zu sehen ist. */
+async function radarFrisch() {
+  if (!radarVorn || document.hidden || radarSpielt) return;
+  if (Date.now() - radarRefGeholt < RADAR_FRISCH) return;
+  if (await radarRefHolen()) radarZeigen(radarVersatz);
+}
+
+/** Zeitpunkt zeigen. Liefert true, wenn dafür ein Bild geladen wird. */
+function radarZeigen(versatz) {
+  radarVersatz = Math.max(-RADAR_ZURUECK, Math.min(RADAR_VOR, versatz));
+  radarLeisteWerte();
+  if (!radarVorn || radarRef == null) return false;
+
+  const zeit = radarIso(radarRef + radarVersatz * 60000);
+  if (radarHinten && radarHinten.wmsParams.time === zeit) return true;     // lädt schon
+  if (!radarHinten && radarVorn.wmsParams.time === zeit) return false;     // steht schon
+
+  // Ein noch ladendes Bild ist überholt
+  if (radarHinten) map.removeLayer(radarHinten);
+  const neu = radarEbene(zeit);
+  neu.setOpacity(0);
+  neu.once('load', () => {
+    if (neu !== radarHinten) return;
+    neu.setOpacity(RADAR_DECKUNG);
+    map.removeLayer(radarVorn);
+    radarVorn = neu;
+    radarHinten = null;
+    radarLeisteWerte();
+    if (radarSpielt) radarSpielWeiter();
+  });
+  radarHinten = neu;
+  neu.addTo(map);
+  ordneAuflagen();
+  radarLeisteWerte();
+  return true;
+}
+
+function radarSpielen(an) {
+  radarSpielt = !!an;
+  clearTimeout(radarSpielTimer);
+  const btn = $('#radarSpiel');
+  if (btn) {
+    btn.classList.toggle('is-on', radarSpielt);
+    btn.setAttribute('aria-pressed', String(radarSpielt));
+    btn.setAttribute('aria-label', radarSpielt ? 'Anhalten' : 'Abspielen');
+  }
+  if (radarSpielt) radarSpielWeiter(true);
+}
+
+/* Abspielen in Viertelstunden von der ersten Messung bis zum Ende der
+ * Vorhersage, dort kurz stehen und von vorn. Weiter geht es erst, wenn das
+ * Bild da ist — auf dem Handy dauert das mal eine halbe, mal drei Sekunden,
+ * und ein fester Takt zeigte dann halbe Bilder. */
+function radarSpielWeiter(start = false) {
+  clearTimeout(radarSpielTimer);
+  if (!radarSpielt) return;
+  const amEnde = radarVersatz >= RADAR_VOR;
+  radarSpielTimer = setTimeout(() => {
+    if (!radarSpielt) return;
+    const naechst = amEnde ? -RADAR_ZURUECK : (Math.floor(radarVersatz / RADAR_SPIEL) + 1) * RADAR_SPIEL;
+    if (!radarZeigen(naechst)) radarSpielWeiter();
+  }, start ? 0 : amEnde ? 1600 : 650);
+}
+
+function radarLeisteWerte() {
+  const zeit = $('#radarZeit'), text = $('#radarText');
+  if (zeit && document.activeElement !== zeit) zeit.value = String(radarVersatz);
+  if (!text) return;
+  if (radarRef == null) {
+    // Ohne Zeitachse zeigt die Ebene, was der Dienst von sich aus für jetzt hält
+    text.innerHTML = radarVorn ? '<b>jetzt</b><small>ohne Zeitachse</small>' : '<b>—</b><small>lädt …</small>';
+    return;
+  }
+  const art = radarVersatz > 0 ? 'Vorhersage' : radarVersatz === 0 ? 'letzte Messung' : 'Messung';
+  text.innerHTML = `<b>${esc(radarUhr.format(radarRef + radarVersatz * 60000))}</b><small>${art}</small>`;
+  text.classList.toggle('vorhersage', radarVersatz > 0);
+  // Grau, solange das gewählte Bild noch lädt — beim Abspielen nicht, da blinkte es im Takt
+  text.classList.toggle('laedt', !!radarHinten && !radarSpielt);
+}
+
+function radarLegende() {
+  const box = $('#radarLegende');
+  if (!box) return;
+  const n = RADAR_STUFEN.length;
+  // Beschriftet nur jede zweite bis dritte Stufe, linksbündig an ihrem Anfang: „ab 0,1"
+  const zeigen = new Set([0.1, 1, 5, 15, 45, 150]);
+  box.innerHTML = `<div class="radar-skala">` +
+    `<div class="radar-stufen">${RADAR_STUFEN.map(([f]) => `<i style="background:${f}"></i>`).join('')}</div>` +
+    `<div class="radar-werte">${RADAR_STUFEN.map(([, v], i) => zeigen.has(v)
+      ? `<span style="left:${(i / n * 100).toFixed(3)}%">${String(v).replace('.', ',')}</span>` : '').join('')}</div>` +
+    `</div><span class="radar-einheit">mm/h</span>`;
+}
+
+function radarBinden() {
+  radarLegende();
+  const zeit = $('#radarZeit');
+  if (zeit) {
+    // Beim Ziehen gleich die Uhrzeit, das Bild erst, wenn der Finger kurz ruht
+    zeit.addEventListener('input', () => {
+      radarSpielen(false);
+      radarVersatz = Number(zeit.value);
+      radarLeisteWerte();
+      clearTimeout(radarZiehTimer);
+      radarZiehTimer = setTimeout(() => radarZeigen(Number(zeit.value)), 220);
+    });
+    zeit.addEventListener('change', () => { clearTimeout(radarZiehTimer); radarZeigen(Number(zeit.value)); });
+  }
+  on('#radarSpiel', 'click', () => radarSpielen(!radarSpielt));
+  on('#radarZu', 'click', () => { if (auflageGewaehlt('radar')) toggleOverlay('radar'); });
+  // Zurück aus dem Hintergrund: gleich nachsehen statt bis zur nächsten vollen Minute
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) radarFrisch(); });
 }
 
 /* -------- Eigene KML-Dateien -------- */
@@ -3173,6 +3579,10 @@ function kmlPopup(o, akte) {
   if (!zeilen.length) return '';
   zeilen.push(`<button type="button" class="kml-km" data-kmlkm>Kilometer bestimmen` +
     `<small>rechnet die Stelle auf die Strecke — braucht Netz</small></button>`);
+  if (o.art === 'p') {
+    zeilen.push(`<button type="button" class="kml-km" data-kmlab>Abstecken` +
+      `<small>Entfernung und Richtung vom Standort hierher</small></button>`);
+  }
   return zeilen.join('');
 }
 
@@ -3243,6 +3653,11 @@ function kmlEbene(akte) {
         map.closePopup();          // ohne Argument, sonst behält Leaflet _popup gesetzt
         kmAnStelle(wo[0], wo[1], PUNKT_TOL);
       });
+      const ab = el && el.querySelector('[data-kmlab]');
+      if (ab) ab.addEventListener('click', () => {
+        map.closePopup();
+        abZielSetzen({ a: akte, o });
+      });
     });
     l.addTo(gruppe);
   }
@@ -3309,6 +3724,12 @@ function kmlZeigen(akte, sichtbar) {
   ebene.addTo(map);
   kmlEbenen.set(akte.id, ebene);
   kmlLabels();
+}
+
+/** Nach jeder Änderung an den Dateien: Absteckknopf und offene Punktliste nachziehen. */
+function kmlGeaendert() {
+  abKnopf();
+  if (abAn && (abListeOffen || !abZiel)) abListeFuellen();
 }
 
 /* -------- Liste im Menü -------- */
@@ -3491,6 +3912,10 @@ function kmlListe() {
     kmlListe();
     try { await kmlLoeschen(a.id); } catch { /* sonst ist sie nach dem Neuladen wieder da */ }
   }));
+
+  // Die Liste wird nach jeder Änderung an den Dateien neu gebaut — der Ort, an dem
+  // auch das Abstecken davon erfährt
+  kmlGeaendert();
 }
 
 /* -------- Dateien öffnen -------- */
@@ -4896,14 +5321,17 @@ function closeBottom() {
  * Leiste 6 px über dem Rand, mit Leiste 8 px über ihr (die Leiste selbst
  * 6 px über dem Rand). Die Knopfsäule rechts — Standort, Messen, Nord —
  * steht auf dieser Grundlinie (--bh). Die Zeile wächst beim Aufklappen der
- * Quellen nicht, die Zahl bleibt dabei stehen. */
+ * Quellen nicht, die Zahl bleibt dabei stehen. Steht die Absteckleiste über
+ * der unteren, kommt sie samt ihren 8 px Luft dazu. Gerundet wird erst die
+ * Summe: Die Leisten sind krumm hoch (gemessen 108,72 und 160,53 px), einzeln
+ * gerundet lag der Standortknopf einen Pixel unter dem ©-Kasten. */
 const UNTEN_RAND = 6;
 function updateBH() {
-  const b = $('#bottom');
-  const grundlinie = b.hidden
-    ? UNTEN_RAND
-    : UNTEN_RAND + Math.round(b.getBoundingClientRect().height) + 8;
-  document.documentElement.style.setProperty('--bh', grundlinie + 'px');
+  let grundlinie = UNTEN_RAND;
+  for (const el of [$('#bottom'), $('#ziel')]) {
+    if (el && !el.hidden) grundlinie += el.getBoundingClientRect().height + 8;
+  }
+  document.documentElement.style.setProperty('--bh', Math.round(grundlinie) + 'px');
 }
 
 /* ---- Quellenangaben ----
@@ -5212,6 +5640,7 @@ function ortStop(nachricht) {
   if (btn) btn.classList.remove('busy', 'is-on');
   if (nachricht) toast(nachricht);
   liveLeiste();
+  abNachziehen();
   syncButtons();
 }
 
@@ -5265,34 +5694,8 @@ function ortNeu(pos) {
    * rechnet nebenher und zeichnet sie ein zweites Mal. Auf ihn zu warten hieße,
    * den Standortpunkt später zu setzen. */
   liveLeiste();
+  abNachziehen();
   if (liveKmAn) liveKmRechnen();
-}
-
-/** Rechtweisende Peilung von hier zu einem Ziel, in Grad. */
-function ortPeilung(von, ziel) {
-  const rad = Math.PI / 180;
-  const dLon = (ziel[1] - von.lon) * rad;
-  const y = Math.sin(dLon) * Math.cos(ziel[0] * rad);
-  const x = Math.cos(von.lat * rad) * Math.sin(ziel[0] * rad) -
-            Math.sin(von.lat * rad) * Math.cos(ziel[0] * rad) * Math.cos(dLon);
-  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-}
-
-/** Nächstes Objekt aus sichtbaren KML-Dateien — das Ziel beim Suchen im Gelände. */
-function ortNaechstesObjekt() {
-  if (!ortLetzt) return null;
-  let best = null;
-  for (const a of kmlAkten) {
-    if (!a.sichtbar) continue;
-    for (const o of a.objekte) {
-      if (!kmlSichtbarObj(a, o)) continue;
-      const k = kmlAnker(o);
-      if (!k) continue;
-      const d = haversine(ortLetzt.lat, ortLetzt.lon, k[0], k[1]);
-      if (!best || d < best.d) best = { d, koord: k, name: o.name || '(ohne Namen)', datei: a.name };
-    }
-  }
-  return best;
 }
 
 /* ---- Kilometer live aus dem Standort ----
@@ -5546,10 +5949,13 @@ function liveKmFest() {
 }
 
 /* Schmale Zeile unter der Suchleiste, solange verfolgt wird — aber nur, wenn
- * sie etwas zu sagen hat: den Kilometer an der eigenen Stelle, den Abstand zum
- * letzten Messpunkt oder das nächste KML-Objekt mit Richtungspfeil. Der Pfeil
- * rechnet die Kartendrehung heraus, zeigt also auf dem Schirm dorthin, wo das
- * Ziel wirklich liegt.
+ * sie etwas zu sagen hat: den Kilometer an der eigenen Stelle oder den Abstand
+ * zum letzten Messpunkt.
+ *
+ * Bis Oktober 2026 stand hier auch das nächste KML-Objekt mit Richtungspfeil,
+ * und zwar von selbst, sobald der Standort lief. Das war ungefragt und immer
+ * nur das nächste; das Ansteuern eines Punkts läuft jetzt über das Abstecken
+ * (Fähnchenknopf), in dem man ihn auch auswählt.
  *
  * Die Ortungsgenauigkeit allein ist kein Grund für die Zeile: Die Karte zeigt
  * sie schon als Kreis um den blauen Punkt, und beim ersten Fix steht sie im
@@ -5584,21 +5990,565 @@ function liveLeiste() {
       `<small>vom letzten Messpunkt</small></span>`);
   }
 
-  const nah = ortNaechstesObjekt();
-  if (nah) {
-    const dreh = ortPeilung(ortLetzt, nah.koord) - (map.getBearing ? map.getBearing() : 0);
-    stuecke.push(`<span class="live-teil live-ziel">` +
-      `<svg viewBox="0 0 24 24" aria-hidden="true" style="transform:rotate(${dreh.toFixed(1)}deg)">` +
-      `<path d="M12 3l6 16-6-4-6 4z"/></svg>` +
-      `<b>${esc(messText(nah.d))}</b><small>${esc(nah.name)}</small></span>`);
-  }
-
   if (!stuecke.length) { leer(); return; }
   el.innerHTML = stuecke.join('');
   el.hidden = false;
   const knopf = el.querySelector('[data-livekm]');
   if (knopf) knopf.addEventListener('click', liveKmFest);
   updateBH();
+}
+
+/* ============================ Abstecken ============================
+ *
+ * Einen Punkt aus den geladenen KML-Dateien ansteuern: Entfernung, Richtung und
+ * Versatz nach Nord und Ost, bei jeder Ortung neu. Der Fähnchenknopf öffnet eine
+ * Liste der Punkte — nach Entfernung, Name oder Reihenfolge in der Datei, dazu
+ * ein Filter —, nach der Wahl steht die Anzeige dorthin. „Nächster" geht weiter:
+ * nach Entfernung zum nächstgelegenen Punkt, der noch nicht Ziel war, sonst zum
+ * nächsten der Liste. So lässt sich eine Punktdatei der Reihe nach ablaufen.
+ *
+ * Nur Punkte: Abgesteckt wird ein Punkt. Linien und Flächen haben keinen
+ * eindeutigen Zielort — kmlAnker ist bloß der Platz für die Beschriftung.
+ *
+ * Die Anzeige hat eine eigene Leiste über der unteren. Teilten sich beide die
+ * untere, verdrängte jeder unterwegs festgehaltene Kilometer das Ziel. */
+
+const AB_LISTE_MAX = 150;      // Zeilen auf einmal — für den Rest gibt es den Filter
+const AB_SORT = ['nah', 'name', 'datei'];
+const AB_NF = [0, 1, 2].map(n => new Intl.NumberFormat('de-DE', { minimumFractionDigits: n, maximumFractionDigits: n }));
+const abNamen = new Intl.Collator('de', { numeric: true, sensitivity: 'base' });
+
+let abAn = false;              // Leiste offen
+let abZiel = null;             // { a, o }: Datei und Punkt
+let abListeOffen = false;
+let abFilter = '';
+let abListe = [];              // die gerade gezeigte Auswahl, sortiert
+let abOhneOrt = false;         // nach Entfernung gewünscht, aber noch kein Standort
+let abVorher = [];             // frühere Ziele, für „Zurück"
+const abWarZiel = new Set();   // in dieser Sitzung schon Ziel gewesen
+let abLayer = null, abLinie = null, abMarke = null;
+
+/** Haben die sichtbaren Dateien überhaupt Punkte? Davon hängt der Knopf ab. */
+function abMoeglich() {
+  return kmlAkten.some(a => a.sichtbar && a.objekte.some(o => o.art === 'p' && kmlSichtbarObj(a, o)));
+}
+
+function abKnopf() {
+  const btn = $('#mapZielBtn');
+  if (!btn) return;
+  btn.hidden = !abAn && !abMoeglich();
+  btn.classList.toggle('is-on', abAn);
+  btn.setAttribute('aria-pressed', abAn ? 'true' : 'false');
+}
+
+/* Nachkommastellen nach der Ortungsgenauigkeit. Ein Handy meldet ±3 bis 5 m, da
+ * wären Dezimeter bloß Rauschen. Hängt ein RTK-Empfänger am Gerät (unter Android
+ * über die Scheinposition), kommen ±2 cm — dann zählt jeder Zentimeter. */
+function abStellen() {
+  const g = ortLetzt ? ortLetzt.genau : Infinity;
+  return g < 0.2 ? 2 : g < 2 ? 1 : 0;
+}
+
+function abMeter(m, stellen = abStellen()) {
+  if (m >= 1000) return fmtKm(m / 1000) + ' km';
+  return AB_NF[m >= 100 ? 0 : stellen].format(m) + ' m';
+}
+
+const abAbstand = k => haversine(ortLetzt.lat, ortLetzt.lon, k[0], k[1]);
+
+/** Versatz zum Ziel in Metern, nach Norden und Osten positiv. */
+function abVersatz(k) {
+  const R = 6371000, rad = Math.PI / 180;
+  return {
+    n: (k[0] - ortLetzt.lat) * rad * R,
+    o: (k[1] - ortLetzt.lon) * rad * R * Math.cos((k[0] + ortLetzt.lat) / 2 * rad)
+  };
+}
+
+/* ---- Pfeil nach dem Handy ----
+ *
+ * Ohne Kompass zeigt der Pfeil dorthin, wo das Ziel auf der Karte liegt — bei
+ * genordeter Karte also von Norden aus. Mit Kompass dreht er mit dem Gerät: Die
+ * Oberkante des Bildschirms ist vorn, und der Pfeil zeigt, wohin man gehen muss.
+ *
+ * Die Richtung kommt vom Magnetfeldsensor. Der streut typisch 5 bis 15 Grad, an
+ * der Strecke mehr: Schienen, Fahrleitung und Fahrzeuge lenken ihn ab. Für den
+ * letzten Meter zählt deshalb der Versatz nach Nord und Ost, nicht der Pfeil.
+ * Die Missweisung (in Deutschland 3 bis 5 Grad Ost) bleibt außen vor — sie
+ * liegt unter dem, was der Sensor ohnehin streut. */
+let abKurs = null;            // Kompassrichtung der Bildschirmoberkante, Grad ab Nord
+let abKursHorcht = null;      // das abonnierte Ereignis
+let abPfeilBild = 0;
+
+function abKursEreignis(e) {
+  let kurs = null;
+  if (typeof e.webkitCompassHeading === 'number' && isFinite(e.webkitCompassHeading)) {
+    kurs = e.webkitCompassHeading;           // iOS: schon im Uhrzeigersinn ab Nord
+  } else if ((e.absolute || e.type === 'deviceorientationabsolute') && e.alpha != null) {
+    kurs = 360 - e.alpha;                    // alpha zählt gegen den Uhrzeigersinn
+  }
+  if (kurs == null || !isFinite(kurs)) return;
+  // Quer gehalten liegt die Oberkante des Bildschirms an einer anderen Seite des Geräts
+  const lage = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+  kurs = ((kurs + lage) % 360 + 360) % 360;
+  /* Glätten, aber über den Kreis: Ein schlichter Mittelwert aus 359° und 1° wäre
+   * 180°. Ein Viertel je Meldung beruhigt das Zittern, ohne nachzuhängen. */
+  const erste = abKurs == null;
+  if (erste) abKurs = kurs;
+  else abKurs = (abKurs + (((kurs - abKurs) % 360 + 540) % 360 - 180) * 0.25 + 360) % 360;
+  if (erste) abBezugZeigen();
+  if (!abPfeilBild) abPfeilBild = requestAnimationFrame(() => { abPfeilBild = 0; abPfeile(); });
+}
+
+/* Unter dem Pfeil steht, wonach er gerade wirklich zeigt; der Rahmen sagt, dass
+ * Kompass gewünscht ist. Beides fällt auseinander, solange der Sensor nichts
+ * meldet — dann zeigt der Pfeil weiter nach der Karte, und das soll dastehen. */
+const abBezug = () => prefs.abKompass && abKurs != null ? 'Kompass' : 'Karte';
+
+function abBezugZeigen() {
+  const btn = $('[data-abkompass]');
+  if (!btn) return;
+  btn.classList.toggle('is-on', !!prefs.abKompass);
+  btn.setAttribute('aria-pressed', prefs.abKompass ? 'true' : 'false');
+  btn.querySelector('span').textContent = abBezug();
+}
+
+/** Meldet der Sensor nach einer Weile nichts, hat das Gerät keinen Kompass. */
+function abKursPruefen() {
+  setTimeout(() => {
+    if (prefs.abKompass && abAn && abKurs == null) toast('Kein Kompass gefunden — der Pfeil richtet sich weiter nach der Karte.');
+  }, 2500);
+}
+
+function abKursAn() {
+  if (abKursHorcht) return;
+  // Android meldet die Richtung zum Norden nur im eigenen Ereignis, iOS im gewöhnlichen
+  abKursHorcht = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+  window.addEventListener(abKursHorcht, abKursEreignis);
+}
+
+function abKursAus() {
+  if (abKursHorcht) window.removeEventListener(abKursHorcht, abKursEreignis);
+  abKursHorcht = null;
+  abKurs = null;
+}
+
+/* iOS gibt den Sensor nur nach einer Freigabe heraus, und die darf nur aus einem
+ * Tipp heraus erfragt werden — deshalb steht der Aufruf vor jedem await. Eine
+ * einmal erteilte Freigabe kommt sofort zurück. */
+function abKursFreigabe() {
+  const D = window.DeviceOrientationEvent;
+  if (!D) return Promise.resolve(false);
+  if (typeof D.requestPermission !== 'function') return Promise.resolve(true);
+  return D.requestPermission().then(r => r === 'granted', () => false);
+}
+
+async function abKompassSchalten() {
+  if (prefs.abKompass) {
+    prefs.abKompass = false;
+    abKursAus();
+  } else {
+    const frei = abKursFreigabe();
+    if (!(await frei)) { toast('Ohne Zugriff auf den Kompass bleibt der Pfeil nach der Karte.'); return; }
+    prefs.abKompass = true;
+    abKursAn();
+    toast('Der Pfeil dreht jetzt mit dem Handy — flach halten. Schienen und Fahrleitung lenken den Kompass ab.');
+    abKursPruefen();
+  }
+  saveStore();
+  abBezugZeigen();
+  abPfeile();
+}
+
+/* Richtung zum Ziel auf dem Bildschirm, in Grad im Uhrzeigersinn ab oben.
+ *
+ * Mit Kompass: die Peilung zum Ziel abzüglich der Richtung, in die das Handy
+ * zeigt. Ohne — oder solange der Kompass noch nichts gemeldet hat — nach der
+ * Karte, über die ungerundete Projektion gerechnet: latLngToContainerPoint
+ * rundet auf ganze Pixel, und auf wenige Meter Abstand sprang der Pfeil damit in
+ * groben Stufen. Die Kartendrehung kommt dazu — Norden liegt bei b Grad (syncNorth). */
+function abWinkel(k) {
+  if (prefs.abKompass && abKurs != null) {
+    return peilung(ortLetzt, { lat: k[0], lon: k[1] }) - abKurs;
+  }
+  const z = 22;
+  const a = map.project([ortLetzt.lat, ortLetzt.lon], z), b = map.project(k, z);
+  const nordoben = Math.atan2(b.x - a.x, a.y - b.y) * 180 / Math.PI;
+  return nordoben + (map.getBearing ? map.getBearing() || 0 : 0);
+}
+
+function abPasst(o, f) {
+  if ((o.name || '').toLowerCase().includes(f)) return true;
+  for (const [, v] of (o.daten || [])) if (String(v).toLowerCase().includes(f)) return true;
+  return false;
+}
+
+/** Alle Punkte der sichtbaren Dateien, die zum Filter passen, in Dateireihenfolge. */
+function abKandidaten() {
+  const f = abFilter.trim().toLowerCase();
+  const raus = [];
+  for (const a of kmlAkten) {
+    if (!a.sichtbar) continue;
+    for (const o of a.objekte) {
+      if (o.art !== 'p' || !kmlSichtbarObj(a, o)) continue;
+      if (f && !abPasst(o, f)) continue;
+      raus.push({ a, o });
+    }
+  }
+  return raus;
+}
+
+function abSortieren(liste) {
+  const art = AB_SORT.includes(prefs.abSort) ? prefs.abSort : 'nah';
+  abOhneOrt = art === 'nah' && !ortLetzt;
+  if (art === 'name') {
+    liste.sort((x, y) => abNamen.compare(x.o.name || '', y.o.name || ''));
+  } else if (art === 'nah' && ortLetzt) {
+    for (const e of liste) e.d = abAbstand(e.o.koord);
+    liste.sort((x, y) => x.d - y.d);
+  }
+  return liste;          // „datei" bleibt, wie es kam — sort ist stabil
+}
+
+/** Symbol wie auf der Karte: dieselbe Farbe und Form wie in kmlEbene. */
+function abSymbol(a, o, formKarten) {
+  const s = o.stil || {};
+  const farbe = a.farbeFest ? a.farbe : (s.punkt || s.color || a.farbe);
+  let form = a.symbol || 'kreis';
+  if (form === 'auto') {
+    if (!formKarten.has(a)) formKarten.set(a, kmlFormKarte(a));
+    const karte = formKarten.get(a);
+    form = (karte && karte.get(kmlWert(o, a.autoFeld))) || 'kreis';
+  }
+  return kmlSymbolSvg(form, esc(farbe));
+}
+
+function abUnterzeile(a, o) {
+  const merkmal = a.autoFeld ? kmlWert(o, a.autoFeld) : null;
+  return [merkmal, a.name].filter(Boolean).join(' · ');
+}
+
+const AB_ZU = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+/** Kompass wieder anwerfen, wenn er eingeschaltet war — nur während des Absteckens,
+ *  der Sensor kostet Strom. Läuft aus einem Tipp heraus, wegen der Freigabe in iOS. */
+function abKursWieder() {
+  if (!prefs.abKompass || abKursHorcht) return;
+  abKursFreigabe().then(ok => {
+    if (!ok || !abAn) return;
+    abKursAn();
+    abKursPruefen();
+  });
+}
+
+function abStart() {
+  if (!abMoeglich()) { toast('Erst eine KML-Datei mit Punkten laden und einschalten.'); return; }
+  abAn = true;
+  abListeOffen = !abZiel;
+  closeSheet();
+  if (!ortAn()) locate();
+  abKursWieder();
+  abZeichnen();
+  abLeiste();
+  abKnopf();
+}
+
+function abEnde() {
+  abAn = false;
+  abZiel = null;
+  abListeOffen = false;
+  abVorher = [];
+  abFilter = '';
+  abKursAus();
+  abZeichnen();
+  abLeiste();
+  abKnopf();
+}
+
+/** Ziel setzen — aus der Liste, über „Nächster" oder aus der Sprechblase. */
+function abZielSetzen(e, merken = true) {
+  if (merken && abZiel && abZiel.o !== e.o) abVorher.push(abZiel);
+  abZiel = { a: e.a, o: e.o };
+  abWarZiel.add(e.o);
+  abListeOffen = false;
+  if (!abAn) { abAn = true; closeSheet(); }
+  if (!ortAn()) locate();
+  abKursWieder();
+  abZeichnen();
+  abLeiste();
+  abKnopf();
+  abInsBild();
+}
+
+/* Liegt das Ziel außerhalb des Bildes, die Karte so stellen, dass Standort und
+ * Ziel beide zu sehen sind — die Wahl ist ein bewusster Griff, da darf sie sich
+ * bewegen. Liegt es schon im Bild, bleibt sie stehen. */
+function abInsBild() {
+  const k = abZiel.o.koord;
+  if (map.getBounds().pad(-0.12).contains(k)) return;
+  if (ortLetzt && abAbstand(k) < 3000) {
+    map.fitBounds(L.latLngBounds([k, [ortLetzt.lat, ortLetzt.lon]]), {
+      paddingTopLeft: [50, 120], paddingBottomRight: [70, 220], maxZoom: 19
+    });
+  } else {
+    map.setView(k, Math.max(map.getZoom(), 17));
+  }
+}
+
+function abWeiter() {
+  const liste = abKandidaten();
+  let neu = null;
+  if ((prefs.abSort || 'nah') === 'nah' && (ortLetzt || abZiel)) {
+    // Vom Standort aus — ohne Ortung vom bisherigen Ziel aus
+    const von = ortLetzt ? [ortLetzt.lat, ortLetzt.lon] : abZiel.o.koord;
+    let best = Infinity;
+    for (const e of liste) {
+      if (abWarZiel.has(e.o)) continue;
+      const d = haversine(von[0], von[1], e.o.koord[0], e.o.koord[1]);
+      if (d < best) { best = d; neu = e; }
+    }
+    if (!neu) { toast('Alle Punkte dieser Auswahl waren schon Ziel.'); return; }
+  } else {
+    abSortieren(liste);
+    const i = abZiel ? liste.findIndex(e => e.o === abZiel.o) : -1;
+    neu = liste[i + 1];
+    if (!neu) { toast('Das war der letzte Punkt der Liste.'); return; }
+  }
+  abZielSetzen(neu);
+}
+
+function abZurueck() {
+  const e = abVorher.pop();
+  if (e) abZielSetzen(e, false);
+}
+
+/* -------- Karte -------- */
+
+const AB_MARKE = '<svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true"><g fill="none">' +
+  '<circle class="halo" cx="16" cy="16" r="10"/><path class="halo" d="M16 1.5v6M16 24.5v6M1.5 16h6M24.5 16h6"/>' +
+  '<circle class="ring" cx="16" cy="16" r="10"/><path class="ring" d="M16 1.5v6M16 24.5v6M1.5 16h6M24.5 16h6"/></g></svg>';
+
+/** Ring um das Ziel und die Linie vom Standort dorthin. Angelegt einmal, danach nur verschoben. */
+function abZeichnen() {
+  if (!abLayer) abLayer = L.layerGroup().addTo(map);
+  if (!abAn || !abZiel) {
+    abLayer.clearLayers();
+    abLinie = abMarke = null;
+    return;
+  }
+  const k = abZiel.o.koord;
+  if (!abMarke) {
+    // Über den KML-Symbolen, sonst verdeckt das Symbol die Mitte des Rings
+    abMarke = L.marker(k, {
+      pane: 'kmlIconPane', interactive: false, keyboard: false, zIndexOffset: 1000,
+      icon: L.divIcon({ className: 'ab-marke', iconSize: [32, 32], iconAnchor: [16, 16], html: AB_MARKE })
+    }).addTo(abLayer);
+  } else {
+    abMarke.setLatLng(k);
+  }
+  if (ortLetzt) {
+    const linie = [[ortLetzt.lat, ortLetzt.lon], k];
+    if (!abLinie) {
+      /* Gestrichelt, nicht gepunktet: Gepunktet sind in der OSM-Karte die Fußwege,
+       * und genau zwischen denen läuft man beim Abstecken. */
+      abLinie = L.polyline(linie, {
+        className: 'ab-linie', weight: 3, opacity: 0.95, dashArray: '10 6', lineCap: 'butt', interactive: false
+      }).addTo(abLayer);
+    } else {
+      abLinie.setLatLngs(linie);
+    }
+  } else if (abLinie) {
+    abLayer.removeLayer(abLinie);
+    abLinie = null;
+  }
+}
+
+/* -------- Leiste -------- */
+
+function abLeiste() {
+  const el = $('#ziel');
+  if (!el) return;
+  if (!abAn) { el.hidden = true; el.innerHTML = ''; updateBH(); return; }
+  el.hidden = false;
+  if (abListeOffen || !abZiel) abListeZeigen(el); else abZielZeigen(el);
+  updateBH();
+}
+
+function abListeZeigen(el) {
+  const sort = AB_SORT.includes(prefs.abSort) ? prefs.abSort : 'nah';
+  const knopf = (art, text) =>
+    `<button type="button" class="seg-btn${sort === art ? ' is-on' : ''}" data-absort="${art}">${text}</button>`;
+  el.innerHTML = `
+    <button type="button" class="bb-close" data-abzu aria-label="Abstecken beenden">${AB_ZU}</button>
+    <div class="bb-head">
+      <p class="bb-title">Abstecken</p>
+      <span class="tag">Punkt wählen</span>
+      ${abZiel ? '<button type="button" class="ab-zur" data-abanzeige>Zur Anzeige</button>' : ''}
+    </div>
+    <input id="abFilter" class="ab-filter" type="search" placeholder="Name oder Merkmal" autocomplete="off"
+           spellcheck="false" enterkeyhint="search" aria-label="Punkte filtern" value="${esc(abFilter)}">
+    <div class="seg ab-sort" role="group" aria-label="Sortierung">
+      ${knopf('nah', 'Nächste zuerst')}${knopf('name', 'Name')}${knopf('datei', 'Datei')}
+    </div>
+    <div id="abListe" class="ab-liste"></div>`;
+
+  el.querySelector('[data-abzu]').addEventListener('click', abEnde);
+  const zur = el.querySelector('[data-abanzeige]');
+  if (zur) zur.addEventListener('click', () => { abListeOffen = false; abLeiste(); });
+
+  const filter = el.querySelector('#abFilter');
+  filter.addEventListener('input', () => { abFilter = filter.value; abListeFuellen(); });
+  filter.addEventListener('keydown', ev => { if (ev.key === 'Enter') filter.blur(); });
+
+  el.querySelectorAll('[data-absort]').forEach(btn => btn.addEventListener('click', () => {
+    prefs.abSort = btn.dataset.absort;
+    saveStore();
+    el.querySelectorAll('[data-absort]').forEach(b => b.classList.toggle('is-on', b === btn));
+    abListeFuellen();
+  }));
+
+  // Ein Zuhörer für die ganze Liste: Die Zeilen werden beim Filtern neu gebaut
+  el.querySelector('#abListe').addEventListener('click', ev => {
+    const zeile = ev.target.closest('[data-ab]');
+    const e = zeile && abListe[Number(zeile.dataset.ab)];
+    if (e) abZielSetzen(e);
+  });
+
+  abListeFuellen();
+}
+
+function abListeFuellen() {
+  const box = $('#abListe');
+  if (!box) return;
+  abListe = abSortieren(abKandidaten());
+
+  if (!abListe.length) {
+    box.innerHTML = `<p class="ab-mehr">${abFilter.trim()
+      ? 'Kein Punkt passt zum Filter.' : 'Keine Punkte in den eingeschalteten Dateien.'}</p>`;
+    updateBH();
+    return;
+  }
+
+  const formKarten = new Map();
+  const zeilen = abListe.slice(0, AB_LISTE_MAX).map((e, i) => {
+    const ist = abZiel && abZiel.o === e.o;
+    const war = !ist && abWarZiel.has(e.o);
+    const unter = abUnterzeile(e.a, e.o) + (war ? ' · war schon Ziel' : '');
+    return `<button type="button" class="ab-zeile${ist ? ' is-on' : ''}${war ? ' war' : ''}" data-ab="${i}">` +
+      `<span class="ab-sym">${abSymbol(e.a, e.o, formKarten)}</span>` +
+      `<span class="ab-txt"><b>${esc(e.o.name || '(ohne Namen)')}</b><small>${esc(unter)}</small></span>` +
+      `<span class="ab-weit" data-abweit="${i}"></span>` +
+      `<svg class="ab-pfeil" data-abpfeil="${i}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l6 16-6-4-6 4z"/></svg>` +
+      `</button>`;
+  });
+  const vorn = abOhneOrt
+    ? '<p class="ab-mehr">Nach Entfernung sortiert wird, sobald der Standort da ist.</p>' : '';
+  const rest = abListe.length > AB_LISTE_MAX
+    ? `<p class="ab-mehr">… und ${nfM.format(abListe.length - AB_LISTE_MAX)} weitere — der Filter grenzt ein.</p>` : '';
+  box.innerHTML = vorn + zeilen.join('') + rest;
+  box.scrollTop = 0;
+  abListeWerte();
+  updateBH();
+}
+
+/* Entfernung und Pfeil je Zeile, bei jeder Ortung. Umsortiert wird dabei nicht:
+ * Eine Liste, die unter dem Finger die Reihenfolge wechselt, trifft man nicht. */
+function abListeWerte() {
+  const box = $('#abListe');
+  if (!box) return;
+  box.querySelectorAll('[data-abweit]').forEach(s => {
+    const e = abListe[Number(s.dataset.abweit)];
+    s.textContent = ortLetzt && e ? abMeter(abAbstand(e.o.koord), 0) : '';
+  });
+  box.querySelectorAll('[data-abpfeil]').forEach(p => {
+    const e = abListe[Number(p.dataset.abpfeil)];
+    p.style.visibility = ortLetzt && e ? '' : 'hidden';
+    if (ortLetzt && e) p.style.transform = `rotate(${abWinkel(e.o.koord).toFixed(1)}deg)`;
+  });
+}
+
+function abZielZeigen(el) {
+  const { a, o } = abZiel;
+  const k = o.koord;
+  el.innerHTML = `
+    <button type="button" class="bb-close" data-abzu aria-label="Abstecken beenden">${AB_ZU}</button>
+    <div class="ab-kopf">
+      <!-- Der Pfeil ist zugleich der Schalter: Antippen wechselt zwischen Karte und Kompass -->
+      <button type="button" class="ab-richtung${prefs.abKompass ? ' is-on' : ''}" data-abkompass
+              aria-pressed="${prefs.abKompass ? 'true' : 'false'}"
+              title="Antippen: Pfeil nach dem Handy (Kompass) oder nach der Karte">
+        <svg id="abPfeil" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l7 18-7-4.6-7 4.6z"/></svg>
+        <span>${abBezug()}</span>
+      </button>
+      <div class="ab-kopf-txt">
+        <p id="abWeite" class="ab-weite">—</p>
+        <p class="ab-name">${esc(o.name || '(ohne Namen)')}<small>${esc(abUnterzeile(a, o))}</small></p>
+      </div>
+      <span id="abTag" class="tag ok" hidden>am Ziel</span>
+    </div>
+    <p id="abVersatz" class="bb-note plain"></p>
+    <div class="bb-actions">
+      <button type="button" data-abliste>Liste</button>
+      <button type="button" data-abzurueck${abVorher.length ? '' : ' disabled'}>Zurück</button>
+      <button type="button" class="maps" data-abweiter>Nächster</button>
+      <a class="bb-ikon" href="${gmapsUrl(k[0], k[1])}" target="_blank" rel="noopener"
+         aria-label="In Google Maps öffnen" title="In Google Maps öffnen">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.3s-6.6-6.1-6.6-11.2a6.6 6.6 0 0 1 13.2 0c0 5.1-6.6 11.2-6.6 11.2z"/><circle cx="12" cy="10.1" r="2.4"/></svg>
+      </a>
+    </div>`;
+
+  el.querySelector('[data-abzu]').addEventListener('click', abEnde);
+  el.querySelector('[data-abliste]').addEventListener('click', () => { abListeOffen = true; abLeiste(); });
+  el.querySelector('[data-abzurueck]').addEventListener('click', abZurueck);
+  el.querySelector('[data-abweiter]').addEventListener('click', abWeiter);
+  el.querySelector('[data-abkompass]').addEventListener('click', abKompassSchalten);
+  abZielWerte();
+}
+
+/** Nur die Pfeile drehen — beim Kompass bis zu 60-mal je Sekunde, da bleibt der Rest stehen. */
+function abPfeile() {
+  if (!abAn || !ortLetzt) return;
+  const p = $('#abPfeil');
+  if (p && abZiel) p.style.transform = `rotate(${abWinkel(abZiel.o.koord).toFixed(1)}deg)`;
+  document.querySelectorAll('#abListe [data-abpfeil]').forEach(s => {
+    const e = abListe[Number(s.dataset.abpfeil)];
+    if (e) s.style.transform = `rotate(${abWinkel(e.o.koord).toFixed(1)}deg)`;
+  });
+}
+
+function abZielWerte() {
+  const weite = $('#abWeite'), pfeil = $('#abPfeil'), versatz = $('#abVersatz'), tag = $('#abTag');
+  if (!abZiel || !weite) return;
+  if (!ortLetzt) {
+    weite.textContent = '—';
+    pfeil.style.visibility = 'hidden';
+    tag.hidden = true;
+    versatz.textContent = ortAn() ? 'Standort wird bestimmt …' : 'Standort ist aus — der Standortknopf schaltet ihn ein.';
+    return;
+  }
+  const k = abZiel.o.koord;
+  const d = abAbstand(k);
+  const { n, o } = abVersatz(k);
+  const st = abStellen();
+  weite.textContent = abMeter(d, st);
+  pfeil.style.visibility = '';
+  pfeil.style.transform = `rotate(${abWinkel(k).toFixed(1)}deg)`;
+  versatz.textContent = `${abMeter(Math.abs(n), st)} ${n >= 0 ? 'N' : 'S'} · ` +
+    `${abMeter(Math.abs(o), st)} ${o >= 0 ? 'O' : 'W'} · GPS ±${abMeter(ortLetzt.genau, st)}`;
+  // Näher als die Ortung genau ist, lässt sich nicht herankommen
+  tag.hidden = d > ortLetzt.genau;
+}
+
+/** Nach jeder Ortung, Drehung oder Änderung an den Dateien. */
+function abNachziehen() {
+  if (!abAn) return;
+  abZeichnen();
+  if (abListeOffen || !abZiel) {
+    if (abOhneOrt && ortLetzt) abListeFuellen();   // einmal nachsortieren, sobald der Standort da ist
+    else abListeWerte();
+  } else {
+    abZielWerte();
+  }
 }
 
 /* ============================ Verlauf ============================ */
@@ -5937,6 +6887,7 @@ function openSheet() {
 function closeSheet() {
   $('#sheet').hidden = true;
   document.querySelectorAll('#sheet [data-sec]').forEach(b => { b.open = false; });
+  parzWahlZeigen(false);
   $('#menuBtn').classList.remove('is-on');
   $('#menuBtn').setAttribute('aria-expanded', 'false');
 }
@@ -6001,6 +6952,26 @@ function syncButtons() {
     b.classList.toggle('is-on', b.dataset.theme === (prefs.theme || 'auto')));
   document.querySelectorAll('[data-palette]').forEach(b =>
     b.classList.toggle('is-on', b.dataset.palette === (prefs.palette || 'lapis')));
+
+  /* Parzellenfarbe: eine der festen, Auto — oder eine eigene, dann ist das
+   * Pluszeichen markiert und trägt die Farbe */
+  const parz = /^#[0-9a-f]{6}$/i.test(prefs.parzFarbe || '') ? prefs.parzFarbe.toLowerCase() : 'auto';
+  let parzFest = false;
+  document.querySelectorAll('[data-parz]').forEach(b => {
+    const an = b.dataset.parz === parz;
+    if (an) parzFest = true;
+    b.classList.toggle('is-on', an);
+  });
+  const eigen = $('.parz-eigen');
+  if (eigen) {
+    const istEigen = !parzFest;
+    eigen.classList.toggle('is-on', istEigen);
+    eigen.style.setProperty('--parz', istEigen ? parz : '');
+    if (istEigen) $('#parzEigen').value = parz;
+  }
+  // Das Feld im Knopf: die Farbe, in der gerade gezeichnet wird — bei Auto je nach Grund
+  const jetzt = $('.parz-jetzt');
+  if (jetzt) jetzt.style.setProperty('--parz', parzFarbe());
   if (map) {
     // Nach der Wahl, nicht nach der Karte: Straßen und Ortsnamen sind über der
     // OSM-Karte gewählt, aber nicht gezeichnet
@@ -6018,6 +6989,7 @@ function syncButtons() {
     mb.classList.toggle('is-on', messModus);
     mb.setAttribute('aria-pressed', messModus ? 'true' : 'false');
   }
+  abKnopf();
 
   const wl = $('#wegLinieBtn');
   if (wl) wl.classList.toggle('is-on', prefs.wegLinie !== false);
@@ -6172,9 +7144,12 @@ function bind() {
     syncButtons();
     drawMilestones();
   });
-  on('#parzBtn', 'click', () => toggleOverlay('parz'));
+  parzKnopfBinden();
+  buildParzRow();
   on('#strBtn', 'click', () => toggleOverlay('str'));
   on('#ortBtn', 'click', () => toggleOverlay('ort'));
+  on('#radarBtn', 'click', () => toggleOverlay('radar'));
+  radarBinden();
   document.querySelectorAll('[data-theme]').forEach(b => b.addEventListener('click', () => {
     prefs.theme = b.dataset.theme;
     applyTheme();
@@ -6200,6 +7175,7 @@ function bind() {
   on('#mapLocBtn', 'click', locate);
 
   on('#mapMessBtn', 'click', () => { if (messModus) messEnde(); else messStart(); });
+  on('#mapZielBtn', 'click', () => { if (abAn) abEnde(); else abStart(); });
 
   on('#kmlNamenBtn', 'click', () => {
     prefs.kmlNamen = prefs.kmlNamen === false;

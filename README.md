@@ -36,10 +36,18 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   25 km, wird auch in der Richtung km → Position von selbst am Gleis entlang abgetragen, statt
   den nächsten Stein mit „x km daneben" zu zeigen.
 - **Grundkarte und Auflagen getrennt.** Als Grundkarte Karte, dunkle Karte (OpenFreeMap), Luftbild, DOP20
-  oder Geländerelief; darüber beliebig kombinierbar Bahn-Layer, Flurstücksgrenzen, Straßennetz
-  und Ortsnamen — die beiden letzten für die Bildgrundkarten, auf denen sie sonst fehlen, und
-  für die dunkle Karte, deren eigene sie durch deutlichere ersetzen. Dazu
+  oder Geländerelief; darüber beliebig kombinierbar Bahn-Layer, Flurstücksgrenzen (in wählbarer
+  Farbe), Straßennetz, Ortsnamen und das **Regenradar des DWD** — Straßen und Ortsnamen für die
+  Bildgrundkarten, auf denen sie sonst fehlen, und für die dunkle Karte, deren eigene sie durch
+  deutlichere ersetzen. Dazu
   eigener Standort, Link zum Teilen, Betriebsstellensuche über Name, DS100 oder UIC.
+- **Regenradar** mit Zeitleiste: eine Stunde Messung zurück, zwei Stunden Vorhersage voraus, zum
+  Abspielen in Viertelstunden — für die Frage, ob man den Außentermin noch trocken schafft
+  (siehe unten).
+- **Abstecken.** Punkte aus geladenen KML-Dateien ansteuern: Liste nach Entfernung, Name oder
+  Dateireihenfolge, dann Entfernung, Richtungspfeil und Versatz nach Nord und Ost vom eigenen
+  Standort, *Nächster* geht zum nächstgelegenen noch nicht angesteuerten Punkt. Der Pfeil richtet
+  sich nach der Karte oder — ein Tipp auf ihn — nach dem Kompass des Handys (siehe unten).
 - **Eigene KML- und KMZ-Dateien** öffnen — beliebig viele, jede einzeln ein- und ausschaltbar wie
   in einer Ebenenliste, mit wählbarer Farbe, wählbarem Symbol und Namen auf der Karte. Sie bleiben
   auf dem Gerät und sind auch offline wieder da (siehe unten).
@@ -50,9 +58,9 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   Hand arbeiten. Ein Tipp auf den Knopf holt die Karte zum Standort zurück, der nächste beendet die
   Verfolgung. Die Ortungsgenauigkeit zeigt der Kreis um den Punkt. Darüber erscheint eine Zeile,
   sobald es etwas zu zeigen gibt: der **eigene Kilometer** (nach einem Tipp auf den Punkt, mit
-  der Ortungsgenauigkeit als Zahl), der Abstand zum letzten Messpunkt und **Entfernung samt
-  Richtungspfeil zum nächsten Objekt der geladenen KML-Dateien** — damit lassen sich Punkte im
-  Gelände ablaufen. Nur zum Verfolgen bleibt die Zeile weg.
+  der Ortungsgenauigkeit als Zahl) und der Abstand zum letzten Messpunkt. Nur zum Verfolgen
+  bleibt die Zeile weg — auch bei geladenen KML-Dateien: Das Ansteuern eines Punkts läuft über
+  das Abstecken, in dem man ihn auswählt.
 - **Messen** — Punkte auf der Karte antippen, die Luftlinie steht als Maßzahl an jedem Abschnitt
   und als Summe in der Leiste. Liegen Anfang und Ende auf der geladenen Strecke, steht die
   Differenz **nach Kilometrierung** daneben; die Abweichung zwischen beiden Zahlen zeigt gleich,
@@ -148,7 +156,9 @@ Tipp still auf irgendeinen Punkt gesprungen — die Messung um diese Strecke fal
 sieht. Weiter entfernte Punkte stehen weiter zur Auswahl, nur nicht automatisch.
 
 **Zoomknöpfe gibt es nicht** — am Rechner zoomt das Mausrad, am Gerät zwei Finger oder ein
-Doppeltipp. Der Platz rechts unten gehört den drei eigenen Knöpfen: Messen, Ablesen, Standort.
+Doppeltipp. Der Platz rechts unten gehört den eigenen Knöpfen: von unten Standort, Messen und —
+sobald eine eingeschaltete KML-Datei Punkte hat — das Fähnchen zum Abstecken; ganz oben bei
+gedrehter Karte der Kompass.
 
 ### Mehrere Achspunkte in einem Durchgang
 
@@ -641,7 +651,7 @@ Drei offene Dienste der Bayerischen Vermessungsverwaltung sind fest eingebaut, a
 | --- | --- | --- |
 | **DOP20** | `geoservices.bayern.de/od/wms/dop/v1/dop20` | `by_dop20c` |
 | **Relief** | `geoservices.bayern.de/od/wms/dgm/v1/relief` | `by_relief_schraeglicht` |
-| **Parzellen** | `geoservices.bayern.de/od/wms/alkis/v1/parzellarkarte` | `by_alkis_parzellarkarte_umr_gelb` / `_umr_schwarz` |
+| **Parzellen** | `geoservices.bayern.de/od/wms/alkis/v1/parzellarkarte` | `by_alkis_parzellarkarte_umr_schwarz`, in der App gefärbt |
 
 **DOP20** ist das amtliche Orthophoto mit 20 cm Bodenauflösung und damit wesentlich feiner als das
 weltweite Esri-Luftbild. **Relief** ist das Schräglicht aus dem Geländemodell — Dämme, Einschnitte
@@ -656,10 +666,57 @@ beim Orthophoto, ohne sichtbaren Unterschied.
 Die **Parzellarkarte** liegt als Auflage darüber, aber nur als Umring: Die Farbfassung mit
 Nutzungsarten bringt einen deckend weißen Grund mit (gemessen 0 % durchsichtig gegenüber 98 % beim
 Umring) und würde alles darunter verdecken. Wer sie braucht, kann sie unter *Eigener WMS-Layer* mit
-`by_alkis_parzellarkarte_farbe` laden. Die Umringe sind **gelb über Luftbildern und schwarz über der
-Karte**, sonst verschwinden sie jeweils im Untergrund. Der Dienst zeichnet sie erst unterhalb
+`by_alkis_parzellarkarte_farbe` laden. Der Dienst zeichnet sie erst unterhalb
 1:5000, also etwa ab Zoomstufe 17 — davor bleibt die Auflage leer, und die App sagt das beim
 Einschalten.
+
+**Die Farbe ist wählbar** — lange auf *Parzellen* drücken (am Rechner Rechtsklick), dann klappt
+die Wahl auf: *Auto* (gelb über Luftbildern, schwarz über der Karte, sonst verschwinden sie im
+Untergrund), sechs feste Farben oder über *+* eine beliebige. Ein kurzer Tipp schaltet weiter nur
+ein und aus; das kleine Feld im Knopf zeigt die Farbe, in der gerade gezeichnet wird.
+
+Der Dienst selbst kennt nur Schwarz und Gelb. Nachgemessen ist die schwarze Fassung reines Schwarz,
+geglättet über den Alphakanal, dazu einzelne weiße Pixel — und die gelbe Pixel für Pixel dieselbe
+Kachel mit Schwarz durch Gelb ersetzt. Die App holt deshalb immer die schwarze und färbt sie selbst
+um: Grauwert 0 wird die gewählte Farbe, Weiß bleibt Weiß, der Alphakanal bleibt. Gelb kommt so
+**bitgleich** zu dem heraus, was der Dienst liefert (0 von 262 144 Werten abweichend). Ein
+Farbwechsel färbt die geladenen Kacheln ohne neue Abfrage um. Das geht nur, weil der Dienst CORS
+freigibt — ohne wäre die Kachel für das Auslesen gesperrt.
+
+## Regenradar
+
+Unter *Karte → Regenradar* liegt das Niederschlagsradar des Deutschen Wetterdienstes über der
+Karte: Layer `Niederschlagsradar` aus `maps.dwd.de/geoserver/dwd/wms`, das RV-Produkt mit 1 km
+Raster, alle 5 Minuten neu, in mm/h. Der Dienst gibt CORS frei und rechnet in `EPSG:3857`, läuft also
+direkt als Leaflet-WMS. Es liegt über der Grundkarte und unter Parzellen und Bahn-Layer — eine
+Fläche, über der die Linien scharf bleiben, statt eingefärbt zu werden.
+
+Solange es an ist, steht unter der Suchzeile eine **Zeitleiste**: links eine Stunde Messung
+(durchgezogen), rechts zwei Stunden Vorhersage (gestrichelt), dazwischen eine Marke für die letzte
+Messung. Daneben die Uhrzeit des gezeigten Bildes und ob es Messung oder Vorhersage ist; darunter
+die Farbstufen des Dienstes. **▶** spielt den Verlauf in Viertelstunden ab und wartet dabei jedes
+Bild ab, statt im festen Takt halbe Bilder zu zeigen. Das **×** schaltet das Radar ab. Bei offenem
+Menü tritt die Leiste zurück.
+
+Zwei Dinge, die nicht offensichtlich sind:
+
+- **Ohne Zeitangabe geht es nicht.** Ohne `TIME` nimmt der Dienst „current", und das ist nicht die
+  letzte Messung, sondern der Zeitschritt, der der Uhr am nächsten liegt — meist schon einer der
+  Vorhersage. Eine erste Fassung legte die Ebene an, bevor die Zeitachse da war: Eine Kachel kam ohne
+  Zeit, die Nachbarkachel mit, und ein Regengebiet endete schnurgerade an der Kachelkante. Die letzte
+  Messung steht als Vorgabe von `REFERENCE_TIME` in den Capabilities der Ebene; über den Ebenenpfad
+  (`…/dwd/Niederschlagsradar/wms`) sind die 38 KB klein statt 875 KB für den ganzen Dienst. Gemessen
+  lag sie 6 Minuten hinter der Uhr. `TIME` allein genügt dann: Für einen vergangenen Zeitpunkt
+  liefert der Dienst die Messung, für einen künftigen die Vorhersage des neuesten Laufs.
+- **Bildwechsel über eine zweite Ebene.** Die lädt unsichtbar, und erst wenn alle Kacheln da sind,
+  wird getauscht. Sonst stünde zwischen zwei Bildern jedes Mal die leere Karte — beim Abspielen ein
+  Flackern im Takt.
+
+Ab Zoomstufe 12 werden die Bilder nur noch vergrößert: Die Daten haben 1 km Raster, eine Kachel
+der Stufe 12 ist rund 6 km breit; tiefer zu fragen kostete Abfragen und brächte nichts. Solange die
+App offen ist, sieht sie alle fünf Minuten nach einer neuen Messung; ein gewählter Zeitpunkt bleibt
+dabei stehen, nur „letzte Messung" geht mit. Der Service Worker lässt `maps.dwd.de` durch: Ein
+Radarbild ist nach fünf Minuten alt und gehört nicht in den Offlinevorrat.
 
 ## Eigener WMS-Layer
 
@@ -711,8 +768,8 @@ aufnehmen, etwa `5062AA00001 · PS2`.
 **Einzelne Merkmalswerte aus- und einblenden.** Unter *Sichtbar* steht jeder Wert des gewählten
 Merkmals mit seiner Häufigkeit — ein Tipp nimmt ihn aus der Karte. Aus einer Datei mit 61 Objekten
 werden so etwa nur die 36 Neubau-Querungen gezeigt; die Zeile in der Liste sagt dann „59 von 61
-Objekten". Ausgeblendetes wird auch nicht beschriftet, nicht beim Messen gefangen und nicht als
-nächstes Objekt gemeldet. Der Zustand bleibt gespeichert.
+Objekten". Ausgeblendetes wird auch nicht beschriftet, nicht beim Messen gefangen und nicht zum
+Abstecken angeboten. Der Zustand bleibt gespeichert.
 
 **Namen auf der Karte** erscheinen ab Zoomstufe 16 und höchstens 200 auf einmal, jeweils nur was
 im Bild liegt. Ohne diese Grenzen hängen bei einer Datei mit tausend Punkten tausend Textknoten in
@@ -776,6 +833,38 @@ bestimmen"**: Bei einem Punkt gilt dessen eigene Koordinate, bei einer Linie ode
 angetippte Stelle. Gerechnet wird danach genau wie bei einem Tipp auf die Karte, nur mit festem
 Fangradius von 80 m statt der zoomabhängigen Fingerbreite — die Koordinate eines gesetzten Punktes
 steht ja fest und soll nicht je nach Zoomstufe an eine andere Linie springen.
+
+### Abstecken
+
+Bis Oktober 2026 stand das nächste KML-Objekt von selbst in der Zeile oben, sobald der Standort
+lief — ungefragt und immer nur das nächste. Jetzt ist das ein eigener Griff: Hat eine
+eingeschaltete Datei Punkte, steht rechts über dem Messen ein **Fähnchen**. Es öffnet über der
+unteren Leiste eine eigene Leiste mit der Liste der Punkte — *Nächste zuerst*, nach *Name* (2 vor
+10) oder wie in der *Datei*, dazu ein Filter über Namen und Merkmale. Entfernung und Pfeil je Zeile
+laufen mit, umsortiert wird beim Laufen aber nicht: Eine Liste, die unter dem Finger die
+Reihenfolge wechselt, trifft man nicht. Ein Tipp auf einen Punkt in der Karte bietet in der
+Sprechblase dasselbe an.
+
+Nach der Wahl stehen dort die **Entfernung** groß, ein **Pfeil**, der **Versatz nach Nord und
+Ost** und die Ortungsgenauigkeit; auf der Karte ein Ring um den Punkt und eine gestrichelte Linie
+vom Standort (gestrichelt, weil gepunktet in der OSM-Karte die Fußwege sind). Nachkommastellen
+richten sich nach der Ortung: Ein Handy meldet ±3 bis 5 m, da wären Dezimeter Rauschen; hängt ein
+RTK-Empfänger am Gerät, kommen ±2 cm und Zentimeter dazu. *am Ziel* erscheint, sobald der Abstand
+kleiner ist als die Ortungsgenauigkeit — näher lässt sich nicht herankommen. **Nächster** geht nach
+Entfernung zum nächstgelegenen Punkt, der in dieser Sitzung noch nicht Ziel war, sonst zum nächsten
+der Liste; **Zurück** zum vorigen Ziel. Die Leiste ist eine eigene, damit ein unterwegs
+festgehaltener Kilometer in der unteren das Ziel nicht verdrängt.
+
+**Der Pfeil** richtet sich nach der Karte oder nach dem Handy — ein Tipp auf ihn schaltet um,
+darunter steht, wonach er gerade zeigt. *Karte*: dorthin, wo der Punkt auf dem Bildschirm liegt,
+samt Kartendrehung, gerechnet über die ungerundete Projektion (`latLngToContainerPoint` rundet auf
+ganze Pixel, auf wenige Meter sprang der Pfeil damit in groben Stufen). *Kompass*: die Peilung zum
+Punkt abzüglich der Richtung, in die das Handy zeigt — Oberkante vorn, also dorthin gehen, wohin der
+Pfeil zeigt. Die Richtung kommt unter Android aus `deviceorientationabsolute`, unter iOS aus
+`webkitCompassHeading` nach einer Freigabe, die nur aus einem Tipp heraus erfragt werden darf. Der
+Magnetfeldsensor streut typisch 5 bis 15 Grad und an der Strecke mehr — Schienen, Fahrleitung und
+Fahrzeuge lenken ihn ab. Für den letzten Meter zählt deshalb der Versatz nach Nord und Ost. Meldet
+das Gerät nichts, bleibt der Pfeil bei der Karte, und die App sagt das.
 
 ## Das mitgelieferte Gleisnetz
 
@@ -956,7 +1045,7 @@ unter `netz/` ein, die aus OSM abgeleitet sind und damit ebenfalls unter der ODb
 Bahn-Layer von
 [OpenRailwayMap](https://www.openrailwaymap.org/) (CC-BY-SA 2.0), Luftbilder von Esri,
 dunkle Karte, Straßen und Ortsnamen von [OpenFreeMap](https://openfreemap.org/) (© OpenMapTiles,
-Daten © OpenStreetMap).
+Daten © OpenStreetMap). Regenradar: Quelle [Deutscher Wetterdienst](https://www.dwd.de/).
 Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause),
 [leaflet-rotate](https://github.com/Raruto/leaflet-rotate) (GPL-3.0) und
 [MapLibre GL JS](https://maplibre.org/) 6.10.0 (BSD-3-Clause, `vendor/maplibre/`) bei, damit die
