@@ -61,6 +61,10 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   der Ortungsgenauigkeit als Zahl) und der Abstand zum letzten Messpunkt. Nur zum Verfolgen
   bleibt die Zeile weg — auch bei geladenen KML-Dateien: Das Ansteuern eines Punkts läuft über
   das Abstecken, in dem man ihn auswählt.
+- **Tour durch die App** — das **?** unten links neben dem © führt in neun Schritten durch alle
+  Funktionen und führt sie live vor: Es tippt eine Beispielstrecke ein und sucht sie, setzt einen
+  Punkt, öffnet Messmenü und Einstellungen und zeichnet ein Profil. Beim allerersten Start bietet
+  die App die Tour einmal an (siehe unten).
 - **Querprofil** — zwei oder mehr Punkte antippen, unten steht der Geländeschnitt aus dem amtlichen
   DGM1 (1 m Gitter); auf Knopfdruck kommt die Oberfläche mit Gebäuden und Bewuchs aus dem DOM20 als
   gestrichelte Linie dazu. Ein Finger auf dem Diagramm zeigt die Stelle auf der Karte. Nur in Bayern
@@ -706,6 +710,29 @@ um: Grauwert 0 wird die gewählte Farbe, Weiß bleibt Weiß, der Alphakanal blei
 **bitgleich** zu dem heraus, was der Dienst liefert (0 von 262 144 Werten abweichend). Ein
 Farbwechsel färbt die geladenen Kacheln ohne neue Abfrage um. Das geht nur, weil der Dienst CORS
 freigibt — ohne wäre die Kachel für das Auslesen gesperrt.
+
+## Tour
+
+Das **?** im ©-Kasten unten links startet sie, jederzeit. Die Karte wird abgedunkelt, nur das
+gerade erklärte Element bleibt hell und bekommt einen Rahmen in der Signalfarbe; daneben steht
+eine Blase mit Text, *Zurück* und *Weiter*. Am Rechner gehen auch die Pfeiltasten, Escape oder ×
+beendet sie. Während der Tour nimmt die Ebene alle Griffe ab — die Karte bewegt sich nur durch die
+Vorführung.
+
+Die neun Schritte: Suchzeile, Ergebnis, langer Druck setzt einen Punkt, Standort und mitlaufender
+Kilometer, Messmenü, Geländeprofil, Karten und Auflagen, eigene Dateien und Abstecken, Quellen und
+das ?. Was sie erklärt, führt sie vor: Sie tippt `5100 12,5` Zeichen für Zeichen ein (ohne die
+Tastatur des Handys aufzuklappen), sucht die Strecke wirklich, setzt einen Punkt, öffnet Messmenü
+und Einstellungen und zeichnet ein 300-m-Profil am Ergebnis. Klappt eine Vorführung nicht — ohne
+Netz, außerhalb Bayerns —, sagt die Blase das, statt zu warten; nach höchstens 12 s geht es weiter.
+
+Die Blase steht unter dem Ziel, wenn dort Platz ist, sonst darüber, sonst daneben (am großen
+Bildschirm neben dem offenen Menü); passt sie nirgends, steht sie unten am Rand — auf dem Handy
+beim Menü, dessen Knöpfe dann oben sichtbar bleiben.
+
+**Beim allerersten Start** bietet die App die Tour einmal an, in einer kleinen Blase über dem
+©-Kasten. Sie gilt als gemacht, sobald sie gezeigt wurde: Wer *Nein, danke* sagt, wird nicht wieder
+gefragt. Wer die App über einen geteilten Link öffnet, sieht zuerst sein Ergebnis und kein Angebot.
 
 ## Querprofil
 

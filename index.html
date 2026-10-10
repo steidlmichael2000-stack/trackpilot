@@ -356,6 +356,9 @@
       Antippen des Pins durchgehen. Höchstens 20 auf einmal. Auf dem Handy am besten in die
       Suchzeile oben tippen: Die hat eine vollständige Tastatur, der Zahlenblock am
       Kilometerfeld hat weder <code>&amp;</code> noch Leertaste.</p>
+      <p class="fine"><strong>Tour.</strong> Das <em>?</em> unten links neben dem © führt in neun
+      Schritten durch die App und zeigt dabei live vor, was es erklärt — mit Netz sucht es eine
+      Beispielstrecke und zeichnet ein Profil. Escape oder × beendet sie jederzeit.</p>
       <p class="fine"><strong>Polygon und Live.</strong> Unter <em>Polygon aus Punkten</em> stehen an
       jedem Abschnitt die Länge und unten die Summe; ab drei Punkten schließt ein Tipp auf den ersten
       Punkt (gestrichelter Ring) die Fläche, dann stehen Fläche und Umfang da. <em>Live</em> misst vom
@@ -406,11 +409,45 @@
     <div class="quellen-kasten">
       <button id="quellenBtn" class="quellen-knopf" type="button" aria-controls="quellenText"
               aria-expanded="true" aria-label="Quellen und Lizenzen" title="Quellen und Lizenzen">©</button>
+      <!-- Startet die Tour durch die App (tour.js) -->
+      <button id="tourBtn" class="quellen-knopf tour-start" type="button"
+              aria-label="Tour durch die App" title="Tour durch die App">?</button>
       <div id="quellenMass" class="quellen-mass"></div>
     </div>
     <div id="quellenText" class="quellen-text"></div>
   </div>
 
+</div>
+
+<!-- Tour durch die App (tour.js): Die Ebene dunkelt alles ab bis auf das „Loch"
+     über dem gerade erklärten Element; die Blase daneben trägt Text und Knöpfe. -->
+<div id="tour" class="tour" hidden role="dialog" aria-modal="true" aria-labelledby="tourTitel" aria-describedby="tourText">
+  <div class="tour-loch"></div>
+  <div class="tour-blase">
+    <div class="tour-kopf">
+      <span id="tourZahl" class="tour-zahl"></span>
+      <b id="tourTitel" class="tour-titel"></b>
+      <button id="tourZu" class="tour-zu" type="button" aria-label="Tour beenden">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <p id="tourText" class="tour-text" aria-live="polite"></p>
+    <div class="tour-fuss">
+      <span id="tourPunkte" class="tour-punkte" aria-hidden="true"></span>
+      <button id="tourZurueck" class="tour-knopf-2" type="button">Zurück</button>
+      <button id="tourWeiter" class="tour-weiter" type="button">Weiter</button>
+    </div>
+  </div>
+</div>
+
+<!-- Beim allerersten Start einmal: das Angebot, die Tour zu machen -->
+<div id="tourAngebot" class="tour-angebot" role="dialog" aria-labelledby="tourAngebotText" hidden>
+  <p id="tourAngebotText"><b>Neu hier?</b> Die Tour zeigt in zwei Minuten, was TrackPilot kann —
+  das <span class="tour-angebot-zeichen">?</span> unten links startet sie jederzeit wieder.</p>
+  <div class="tour-fuss">
+    <button id="tourAngebotNein" class="tour-knopf-2" type="button">Nein, danke</button>
+    <button id="tourAngebotJa" class="tour-weiter" type="button">Tour starten</button>
+  </div>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -423,5 +460,6 @@
 <!-- Höhendaten fürs Querprofil (DGM1/DOM20 der BVV über den eigenen Worker) -->
 <script src="hoehen.js"></script>
 <script src="app.js"></script>
+<script src="tour.js"></script>
 </body>
 </html>

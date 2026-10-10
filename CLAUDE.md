@@ -146,6 +146,20 @@ Messwerte stehen in der README, hier nur, was beim Weiterbauen nicht übersehen 
 - Die DGM1-Dateien sind nicht einheitlich gebaut (TIFF-Verzeichnis mal am Anfang, mal am Ende).
   Wer den Leser vereinfacht, prüft mindestens 636_5528 und 778_5292.
 
+## Tour (`tour.js`, Oktober 2026)
+
+Das ? im ©-Kasten startet sie; beim ersten Start einmal angeboten (`prefs.tourAngeboten`). Die
+Tour führt vor, indem sie dieselben Funktionen aufruft wie die Knöpfe: `search`, `merkPunkt`,
+`messMenueAuf`, `profStart`/`profGeaendert`/`profEnde`, `openSheet`/`closeSheet`, `suchAuf`,
+`closeSuggest` und die Variablen `view`, `profDgm`, `profLaedt`, `profFehler`. **Wer davon etwas
+umbenennt oder neue Funktionen einbaut, zieht die Schritte in `TOUR_SCHRITTE` nach** — sonst
+erklärt die Tour eine App, die es so nicht mehr gibt.
+
+- Das ? macht den ©-Kasten 21 px breiter; die Grenze für die Ecken-Anordnung (1010 px) hängt daran.
+- Beim Prüfen im Testbrowser: Ohne Bildanforderung friert er die 0,25-s-Übergänge von Loch und
+  Blase ein, `getBoundingClientRect` meldet dann Zwischenstände. Die gesetzten Werte in `style`
+  vergleichen oder vorher einen Screenshot auslösen.
+
 ## Beim Deployen
 
 `VERSION` in `sw.js` hochzählen. Der Worker arbeitet zwar „erst Netz, dann

@@ -29,12 +29,12 @@
   --r-klein: 4px;
   --bh: 6px;              /* Grundlinie der Knöpfe rechts, von JS gesetzt (updateBH) */
   --gap: 10px;
-  /* Rechte Kante der Knopfsäule. Bis 960 px die Kante der Bedienspalte (Leisten
+  /* Rechte Kante der Knopfsäule. Bis 1010 px die Kante der Bedienspalte (Leisten
      bis 640 px, mittig) — auf dem Handy fällt sie mit dem Fensterrand zusammen,
      auf dem Tablet hinge die Säule sonst abgelöst draußen. Darüber stehen
      Knöpfe und ©-Kasten in den Ecken, siehe „Große Bildschirme". */
   --saeule: max(var(--gap), calc((100vw - 640px) / 2));
-  /* Grundlinie der Knopfsäule: bis 960 px über der Leiste (--bh), darüber im Eck */
+  /* Grundlinie der Knopfsäule: bis 1010 px über der Leiste (--bh), darüber im Eck */
   --grund: var(--bh);
 }
 
@@ -142,7 +142,7 @@ body {
 }
 
 /* ---------- Quellenzeile: ein Kasten links ----------
-   (Ab 960 px Breite steht der Kasten stattdessen im Eck, siehe „Große
+   (Ab 1010 px Breite steht der Kasten stattdessen im Eck, siehe „Große
    Bildschirme".) Ohne Ergebnisleiste ganz unten, mit ihr 8 px darüber — auf derselben
    Grundlinie wie Standort- und Messknopf rechts (updateBH). Im Quelltext
    steht die Zeile hinter #ziel und #bottom, damit „#ziel[hidden] +
@@ -301,10 +301,10 @@ body {
    Neben der 640 px breiten Bedienspalte ist dann Platz. Der ©-Kasten steht
    unten links, die Knopfsäule unten rechts, beide mit der Unterkante auf der
    der Leiste, 6 px über dem Rand. So springen sie auch nicht mehr mit, wenn
-   eine Leiste auf- oder zugeht. Die Grenze: Mit voll langem Maßstab wird der
-   Kasten 138 px breit (über alle Zoomstufen nachgemessen); ab 960 px bleiben
-   neben der Spalte dann mindestens 12 px Luft. */
-@media (min-width: 960px) {
+   eine Leiste auf- oder zugeht. Die Grenze: Mit voll langem Maßstab und dem ?
+   der Tour wird der Kasten 159 px breit (über alle Zoomstufen nachgemessen);
+   ab 1010 px bleiben neben der Spalte dann mindestens 16 px Luft. */
+@media (min-width: 1010px) {
   :root { --saeule: var(--gap); --grund: 6px; }
   /* Die Zeile bleibt als Abstandhalter im Fluss — ihr margin-top: auto hält die
      Leisten unten —, ihr Inhalt wandert ins Eck */
@@ -1133,6 +1133,82 @@ body {
 .bb-chip.is-on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
 
 .bb-actions button:disabled { color: var(--muted-2); cursor: default; }
+
+/* ---------- Tour durch die App (tour.js) ---------- */
+
+/* Das ? im ©-Kasten, leicht getönt, damit man es findet. padding-box: Die
+   Tönung soll nicht unter dem Trennstrich liegen, der sonst doppelt deckte. */
+.tour-start {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background-clip: padding-box;
+}
+
+/* Die Ebene nimmt während der Tour alle Griffe ab */
+.tour { position: fixed; inset: 0; z-index: 700; }
+/* Das Loch: ein Rahmen in der Signalfarbe um das Ziel, dessen breiter Schatten
+   den Rest abdunkelt — kein Schein, eine deckende Fläche mit Aussparung */
+.tour-loch {
+  position: absolute; pointer-events: none;
+  border-radius: calc(var(--r) + 4px);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 200vmax rgba(0, 0, 0, .58);
+  transition: left .25s ease, top .25s ease, width .25s ease, height .25s ease;
+}
+.tour-loch.kreis { border-radius: 50%; }
+.tour-loch.leer { box-shadow: 0 0 0 200vmax rgba(0, 0, 0, .58); }
+
+.tour-blase {
+  position: absolute; width: min(340px, calc(100vw - 20px));
+  padding: 12px 13px 11px;
+  background: var(--glass); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  transition: left .25s ease, top .25s ease;
+}
+.tour-kopf { display: flex; align-items: baseline; gap: 8px; }
+.tour-zahl { flex: none; font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Während einer Vorführung steht es nur da — nichts blinkt */
+.tour.laeuft .tour-zahl::after { content: " · läuft …"; }
+.tour-titel { font-size: .95rem; font-weight: 650; }
+.tour-zu {
+  margin-left: auto; align-self: center; flex: none;
+  width: 28px; height: 28px; display: grid; place-items: center;
+  border: 0; border-radius: var(--r-knopf); background: none; color: var(--muted-2); cursor: pointer;
+}
+.tour-zu svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; }
+.tour-text { margin: 6px 0 11px; font-size: .84rem; line-height: 1.5; color: var(--text); }
+
+.tour-fuss { display: flex; align-items: center; gap: 6px; }
+.tour-punkte { display: flex; gap: 4px; margin-right: auto; }
+.tour-punkte i { width: 6px; height: 3px; border-radius: 2px; background: var(--line); }
+.tour-punkte i.is-on { width: 14px; background: var(--accent); }
+.tour-knopf-2, .tour-weiter {
+  padding: 8px 14px; border-radius: var(--r-knopf);
+  font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+}
+.tour-weiter { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+.tour-knopf-2:disabled { color: var(--muted-2); cursor: default; }
+
+/* Das Angebot beim ersten Start, über dem ©-Kasten (Lage aus tour.js) */
+.tour-angebot {
+  position: fixed; z-index: 650; width: min(300px, calc(100vw - 20px));
+  padding: 11px 12px;
+  background: var(--glass); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: var(--r); box-shadow: var(--shadow);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+.tour-angebot p { margin: 0 0 10px; font-size: .84rem; line-height: 1.5; }
+.tour-angebot-zeichen {
+  display: inline-grid; place-items: center; width: 17px; height: 17px;
+  border-radius: var(--r-klein); font-weight: 700; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.tour-angebot .tour-fuss { justify-content: flex-end; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-loch, .tour-blase { transition: none; }
+}
 
 /* ---------- Querprofil ---------- */
 

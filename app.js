@@ -1648,7 +1648,8 @@ let prefs = {
   abSort: 'nah',                         // Abstecken: Punktliste nach Entfernung, Name oder Datei
   abKompass: false,                      // Abstecken: Pfeil nach dem Handy statt nach der Karte
   parzFarbe: 'auto',                     // 'auto' (nach Grundkarte) oder '#rrggbb'
-  profUeber: 1,                          // Querprofil: Überhöhung, 0 = Höhe füllt das Bild
+  profUeber: 1,                          // Querprofil: Überhöhung (1, 2, 5 oder 10)
+  tourAngeboten: false,                  // die Tour wurde beim ersten Start schon einmal angeboten
   wms: { url: '', layers: '', opacity: 75, on: false }   // nur Adresse und Layer, nie Zugangsdaten
 };
 let recent = [];   // nicht "history" nennen — das ist window.history
