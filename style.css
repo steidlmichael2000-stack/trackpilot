@@ -1244,6 +1244,25 @@ body {
 }
 .prof-art button + button { border-left: 1px solid var(--line); }
 .prof-art button.is-on { background: var(--accent); color: var(--accent-ink); }
+/* Teilen als PDF, rechts im Kopf vor dem Schließkreuz */
+.prof-teilen {
+  flex: none; align-self: center; margin-left: auto; width: 30px; height: 26px;
+  display: grid; place-items: center; padding: 0; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--r-knopf); background: var(--panel-2); color: var(--text);
+}
+.prof-art + .prof-teilen { margin-left: 6px; }
+.prof-teilen svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+/* Auswahl, Fortschritt und „fertig" des PDF-Exports */
+.prof-pdf {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+  font-size: .78rem; color: var(--muted);
+}
+.prof-pdf button {
+  padding: 5px 10px; border: 1px solid var(--accent); border-radius: var(--r-knopf);
+  background: color-mix(in srgb, var(--accent) 13%, transparent); background-clip: padding-box;
+  color: var(--accent); font: inherit; font-weight: 600; cursor: pointer;
+}
+.prof-pdf .prof-pdf-zu { margin-left: auto; border-color: var(--line); background: var(--panel-2); color: var(--muted); }
 /* Der Versatz im freien Profil: Angabe und Rücksetzer in einem */
 .tag.prof-versatz {
   font-family: inherit; cursor: pointer; font-variant-numeric: tabular-nums;
@@ -1270,7 +1289,13 @@ body {
 .prof-bild .ecken { fill: none; stroke: var(--muted); stroke-dasharray: 2 3; }
 .prof-bild .flaeche { fill: color-mix(in srgb, var(--warn) 14%, transparent); }
 .prof-bild .dgm { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; }
-.prof-bild .dom { fill: none; stroke: var(--text); stroke-width: 1.1; stroke-dasharray: 3 2.5; opacity: .75; }
+/* Gebäude (LoD2): deckende graue Blöcke, Gelände und Oberfläche laufen darüber */
+.prof-bild .geb { fill: color-mix(in srgb, var(--muted) 45%, var(--bg)); stroke: var(--text); stroke-width: .8; stroke-linejoin: miter; }
+.prof-dom.prof-geb::before { height: 8px; width: 12px; background: color-mix(in srgb, var(--muted) 45%, var(--bg)); border: 1px solid var(--text); }
+/* Breite und Überhöhung als Gruppe rechts: bricht die Zeile, wandern beide zusammen */
+.prof-chips { margin-left: auto; display: inline-flex; gap: 6px; }
+.prof-chips .prof-ueber { margin-left: 0; }
+.prof-bild .dom {fill: none; stroke: var(--text); stroke-width: 1.1; stroke-dasharray: 3 2.5; opacity: .75; }
 .prof-bild .beschr text { fill: var(--muted); }
 .prof-bild .beschr .ecke { fill: var(--warn); font-weight: 650; }
 .prof-bild .zeiger path { stroke: var(--text); stroke-width: 1; }

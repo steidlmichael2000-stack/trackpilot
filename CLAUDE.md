@@ -161,6 +161,19 @@ längs: rund 200 Lagen als Linienzug, `g.kms` gehört zu `profDgm.ecken`.
   `resolvePoint`, `gleisGenau` oder `kmEntlangGleis` dreht, prüft beide Richtungen mit dem Rundlauf
   aus der README (Abschnitte *Profil am Gleis* und *Zwei Gleise, zwei Steinreihen*).
 
+## Gebäude (LoD2) und PDF (Oktober 2026)
+
+- **LoD2 kommt über den Worker** (`/lod2/{O}_{N}.gml`, 2-km-Kacheln mit geraden Kilometern), gzip-gepackt
+  über `Content-Encoding` im Worker. Auch diese Änderung wirkt erst nach Einfügen im Dashboard.
+- `gebaeude.js` hängt an `hoehen.js` (`HOEHEN`, `vorratLesen`/`vorratSchreiben`, `utm32Hin`); Vorrat unter
+  `lod2/{O}_{N}` als JSON. Nach Änderungen `node werkzeug/gebaeude-pruefen.mjs` — Vergleich mit dem DOM20
+  in der Dachmitte, nicht an Firsten (die rundet das DOM ab).
+- `pdf.js` ist ein eigener PDF-Schreiber (Helvetica, WinAnsi, JPEG). Zeichen außerhalb von WinAnsi
+  werden zu „?" — „Δ" deshalb im PDF ausgeschrieben. Nach Änderungen `node werkzeug/pdf-pruefen.mjs`.
+- Diagramm und PDF teilen sich `profHoehenfenster`, `profZSpanne`, `profAchse` und `profPfad` (der liefert
+  `d` fürs SVG und `punkte` fürs PDF). Wer den Maßstab ändert, ändert ihn an einer Stelle.
+- Das PDF-Luftbild ist ein GetMap am DOP20-WMS der BVV (der gibt CORS frei) — nicht über den Worker.
+
 ## Steinliste und Gleisweg (Oktober 2026)
 
 - **`e.alle` für die Karte, `e.sorted` für jede Rechnung.** `e.sorted` = `inselnWeg(steineVereinen(e.alle))`:

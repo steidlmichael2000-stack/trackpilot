@@ -845,6 +845,45 @@ Was bleibt, sind Steine, deren Abstand nicht zur Kilometrierung passt (Luftlinie
 Kilometerdifferenz, oder der Gleisweg deutlich kürzer): ein Fehler in den Daten, gegen den kein
 Gleisweg hilft.
 
+## Gebäude im Profil (LoD2)
+
+*Gebäude* in der Legende legt das 3D-Gebäudemodell LoD2 der Vermessungsverwaltung in den Schnitt —
+graue Blöcke mit senkrechten Wänden und der Dachform. Ein Finger auf einem Block nennt Art, Dachform,
+Höhe und, wo hinterlegt, die Adresse. Quer am Gleis steht in den Kennwerten der Abstand von der
+Gleisachse zur nächsten Wand links und rechts. Das DOM20 bleibt daneben sinnvoll: Es zeigt auch
+Bäume, Masten und Lärmschutzwände, das LoD2 unterscheidet dafür Haus und Baum.
+
+**Daten.** CityGML 1.0 in Kacheln von 2 × 2 km (`…/a/lod2/citygml/{O}_{N}.gml`), dasselbe System wie
+das DGM1. Im Landkreis Bamberg im Median 3,7 MB je Kachel, bei 90 % höchstens 17,6 MB, die größte
+50,5 MB — das XML packt sich aber auf ein Sechzehntel, und der Worker liefert es gzip-gepackt aus.
+`gebaeude.js` liest die Datei Stück für Stück, wie sie ankommt, und behält je Gebäude nur Dachflächen,
+Bodenhöhe und Angaben: Aus 16,7 MB werden 0,6 MB in IndexedDB. Der Schnitt selbst ist exakt: je
+Dachfläche das Stück der Linie darin, die Höhe aus der Ebene der Fläche, aus allen Stücken die obere
+Hülle; unten schließt der Block am Gelände.
+
+**Nachgeprüft** mit `node werkzeug/gebaeude-pruefen.mjs`, Schnitte durch 40 zufällige Gebäude in
+Bamberg gegen das unabhängig entstandene DOM20, jeweils in der Mitte der Dachflächen: Median 0,16 m,
+90 % innerhalb 0,50 m, kein systematischer Versatz (−0,03 m). An First und Graten liegt das DOM
+rund einen halben Meter tiefer — es rundet scharfe Kanten ab. First minus Boden trifft die
+angegebene Gebäudehöhe bei 90 % auf 0,22 m.
+
+## Profil als PDF
+
+Das Teilen-Zeichen im Kopf der Profilleiste erzeugt eine Seite A4 quer: Titel mit Strecke und
+Kilometer (frei: A–B), das Profil als Vektorgrafik im selben Maßstab wie in der Leiste, daneben ein
+Luftbild DOP20 mit der Schnittlinie, Maßstab und Nordpfeil, die Kennwerte mit Lage in Grad und UTM,
+unten die Quellen nach CC BY 4.0 — nur die, die auf der Seite vorkommen. Quer am Gleis fragt die
+Leiste vorher: dieser Schnitt oder eine **Serie** (±50 m alle 10 m, 11 Schnitte). Die Serie steht
+auf Seite 1 als Linien im Luftbild und auf den folgenden Seiten in zwei Spalten, alle im selben
+Höhenfenster und Maßstab, damit man sie vergleichen kann — so viele Reihen je Seite, wie die Höhe
+zulässt.
+
+Geschrieben wird das PDF von `pdf.js` in der App, ohne Fremdbibliothek: Helvetica als Grundschrift
+(nichts eingebettet), Text über WinAnsi, das Luftbild als JPEG unverändert. Eine Seite mit Luftbild
+hat rund 100 kB, die Serie 130 kB. Auf dem Handy öffnet sich danach das Teilen-Menü; dauert es zu
+lang (das Teilen braucht eine frische Geste), steht in der Leiste „PDF fertig · Teilen · Speichern".
+Am Rechner wird gespeichert. Geprüft mit `node werkzeug/pdf-pruefen.mjs` (Aufbau, Zeichensatz, Bild).
+
 ## Höhe am Punkt
 
 Unter dem Ergebnis, in der Sprechblase nach langem Druck, bei KML-Punkten und beim Abstecken steht

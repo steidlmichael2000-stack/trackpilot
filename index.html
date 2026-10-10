@@ -382,6 +382,15 @@
       <em>Längs</em> zeigt das Gelände am Gleis entlang mit der mittleren Neigung in Promille,
       10-fach überhöht. Die Lage auf dem Gleis ist dieselbe wie beim Suchergebnis; wo die Steine
       ungleichmäßig oder auf verschiedenen Gleisen stehen, schwankt die Schrittweite.</p>
+      <p class="fine"><strong>Gebäude.</strong> <em>Gebäude</em> in der Legende legt das amtliche
+      3D-Gebäudemodell LoD2 in den Schnitt: graue Blöcke mit Dachform, ein Finger darauf nennt Art,
+      Höhe und, wo vorhanden, die Adresse. Quer am Gleis steht der Abstand von der Gleisachse zur
+      nächsten Wand. Geladen wird je 2-km-Kachel, gepackt meist unter 1&nbsp;MB, danach liegt sie
+      auf dem Gerät. Nur in Bayern.</p>
+      <p class="fine"><strong>Als PDF teilen.</strong> Das Teilen-Zeichen oben in der Profilleiste
+      macht eine Seite A4 quer: Profil, Luftbild mit Schnittlinie, Kennwerte, Quellen. Quer am Gleis
+      geht auch eine Serie, ±50&nbsp;m alle 10&nbsp;m, alle Schnitte im selben Höhenfenster. Auf dem
+      Handy öffnet sich das Teilen-Menü, am Rechner wird gespeichert.</p>
       <p class="fine"><strong>Höhe.</strong> Unter dem Ergebnis, in den Sprechblasen und beim
       Abstecken steht die Geländehöhe aus dem DGM1 in Metern über Normalhöhennull. Dafür holt die
       App nur ein Stück der Geländekachel, rund 25&nbsp;kB. Nur in Bayern.</p>
@@ -392,7 +401,7 @@
       <p class="fine">Daten © OpenStreetMap-Mitwirkende · Abfrage über die OpenRailwayMap-API ·
       Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild Esri, Maxar · Dunkle Karte, Straßen
       und Ortsnamen OpenFreeMap © OpenMapTiles, Daten © OpenStreetMap, gezeichnet mit MapLibre GL
-      (BSD-3) · DOP20, Geländerelief, Parzellarkarte sowie DGM1 und DOM20 in Profil und Höhe:
+      (BSD-3) · DOP20, Geländerelief, Parzellarkarte sowie DGM1, DOM20 und LoD2 in Profil und Höhe:
       Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0) · Regenradar: Quelle
       Deutscher Wetterdienst</p>
       <p class="fine"><a href="https://github.com/steidlmichael2000-stack/trackpilot" target="_blank" rel="noopener">Quellcode auf GitHub</a></p>
@@ -471,6 +480,10 @@
 <script src="vendor/leaflet-rotate.js"></script>
 <!-- Höhendaten fürs Querprofil (DGM1/DOM20 der BVV über den eigenen Worker) -->
 <script src="hoehen.js"></script>
+<!-- Profil als PDF teilen: eigener kleiner PDF-Schreiber, ohne Fremdbibliothek -->
+<script src="pdf.js"></script>
+<!-- Gebäude im Profil: 3D-Gebäudemodell LoD2 der BVV über denselben Worker -->
+<script src="gebaeude.js"></script>
 <script src="app.js"></script>
 <script src="tour.js"></script>
 </body>

@@ -7,7 +7,11 @@
  * CC BY 4.0; eine Anfrage oder Vereinbarung ist laut Nutzungsbedingungen nicht
  * nötig.
  *
- * Bewusst eng gefasst, damit kein offener Proxy daraus wird: genau zwei Pfade,
+ * Seit Oktober 2026 auch das 3D-Gebäudemodell LoD2 (CityGML, 2 × 2 km je
+ * Datei). Das XML packt sich auf ein Sechzehntel; der Worker liefert es deshalb
+ * gzip-gepackt aus (16,7 MB → rund 1 MB).
+ *
+ * Bewusst eng gefasst, damit kein offener Proxy daraus wird: genau drei Pfade,
  * Kachelnamen nur als Ziffernmuster, nur GET und HEAD, höchstens ein
  * Bytebereich. Den Höhendienst der BVV reicht er absichtlich nicht durch — der
  * lässt im Browser nur die eigenen Portale zu, und das ist eine Entscheidung
@@ -15,6 +19,7 @@
  *
  *   GET /dgm1/636_5528.tif    →  …/a/dgm/dgm1/636_5528.tif
  *   GET /dom20/638_5526.tif   →  …/a/dom20/DOM/32638_5526_20_DOM.tif
+ *   GET /lod2/638_5532.gml    →  …/a/lod2/citygml/638_5532.gml
  *
  * Einrichten über das Dashboard: Worker öffnen → „Edit code" → diese Datei
  * hineinkopieren → „Deploy". Die Adresse (…workers.dev) gehört danach in
@@ -27,9 +32,10 @@
 const QUELLE = 'https://download1.bayernwolke.de/a';
 const ZIELE = {
   dgm1: (e, n) => `${QUELLE}/dgm/dgm1/${e}_${n}.tif`,
-  dom20: (e, n) => `${QUELLE}/dom20/DOM/32${e}_${n}_20_DOM.tif`
+  dom20: (e, n) => `${QUELLE}/dom20/DOM/32${e}_${n}_20_DOM.tif`,
+  lod2: (e, n) => `${QUELLE}/lod2/citygml/${e}_${n}.gml`
 };
-const PFAD = /^\/(dgm1|dom20)\/(\d{3})_(\d{4})\.tif$/;
+const PFAD = /^\/(?:(dgm1|dom20)\/(\d{3})_(\d{4})\.tif|(lod2)\/(\d{3})_(\d{4})\.gml)$/;
 const BEREICH = /^bytes=(\d+-\d*|-\d+)$/;
 
 const HERKUNFT = ['https://steidlmichael2000-stack.github.io'];
@@ -64,8 +70,10 @@ export default {
       return new Response(null, { status: 405, headers: { ...cors, Allow: 'GET, HEAD, OPTIONS' } });
     }
 
-    const treffer = PFAD.exec(new URL(request.url).pathname);
-    if (!treffer) return new Response('Unbekannter Pfad', { status: 404, headers: cors });
+    const t = PFAD.exec(new URL(request.url).pathname);
+    if (!t) return new Response('Unbekannter Pfad', { status: 404, headers: cors });
+    const treffer = t[4] ? [t[0], t[4], t[5], t[6]] : t;   // [Pfad, Art, Ost, Nord]
+    const lod2 = treffer[1] === 'lod2';
 
     const kopf = new Headers();
     const bereich = request.headers.get('Range');
@@ -95,6 +103,13 @@ export default {
       return new Response(null, { status: quelle.status, headers: antwort });
     }
     antwort.set('Cache-Control', 'public, max-age=604800');
+    /* LoD2 gepackt: Mit Content-Encoding gzip packt die Laufzeit des Workers den
+     * Körper selbst (encodeBody „automatic"); die Länge ist dann eine andere. */
+    if (lod2 && !bereich && /gzip/.test(request.headers.get('Accept-Encoding') || '')) {
+      antwort.set('Content-Type', 'application/xml; charset=utf-8');
+      antwort.set('Content-Encoding', 'gzip');
+      antwort.delete('Content-Length');
+    }
     return new Response(request.method === 'HEAD' ? null : quelle.body, { status: quelle.status, headers: antwort });
   }
 };

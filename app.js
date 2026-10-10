@@ -5050,6 +5050,7 @@ let profDgm = null;                    // Ergebnis von hoehenProfil
 let profDom = null;
 let profDomDgm = null;                 // Gelände an den Stützpunkten des DOM
 let profDomAn = false;
+let profGebAn = false;                 // Gebäude (LoD2) eingeschaltet
 let profLaedt = '';                    // '', 'dgm' oder 'dom'
 let profFehler = '';
 let profNochmal = false;               // lohnt ein zweiter Versuch? Nur bei Netzfehlern
@@ -5060,6 +5061,8 @@ let profLetzterTipp = 0;
 let profAbbild = null;                 // Maßstab des gezeichneten Diagramms
 let profGleis = null;                  // Profil am Gleis: { ref, km, art, mitte, kms, mitteIndex }
 let profVersatz = 0;                   // freies Profil, parallel verschoben in m; plus = links von A→B
+let profGeb = null;                    // Gebäude (LoD2) im Schnitt, aus gebaeude.js
+let profPdf = null;                    // PDF-Zeile: { wahl } · { laeuft: Text } · { fertig: File }
 
 const profName = i => i < 26 ? String.fromCharCode(65 + i) : String(i + 1);
 const profMB = byte => nfH.format(Math.max(0.1, byte / 2 ** 20)) + ' MB';
@@ -5074,8 +5077,9 @@ function profStart() {
   profPunkte = [];
   profGleis = null;
   profVersatz = 0;
-  profDgm = profDom = profDomDgm = null;
-  profDomAn = false;
+  profPdf = null;
+  profDgm = profDom = profDomDgm = profGeb = null;
+  profDomAn = profGebAn = profGebLaedt = false;
   profLaedt = profFehler = '';
   profFreigabe = false;
   profWahl = -1;
@@ -5097,6 +5101,7 @@ function profEnde(zeigen = true) {
   profPunkte = [];
   profGleis = null;
   profVersatz = 0;
+  profPdf = null;
   profDgm = profDom = profDomDgm = null;
   profLauf++;
   if (profLayer) profLayer.clearLayers();
@@ -5214,7 +5219,7 @@ function profZellen(punkte, zelle) {
 async function profRechnen({ behalten = false } = {}) {
   const lauf = ++profLauf;
   const linie = profLinie();
-  if (!behalten) profDgm = profDom = profDomDgm = null;
+  if (!behalten) profDgm = profDom = profDomDgm = profGeb = null;
   profFehler = '';
   profLaedt = '';
   // Lange Linien: erst fragen, die Leiste bietet dann „Gelände laden" an
@@ -5232,7 +5237,7 @@ async function profRechnen({ behalten = false } = {}) {
     const dgm = await hoehenProfil(linie, 'dgm1');
     if (lauf !== profLauf) return;
     profDgm = dgm;
-    profDom = profDomDgm = null;           // gehörte zur vorigen Linie, kommt unten neu
+    profDom = profDomDgm = profGeb = null; // gehörten zur vorigen Linie, kommen unten neu
     if (!dgm.hoehe.some(Number.isFinite)) {
       profFehler = 'Hier gibt es keine Höhendaten — DGM1 und DOM20 decken nur Bayern ab.';
       profNochmal = false;
@@ -5247,6 +5252,7 @@ async function profRechnen({ behalten = false } = {}) {
   profLaedt = '';
   if (profFehler) profDgm = null;
   profLeiste();
+  if (profGebAn && profDgm) profGebLaden();
   if (profDomAn && profDgm) profDomLaden();
 }
 
@@ -5270,6 +5276,41 @@ async function profDomLaden() {
   }
   profLaedt = '';
   profLeiste();
+}
+
+/* Gebäude aus dem LoD2 (gebaeude.js): je berührter 2-km-Kachel einmal geladen
+ * und auf dem Gerät gemerkt, danach kostet jeder Schnitt in der Gegend nichts —
+ * auch das Springen nicht. Eigener Ladezustand, damit Oberfläche und Gebäude
+ * gleichzeitig kommen können. */
+let profGebLaedt = false;
+
+async function profGebLaden() {
+  if (!profDgm) return;
+  const lauf = profLauf, dgm = profDgm;
+  profGebAn = true;
+  profGebLaedt = true;
+  profLeiste();
+  try {
+    const geb = await gebaeudeImSchnitt(profLinie(), dgm);
+    if (lauf !== profLauf || dgm !== profDgm) return;
+    profGeb = geb;
+  } catch (err) {
+    if (lauf !== profLauf) return;
+    profGebAn = false;
+    toast(`Gebäude nicht geladen (${err.message}).`);
+  }
+  profGebLaedt = false;
+  profLeiste();
+}
+
+function profGebKnopf() {
+  // Vorher unbekannt, wie groß die Kachel ist: gepackt meist 0,2–1 MB je 2 km × 2 km
+  const n = gebKachelnFuer(profLinie()).length;
+  const [zusatz, titel] = profGebLaedt ? ['lädt …', 'Gebäude werden geladen']
+    : profGebAn ? ['×', 'Gebäude ausblenden']
+    : [`≈${n} MB`, `Gebäude aus dem 3D-Gebäudemodell LoD2 dazuladen — ${n} Kachel${n > 1 ? 'n' : ''} zu 2 km, gepackt meist unter 1 MB, danach auf dem Gerät`];
+  return `<button type="button" class="prof-dom prof-geb${profGebAn ? ' is-on' : ''}" id="profGeb" ` +
+    `title="${titel}" aria-label="${titel}">Gebäude<small>${zusatz}</small></button>`;
 }
 
 function profKennwerte() {
@@ -5337,8 +5378,11 @@ function profZahlen() {
     const L = profDgm.laenge, h = profWertBei(profDgm, L / 2);
     const li = profWertBei(profDgm, 0) - h, re = profWertBei(profDgm, L) - h;
     const seiten = [Number.isFinite(li) && `links ${profVz(li)}`, Number.isFinite(re) && `rechts ${profVz(re)}`].filter(Boolean);
+    // Abstand von der Gleisachse zur nächsten Gebäudewand je Seite, wenn Gebäude geladen sind
+    const gw = profGeb && gebWand(profGeb, L);
     return `<p class="prof-zahlen">${gleis(h)}` +
-      (seiten.length ? `<span>${seiten.join(' · ')} m</span>` : '') + obj + '</p>';
+      (seiten.length ? `<span>${seiten.join(' · ')} m</span>` : '') +
+      (profGeb ? `<span>Gebäude ${gw || 'keine im Schnitt'}</span>` : '') + obj + '</p>';
   }
   if (g) {
     const h = profWertBei(profDgm, profDgm.ecken[g.mitteIndex]);
@@ -5386,9 +5430,9 @@ function profLeiste() {
      * im eigenen Knopf. Sonst bräche die Zeile auf dem Handy um. */
     teile.push(profZahlen(),
       '<div class="prof-bild" id="profBild"></div>',
-      `<div class="prof-legende">${g ? '' : '<span class="prof-leg-dgm">Gelände</span>'}${profDomKnopf()}` +
-      (g ? gpWeiteKnopf() : '') +
-      '<button type="button" class="prof-ueber" id="profUeber"></button></div>');
+      `<div class="prof-legende">${g ? '' : '<span class="prof-leg-dgm">Gelände</span>'}${profGebKnopf()}${profDomKnopf()}` +
+      `<span class="prof-chips">${g ? gpWeiteKnopf() : ''}` +
+      '<button type="button" class="prof-ueber" id="profUeber"></button></span></div>');
     if (profDgm.hoehe.some(z => !Number.isFinite(z))) {
       teile.push('<p class="bb-note">Teilweise außerhalb Bayerns — dort fehlen die Höhen.</p>');
     }
@@ -5410,11 +5454,18 @@ function profLeiste() {
         `title="Parallel verschoben, plus nach links von A→B — antippen: zurück auf die getippte Linie">${v}</button>` : '');
   }
 
+  // Teilen als PDF — dasselbe Zeichen wie in der Ergebnisleiste
+  if (profDgm) {
+    kopf += '<button type="button" class="prof-teilen" id="profPdfBtn" aria-label="Als PDF teilen" title="Als PDF teilen">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="17.5" cy="5.5" r="2.6"/><circle cx="6.5" cy="12" r="2.6"/>' +
+      '<circle cx="17.5" cy="18.5" r="2.6"/><path d="M8.74 10.68 15.26 6.82M8.74 13.32l6.52 3.86"/></svg></button>';
+  }
   const oben = `
     <button type="button" id="bbClose" class="bb-close" aria-label="Profil beenden">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
     <div class="bb-head">${kopf}</div>
+    ${profPdfZeile()}
     ${teile.join('')}`;
   const unten = (g ? '' : `
     <div class="bb-actions knapp">
@@ -5447,6 +5498,11 @@ function profLeiste() {
     if (profDomAn) { profDomAn = false; profDom = profDomDgm = null; profLeiste(); }
     else profDomLaden();
   });
+  an('#profGeb', () => {
+    if (profGebLaedt) return;
+    if (profGebAn) { profGebAn = false; profGeb = null; profLeiste(); }
+    else profGebLaden();
+  });
   an('#profUeber', () => {
     prefs[profUeberSchluessel()] = PROF_UEBER[(PROF_UEBER.indexOf(profUeberWahl()) + 1) % PROF_UEBER.length];
     saveStore();
@@ -5454,6 +5510,13 @@ function profLeiste() {
     if (el) profBildSetzen(el);
   });
   an('#profWeite', gpWeiter);
+  // Quer am Gleis erst fragen: dieser Schnitt oder die Serie; sonst gleich los
+  an('#profPdfBtn', () => {
+    if (profPdf && profPdf.laeuft) return;
+    if (profGleis && profGleis.art === 'quer') { profPdf = profPdf && profPdf.wahl ? null : { wahl: true }; profLeiste(); }
+    else profPdfErstellen('eins');
+  });
+  b.querySelectorAll('[data-pdf]').forEach(k => k.addEventListener('click', () => profPdfTipp(k.dataset.pdf)));
   b.querySelectorAll('[data-gpart]').forEach(k => k.addEventListener('click', () => gpArtWechseln(k.dataset.gpart)));
 
   const bild = $('#profBild');
@@ -5551,6 +5614,20 @@ async function gleisRichtung(ref, km) {
   return l > 2 ? [(eb - ea) / l, (nb - na) / l] : null;
 }
 
+/** Die beiden Enden eines Querschnitts bei km, W Meter zu jeder Seite; null ohne Gleis.
+ *  Links in Richtung steigender Kilometer ist (−Nord, Ost) der Richtung. Von
+ *  links nach rechts gezogen, damit links im Diagramm links liegt. */
+async function gpQuerPunkte(ref, km, W) {
+  const c = await gleisLage(ref, km);
+  const r = c && await gleisRichtung(ref, km);
+  if (!c || !r) return null;
+  const [e, n] = utm32Hin(c.lat, c.lon);
+  return {
+    punkte: [utm32Zurueck(e - r[1] * W, n + r[0] * W), utm32Zurueck(e + r[1] * W, n - r[0] * W)],
+    mitte: [c.lat, c.lon]
+  };
+}
+
 /** Vom Ergebnis aus: der Knopf mit dem Profilzeichen in der Ergebnisleiste.
  *  art: für die Tour, ohne die gemerkte Wahl zu ändern. */
 function gpStart(art = prefs.gpArt) {
@@ -5572,16 +5649,9 @@ async function gpRechnen() {
   let punkte = [], kms = null, mitte = null, mitteIndex = 0;
   try {
     if (g.art === 'quer') {
-      const c = await gleisLage(g.ref, g.km);
-      const r = c && await gleisRichtung(g.ref, g.km);
+      const q = await gpQuerPunkte(g.ref, g.km, gpBreite());
       if (lauf !== profLauf) return;
-      if (c && r) {
-        /* Links in Richtung steigender Kilometer ist (−Nord, Ost) der Richtung.
-         * Von links nach rechts gezogen, damit links im Diagramm links liegt. */
-        const [e, n] = utm32Hin(c.lat, c.lon), W = gpBreite();
-        punkte = [utm32Zurueck(e - r[1] * W, n + r[0] * W), utm32Zurueck(e + r[1] * W, n - r[0] * W)];
-        mitte = [c.lat, c.lon];
-      }
+      if (q) ({ punkte, mitte } = q);
     } else {
       /* Längs: alle 2–10 m eine Lage, je nach Länge rund 200 Stück. Die Stationen
        * im Diagramm sind dann Meter Gleis; welcher Kilometer wo liegt, sagen die
@@ -5677,6 +5747,379 @@ function gpNachfuehren() {
   if (p.x < 30 || p.x > gr.x - 30 || p.y < 90 || p.y > unten - 20) map.panTo(m);
 }
 
+/* ============================ Profil als PDF ============================
+ *
+ * Eine Seite A4 quer zum Teilen: Titel mit Strecke und Kilometer, das Profil
+ * als Vektorgrafik im selben Maßstab wie in der Leiste, daneben das Luftbild
+ * DOP20 mit der Schnittlinie (der WMS der BVV gibt CORS frei), die Kennwerte
+ * und die Quellen, die CC BY 4.0 verlangt. Am Gleis quer auf Wunsch eine Serie:
+ * ±50 m alle 10 m, alle Schnitte im selben Höhenfenster, damit man sie
+ * nebeneinanderlegen kann. Erzeugt wird in pdf.js, ohne Fremdbibliothek. Auf dem
+ * Handy geht danach das Teilen-Menü auf, am Rechner wird die Datei gespeichert. */
+const PDF_SERIE = { halb: 50, schritt: 10 };
+const PDF_FARBEN = {
+  lapis: '#1761a3', text: '#2c2c2a', fein: '#5f5e5a', gitter: '#e3e1d9', rahmen: '#c9c7be',
+  gelaende: '#faeeda', gelLinie: '#ba7517', schild: '#854f0b', dom: '#444441',
+  geb: '#d3d1c7', gebLinie: '#5f5e5a', marke: '#888780', linie: '#f59e0b'
+};
+const PDF_DOP = 'https://geoservices.bayern.de/od/wms/dop/v1/dop20?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0' +
+  '&LAYERS=by_dop20c&STYLES=&CRS=EPSG:25832&FORMAT=image/jpeg';
+const PDF_RAND = 36;
+
+/** Ein Profil in den Rahmen box {x, y, w}; f ist das Höhenfenster. Liefert die Höhe. */
+function pdfProfil(s, box, d, achse, f) {
+  const F = PDF_FARBEN, li = 34, re = 4, ob = 13, un = 13;
+  const pw = box.w - li - re, L = d.dgm.laenge || 1;
+  const x0 = box.x + li, yo = box.y + ob, basis = yo + f.ph;
+  const X = st => x0 + st / L * pw, Y = z => yo + (f.y1 - z) / (f.y1 - f.y0) * f.ph;
+  const yStep = profSchritt((f.y1 - f.y0) / 5), stellen = yStep < 1 ? 1 : 0;
+  const nfY = new Intl.NumberFormat('de-DE', { minimumFractionDigits: stellen, maximumFractionDigits: stellen });
+
+  for (let z = Math.ceil(f.y0 / yStep - 1e-9) * yStep; z <= f.y1 + 1e-9; z += yStep) {
+    s.linie([[x0, Y(z)], [x0 + pw, Y(z)]], { farbe: F.gitter, breite: 0.4 });
+    s.text(x0 - 4, Y(z) + 2.6, nfY.format(z), { groesse: 7, farbe: F.fein, anker: 'end' });
+  }
+  for (const st of achse.gitter) s.linie([[X(st), yo], [X(st), basis]], { farbe: F.gitter, breite: 0.4 });
+
+  const dgm = profPfad(d.dgm.station, d.dgm.hoehe, X, Y);
+  for (const t of dgm) s.linie([...t.punkte, [t.x1, basis], [t.x0, basis]], { farbe: null, fuellung: F.gelaende });
+  if (d.geb) for (const b of d.geb) {
+    s.linie(b.umriss.map(([st, z]) => [X(st), Y(z)]), { farbe: F.gebLinie, fuellung: F.geb, breite: 0.6, rund: false });
+  }
+  for (const t of dgm) s.linie(t.punkte, { farbe: F.gelLinie, breite: 1.1 });
+  if (d.dom) for (const t of profPfad(d.dom.station, d.dom.hoehe, X, Y)) {
+    s.linie(t.punkte, { farbe: F.dom, breite: 0.5, strichel: [2.5, 2] });
+  }
+  for (const st of achse.marken) s.linie([[X(st), yo], [X(st), basis]], { farbe: F.marke, breite: 0.6, strichel: [2, 2.5] });
+  for (const t of achse.oben) s.text(X(t.s), yo - 3.5, t.text, { groesse: 7.5, fett: true, farbe: F.schild, anker: t.anker });
+  for (const t of achse.unten) {
+    const x = X(t.s), anker = t.anker || (x - x0 < 10 ? 'start' : x0 + pw - x < 10 ? 'end' : 'middle');
+    s.text(x, basis + 9.5, t.text, { groesse: 7, farbe: F.fein, anker });
+  }
+  s.rechteck(x0, yo, pw, f.ph, { farbe: F.rahmen, breite: 0.5 });
+  return ob + f.ph + un;
+}
+
+/** Luftbild mit den Schnittlinien. linien: [[lat, lon], …] je Linie; hervor: Nummer der aktuellen. */
+async function pdfKarte(dok, s, box, linien, { hervor = -1, schilder = [] } = {}) {
+  const F = PDF_FARBEN;
+  const utm = linien.map(l => l.map(p => utm32Hin(p[0], p[1])));
+  let e0 = Infinity, n0 = Infinity, e1 = -Infinity, n1 = -Infinity;
+  for (const l of utm) for (const [e, n] of l) { e0 = Math.min(e0, e); e1 = Math.max(e1, e); n0 = Math.min(n0, n); n1 = Math.max(n1, n); }
+  const rand = Math.max(30, Math.max(e1 - e0, n1 - n0) * 0.25);
+  e0 -= rand; e1 += rand; n0 -= rand; n1 += rand;
+  // Auf das Seitenverhältnis des Rahmens erweitern, nie beschneiden
+  const soll = box.w / box.h, w = e1 - e0, h = n1 - n0;
+  if (w / h < soll) { const neu = h * soll; e0 -= (neu - w) / 2; e1 = e0 + neu; }
+  else { const neu = w / soll; n0 -= (neu - h) / 2; n1 = n0 + neu; }
+
+  let mitBild = false;
+  try {
+    const ab = new AbortController(), uhr = setTimeout(() => ab.abort(), 15000);
+    const r = await fetch(`${PDF_DOP}&BBOX=${e0.toFixed(1)},${n0.toFixed(1)},${e1.toFixed(1)},${n1.toFixed(1)}` +
+      `&WIDTH=${Math.round(box.w * 4)}&HEIGHT=${Math.round(box.h * 4)}`, { signal: ab.signal });
+    clearTimeout(uhr);
+    if (r.ok && /jpeg/.test(r.headers.get('content-type') || '')) {
+      s.bild(dok.bild(new Uint8Array(await r.arrayBuffer())), box.x, box.y, box.w, box.h);
+      mitBild = true;
+    }
+  } catch { /* ohne Netz: ein leerer Rahmen mit Hinweis */ }
+  if (!mitBild) {
+    s.rechteck(box.x, box.y, box.w, box.h, { farbe: null, fuellung: '#f1efe8' });
+    s.text(box.x + box.w / 2, box.y + box.h / 2, 'Luftbild nicht erreichbar', { groesse: 8, farbe: F.fein, anker: 'middle' });
+  }
+
+  const X = e => box.x + (e - e0) / (e1 - e0) * box.w, Y = n => box.y + (n1 - n) / (n1 - n0) * box.h;
+  s.beschnitten(box.x, box.y, box.w, box.h, () => {
+    utm.forEach((l, i) => {
+      const pts = l.map(([e, n]) => [X(e), Y(n)]), stark = hervor < 0 || i === hervor;
+      // Weißer Rand darunter, damit die Linie auf dem Luftbild steht
+      s.linie(pts, { farbe: '#ffffff', breite: stark ? 3.6 : 2.2 });
+      s.linie(pts, { farbe: F.linie, breite: stark ? 2 : 1.1, strichel: stark ? [5, 3] : null });
+    });
+    for (const [text, p] of schilder) {
+      const [e, n] = utm32Hin(p[0], p[1]), x = X(e) + 4, y = Y(n) - 4;
+      const bw = pdfTextBreite(text, 7, true);
+      s.rechteck(x - 2, y - 7, bw + 4, 9.5, { farbe: null, fuellung: '#ffffff' });
+      s.text(x, y, text, { groesse: 7, fett: true, farbe: F.schild });
+    }
+  });
+
+  // Maßstab unten links, Nordpfeil oben rechts (Gitternord, in Bayern höchstens 2,5° neben dem geografischen)
+  const m = profSchritt((e1 - e0) / 5), lang = m / (e1 - e0) * box.w, beschr = messText(m);
+  const bw = lang + pdfTextBreite(beschr, 7) + 14;
+  s.rechteck(box.x + 5, box.y + box.h - 17, bw, 12, { farbe: null, fuellung: '#ffffff' });
+  s.linie([[box.x + 9, box.y + box.h - 9], [box.x + 9 + lang, box.y + box.h - 9]], { farbe: F.text, breite: 1.4, rund: false });
+  s.text(box.x + 13 + lang, box.y + box.h - 8, beschr, { groesse: 7, farbe: F.text });
+  const nx = box.x + box.w - 13, ny = box.y + 8;
+  s.rechteck(nx - 7, ny - 3, 14, 23, { farbe: null, fuellung: '#ffffff' });
+  s.linie([[nx, ny], [nx + 4, ny + 9], [nx - 4, ny + 9]], { farbe: null, fuellung: F.text });
+  s.text(nx, ny + 18, 'N', { groesse: 7.5, fett: true, farbe: F.text, anker: 'middle' });
+  s.rechteck(box.x, box.y, box.w, box.h, { farbe: F.rahmen, breite: 0.5 });
+  return mitBild;
+}
+
+/** Quer am Gleis: Höhe am Gleis und Gelände außen gegen das Gleis. */
+function pdfQuerWerte(dgm) {
+  const L = dgm.laenge, h = profWertBei(dgm, L / 2);
+  return { h, li: profWertBei(dgm, 0) - h, re: profWertBei(dgm, L) - h };
+}
+
+const pdfKoord = (lat, lon) => {
+  const [e, n] = utm32Hin(lat, lon), nf = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return [`${lat.toFixed(5).replace('.', ',')}° N  ${lon.toFixed(5).replace('.', ',')}° O`, `UTM 32: ${nf.format(e)} / ${nf.format(n)}`];
+};
+
+/** Die Angaben rechts unter dem Luftbild, als [Bezeichnung, Wert]. */
+function pdfAngaben() {
+  const g = profGleis, kw = profKennwerte(), raus = [];
+  const hm = z => Number.isFinite(z) ? `${nfH.format(z)} m` : '–';
+  if (g && g.art === 'quer') {
+    const q = pdfQuerWerte(profDgm);
+    raus.push(['Höhe am Gleis', `${hm(q.h)} ü. NHN`], ['Gelände außen', `links ${profVz(q.li)} · rechts ${profVz(q.re)} m`]);
+    const gw = profGeb && gebWand(profGeb, profDgm.laenge);
+    if (gw) raus.push(['Gebäude ab Gleis', gw]);
+    raus.push(['Breite', `±${nfM.format(gpBreite())} m, links in km-Richtung`]);
+  } else if (g) {
+    raus.push(['Höhe am Gleis', `${hm(profWertBei(profDgm, profDgm.ecken[g.mitteIndex]))} ü. NHN`]);
+    const ng = profNeigung(profDgm);
+    if (Number.isFinite(ng)) raus.push(['Neigung', `${profVz(ng)} ‰ (Ausgleichsgerade)`]);
+    raus.push(['Höhenunterschied', `${profVz(kw.dh)} m Anfang–Ende`], ['Gleislänge', messText(profDgm.laenge)]);
+  } else {
+    raus.push(['Länge', messText(profDgm.laenge)], ['Höhenunterschied', `${profVz(kw.dh)} m A–B`],
+      ['Tiefster / höchster', `${hm(kw.min)} / ${hm(kw.max)}`]);
+    if (profVersatz) raus.push(['Versetzt', `${profVersatz > 0 ? '+' : '−'}${nfM.format(Math.abs(profVersatz))} m links von A→B`]);
+  }
+  if (kw.obj) raus.push(['Objekte (DOM20)', `bis ${nfH.format(kw.obj.hoehe)} m über Gelände`]);
+  const ort = g ? g.mitte : profLinie()[0];
+  if (ort) { const [a, b] = pdfKoord(ort[0], ort[1]); raus.push([g ? 'Lage am Gleis' : 'Lage A', a], ['', b]); }
+  return raus;
+}
+
+/** quellen: was im PDF vorkommt — { dom, geb, dop, osm } */
+function pdfFuss(s, nr, gesamt, quellen) {
+  const F = PDF_FARBEN, y = s.hoehe - 26;
+  const bvv = ['Gelände DGM1', quellen.dom && 'Oberfläche DOM20', quellen.geb && 'Gebäude LoD2', quellen.dop && 'Luftbild DOP20']
+    .filter(Boolean).join(', ');
+  s.linie([[PDF_RAND, y - 10], [s.breite - PDF_RAND, y - 10]], { farbe: F.rahmen, breite: 0.5 });
+  s.text(PDF_RAND, y, `${bvv}: Bayerische Vermessungsverwaltung – www.geodaten.bayern.de, CC BY 4.0, bearbeitet.` +
+    (quellen.osm ? ' Kilometrierung und Gleislage: © OpenStreetMap-Mitwirkende (ODbL).' : ''),
+  { groesse: 6.5, farbe: F.fein });
+  s.text(PDF_RAND, y + 9, 'Keine amtliche Quelle — zur Übersicht, nicht für Vermessung oder sicherheitsrelevante ' +
+    'Entscheidungen. Erstellt mit TrackPilot.', { groesse: 6.5, farbe: F.fein });
+  if (gesamt > 1) s.text(s.breite - PDF_RAND, y + 9, `Seite ${nr} von ${gesamt}`, { groesse: 7, farbe: F.fein, anker: 'end' });
+}
+
+function pdfKopf(s, titel, rechts) {
+  const F = PDF_FARBEN;
+  s.text(PDF_RAND, 46, titel, { groesse: 16, fett: true, farbe: F.lapis });
+  s.text(s.breite - PDF_RAND, 46, rechts, { groesse: 8.5, farbe: F.fein, anker: 'end' });
+  s.linie([[PDF_RAND, 54], [s.breite - PDF_RAND, 54]], { farbe: F.lapis, breite: 0.8 });
+}
+
+const pdfUeberText = (wahl, k) => {
+  const t = v => (v >= 10 ? nfM.format(v) : nfH.format(v).replace(/,0$/, '')) + '×';
+  return k < wahl * 0.97 ? `${t(k)} überhöht (gestaucht)` : wahl === 1 ? 'unüberhöht' : `${t(wahl)} überhöht`;
+};
+
+/** art: 'eins' oder 'serie' (nur quer am Gleis). */
+async function profPdfErstellen(art) {
+  if (!profDgm || (profPdf && profPdf.laeuft)) return;
+  const stand = t => {
+    profPdf = { laeuft: t };
+    const el = $('#profPdfStand');
+    if (el) el.textContent = t; else profLeiste();
+  };
+  stand('PDF wird erstellt …');
+  try {
+    const g = profGleis, F = PDF_FARBEN, wahl = profUeberWahl();
+    const heute = new Date().toLocaleDateString('de-DE');
+    let titel, name;
+    if (g && g.art === 'quer') {
+      titel = `${art === 'serie' ? 'Querprofile' : 'Querprofil'} Strecke ${g.ref} · km ${fmtKm(g.km)}`;
+      name = `${art === 'serie' ? 'Querprofile' : 'Querprofil'} ${g.ref} km ${fmtKm(g.km)}.pdf`;
+    } else if (g) {
+      titel = `Längsprofil Strecke ${g.ref} · km ${fmtKm(g.kms[0])} – ${fmtKm(g.kms[g.kms.length - 1])}`;
+      name = `Längsprofil ${g.ref} km ${fmtKm(g.kms[0])}-${fmtKm(g.kms[g.kms.length - 1])}.pdf`;
+    } else {
+      titel = `Geländeprofil ${profName(0)}–${profName(profPunkte.length - 1)}`;
+      name = `Geländeprofil ${new Date().toISOString().slice(0, 10)}.pdf`;
+    }
+
+    // Serie: jeder Schnitt mit denselben Ebenen wie gerade in der Leiste
+    let serie = null;
+    if (art === 'serie' && g && g.art === 'quer') {
+      serie = [];
+      const W = gpBreite(), anzahl = Math.round(2 * PDF_SERIE.halb / PDF_SERIE.schritt) + 1;
+      for (let i = 0; i < anzahl; i++) {
+        const km = Math.round((g.km + (i * PDF_SERIE.schritt - PDF_SERIE.halb) / 1000) * 1e6) / 1e6;
+        stand(`Querschnitt ${i + 1} von ${anzahl} …`);
+        const q = await gpQuerPunkte(g.ref, km, W);
+        if (!q) continue;
+        const dgm = await hoehenProfil(q.punkte, 'dgm1');
+        const dom = profDom ? await hoehenProfil(q.punkte, 'dom20', { maxPunkte: 6000 }) : null;
+        const geb = profGeb ? await gebaeudeImSchnitt(q.punkte, dgm) : null;
+        serie.push({ km, ...q, dgm, dom, geb });
+      }
+      if (!serie.length) throw new Error('kein Querschnitt bestimmbar');
+    }
+
+    stand('Luftbild wird geladen …');
+    const dok = new PdfDokument({ titel });
+    const s = dok.seite();
+    const L = profDgm.laenge, achse = profAchse(L);
+    // Serie: zwei Spalten, so viele Reihen, wie das gemeinsame Höhenfenster zulässt — flache Schnitte liegen dicht
+    let sl = null;
+    if (serie) {
+      let smin = Infinity, smax = -Infinity;
+      for (const q of serie) { const [a, b] = profZSpanne(q); smin = Math.min(smin, a); smax = Math.max(smax, b); }
+      const zw = (PDF_A4_QUER[0] - 2 * PDF_RAND - 24) / 2, frei = PDF_A4_QUER[1] - 72 - 50;
+      const fs = profHoehenfenster(smin, smax, L, zw - 38, wahl, 60, frei - 60);
+      const zh = fs.ph + 46, reihen = Math.max(1, Math.floor((frei + 10) / (zh + 10)));
+      sl = { zw, fs, zh, jeSeite: 2 * reihen };
+    }
+    const gesamt = serie ? 1 + Math.ceil(serie.length / sl.jeSeite) : 1;
+    const box = { x: PDF_RAND, y: 92, w: 530 };
+    const [zmin, zmax] = profZSpanne({ dgm: profDgm, dom: profDom, geb: profGeb });
+    const f = profHoehenfenster(zmin, zmax, L, box.w - 38, wahl, 170, 400);
+    const weite = g ? (g.art === 'quer' ? `±${nfM.format(gpBreite())} m` : `±${nfM.format(gpLaenge())} m`) : messText(L);
+    pdfKopf(s, titel, `${heute} · ${weite} · ${pdfUeberText(wahl, f.k)}`);
+
+    // Kennwerte als eine Zeile über dem Diagramm, wie in der Leiste
+    const tmp = document.createElement('div');
+    tmp.innerHTML = profZahlen();
+    // Δ kennt die Grundschrift nicht (WinAnsi) — ausgeschrieben
+    const zeile = [...tmp.firstElementChild.children].map(c => c.textContent.trim().replace('Δh', 'Höhenunterschied')).join('    ');
+    s.text(PDF_RAND, 74, zeile, { groesse: 10, farbe: F.text });
+    pdfProfil(s, box, { dgm: profDgm, dom: profDom, geb: profGeb }, achse, f);
+    const leg = [['Gelände DGM1', F.gelLinie, null]];
+    if (profDom) leg.push(['Oberfläche DOM20', F.dom, [2.5, 2]]);
+    if (profGeb) leg.push(['Gebäude LoD2', F.gebLinie, 'block']);
+    let lx = box.x + 34;
+    const ly = box.y + f.ph + 40;
+    for (const [text, farbe, art2] of leg) {
+      if (art2 === 'block') s.rechteck(lx, ly - 6, 14, 7, { farbe, fuellung: F.geb, breite: 0.6 });
+      else s.linie([[lx, ly - 2.5], [lx + 14, ly - 2.5]], { farbe, breite: art2 ? 0.6 : 1.2, strichel: art2 });
+      lx += 18 + s.text(lx + 18, ly, text, { groesse: 7.5, farbe: F.fein }) + 14;
+    }
+
+    const kbox = { x: 586, y: 92, w: 220, h: 165 };
+    const linien = serie ? serie.map(q => q.punkte) : [profLinie()];
+    const hervor = serie ? serie.findIndex(q => Math.abs(q.km - g.km) < 1e-6) : -1;
+    const n = linien[0].length;
+    const schilder = serie ? [] : g && g.art === 'quer' ? [['links', linien[0][0]], ['rechts', linien[0][1]]]
+      : g ? [] : linien[0].map((p, i) => [profName(i), p]);
+    if (g && g.art === 'laengs') schilder.push(['km ' + fmtKm(g.kms[0]), linien[0][0]], ['km ' + fmtKm(g.kms[g.kms.length - 1]), linien[0][n - 1]]);
+    const mitBild = await pdfKarte(dok, s, kbox, linien, { hervor, schilder });
+    s.text(kbox.x, kbox.y + kbox.h + 10, mitBild ? `Luftbild DOP20${serie ? ` · ${serie.length} Schnitte, alle ${PDF_SERIE.schritt} m` : ''}` : '',
+      { groesse: 7, farbe: F.fein });
+    let ay = kbox.y + kbox.h + 30;
+    for (const [k, v] of pdfAngaben()) {
+      if (k) s.text(kbox.x, ay, k, { groesse: 7.5, farbe: F.fein });
+      s.text(kbox.x + 82, ay, v, { groesse: 8, farbe: F.text });
+      ay += 12.5;
+    }
+    const quellen = { dom: !!profDom, geb: !!profGeb, dop: mitBild, osm: !!g };
+    pdfFuss(s, 1, gesamt, quellen);
+
+    if (serie) {
+      // Alle Schnitte im selben Fenster: gemeinsame Höhenspanne, derselbe Maßstab
+      const { zw, fs, zh, jeSeite } = sl;
+      const kopf = `Querprofile Strecke ${g.ref} · km ${fmtKm(serie[0].km)} – ${fmtKm(serie[serie.length - 1].km)}`;
+      for (let p = 0; p * jeSeite < serie.length; p++) {
+        const sp = dok.seite();
+        pdfKopf(sp, kopf, `alle ${PDF_SERIE.schritt} m · ±${nfM.format(gpBreite())} m · ${pdfUeberText(wahl, fs.k)} · gleiches Höhenfenster`);
+        serie.slice(p * jeSeite, (p + 1) * jeSeite).forEach((q, j) => {
+          const x = PDF_RAND + (j % 2) * (zw + 24), y = 70 + Math.floor(j / 2) * (zh + 10);
+          const qw = pdfQuerWerte(q.dgm), aktuell = Math.abs(q.km - g.km) < 1e-6;
+          sp.text(x, y + 10, `km ${fmtKm(q.km)}${aktuell ? '  (aktuell)' : ''}`, { groesse: 10, fett: true, farbe: aktuell ? F.lapis : F.text });
+          const gw = q.geb && gebWand(q.geb, q.dgm.laenge);
+          sp.text(x + zw, y + 10, `Gleis ${Number.isFinite(qw.h) ? nfH.format(qw.h) : '–'} m · links ${profVz(qw.li)} · rechts ${profVz(qw.re)} m` +
+            (gw ? ` · Gebäude ${gw}` : ''), { groesse: 7.5, farbe: F.fein, anker: 'end' });
+          pdfProfil(sp, { x, y: y + 16, w: zw }, q, profAchse(q.dgm.laenge), fs);
+        });
+        pdfFuss(sp, p + 2, gesamt, quellen);
+      }
+    }
+
+    stand('PDF wird geschrieben …');
+    const datei = new File([await dok.bytes()], name, { type: 'application/pdf' });
+    await pdfAusgeben(datei, titel);
+  } catch (err) {
+    profPdf = null;
+    profLeiste();
+    toast(`PDF nicht erstellt (${err.message}).`);
+  }
+}
+
+/** Auf dem Handy das Teilen-Menü, sonst speichern. Ist die Geste zu lange her
+ *  (eine Serie dauert Sekunden), braucht das Teilen einen zweiten Tipp. */
+async function pdfAusgeben(datei, titel) {
+  const mobil = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  if (mobil && navigator.canShare && navigator.canShare({ files: [datei] })) {
+    try {
+      await navigator.share({ files: [datei], title: titel });
+      profPdf = null;
+    } catch (err) {
+      profPdf = err.name === 'AbortError' ? null : { fertig: datei, titel };
+    }
+    profLeiste();
+    return;
+  }
+  pdfSpeichern(datei);
+  profPdf = null;
+  profLeiste();
+  toast(`PDF gespeichert: ${datei.name}`);
+}
+
+function pdfSpeichern(datei) {
+  const url = URL.createObjectURL(datei), a = document.createElement('a');
+  a.href = url;
+  a.download = datei.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+/** Die Zeile unter dem Kopf: Auswahl, Fortschritt oder „fertig". */
+function profPdfZeile() {
+  if (!profPdf) return '';
+  if (profPdf.laeuft) return `<div class="prof-pdf"><span id="profPdfStand">${esc(profPdf.laeuft)}</span></div>`;
+  const zu = '<button type="button" class="prof-pdf-zu" data-pdf="zu" aria-label="Schließen">×</button>';
+  if (profPdf.fertig) {
+    return '<div class="prof-pdf"><span>PDF fertig</span><button type="button" data-pdf="teilen">Teilen</button>' +
+      `<button type="button" data-pdf="speichern">Speichern</button>${zu}</div>`;
+  }
+  const anzahl = Math.round(2 * PDF_SERIE.halb / PDF_SERIE.schritt) + 1;
+  return '<div class="prof-pdf"><span>PDF</span><button type="button" data-pdf="eins">Dieser Schnitt</button>' +
+    `<button type="button" data-pdf="serie">Serie ±${PDF_SERIE.halb} m · ${anzahl} Schnitte</button>${zu}</div>`;
+}
+
+function profPdfTipp(was) {
+  if (was === 'zu') { profPdf = null; profLeiste(); return; }
+  if (was === 'eins' || was === 'serie') { profPdfErstellen(was); return; }
+  const f = profPdf && profPdf.fertig;
+  if (!f) return;
+  if (was === 'speichern') { pdfSpeichern(f); profPdf = null; profLeiste(); return; }
+  navigator.share({ files: [f], title: profPdf.titel }).then(() => { profPdf = null; profLeiste(); }).catch(() => {});
+}
+
+/** Abstand Gleis → nächste Gebäudewand links und rechts, als Text; null ohne Gebäude. */
+function gebWand(geb, L) {
+  const mitte = L / 2, proM = L / (2 * gpBreite());
+  let li = null, re = null, drauf = false;
+  for (const b of geb) {
+    if (b.s0 <= mitte && b.s1 >= mitte) drauf = true;
+    else if (b.s1 < mitte) li = li === null ? (mitte - b.s1) / proM : Math.min(li, (mitte - b.s1) / proM);
+    else re = re === null ? (b.s0 - mitte) / proM : Math.min(re, (b.s0 - mitte) / proM);
+  }
+  if (drauf) return 'über dem Gleis';
+  if (li === null && re === null) return null;
+  const seite = v => v === null ? 'keins' : `${nfH.format(v)} m`;
+  return `links ${seite(li)} · rechts ${seite(re)}`;
+}
+
 /** Eine runde Schrittweite für Gitter und Beschriftung: 1, 2 oder 5 mal 10ⁿ. */
 function profSchritt(roh) {
   const p = 10 ** Math.floor(Math.log10(roh || 1));
@@ -5710,8 +6153,10 @@ function profPfad(station, werte, X, Y) {
       if (p.i === vor) continue;
       vor = p.i;
       const y = Y(p.z).toFixed(1);
-      if (!teil) { teil = { d: `M${spalte} ${y}`, x0: spalte, x1: spalte }; teile.push(teil); }
+      // d fürs SVG, punkte für das PDF — dieselbe Ausdünnung für beide
+      if (!teil) { teil = { d: `M${spalte} ${y}`, x0: spalte, x1: spalte, punkte: [] }; teile.push(teil); }
       else teil.d += `L${spalte} ${y}`;
+      teil.punkte.push([spalte, +y]);
       teil.x1 = spalte;
     }
     puffer = null;
@@ -5817,6 +6262,28 @@ function profUeberWahl() {
   return PROF_UEBER.includes(prefs[k]) ? prefs[k] : k === 'gpUeberLaengs' ? 10 : 1;
 }
 
+/** Tiefster und höchster Wert über Gelände, Oberfläche und Gebäude. */
+function profZSpanne(d) {
+  let zmin = Infinity, zmax = -Infinity;
+  const nimm = z => { if (Number.isFinite(z)) { if (z < zmin) zmin = z; if (z > zmax) zmax = z; } };
+  for (const z of d.dgm.hoehe) nimm(z);
+  if (d.dom) for (const z of d.dom.hoehe) nimm(z);
+  if (d.geb) for (const b of d.geb) for (const p of b.umriss) nimm(p[1]);
+  return [zmin, zmax];
+}
+
+/* Höhenfenster und Bildhöhe — für die Leiste wie fürs PDF dieselbe Rechnung.
+ * 1 m Höhe ist im Bild so lang wie „wahl" Meter Station; wäre das Bild höher
+ * als phMax, wird gestaucht, k ist dann der tatsächliche Faktor. */
+function profHoehenfenster(zmin, zmax, L, pw, wahl, phMin, phMax) {
+  const proMeter = pw / L;
+  const spanne = Math.max(zmax - zmin, 0.5) * 1.15;
+  const ph = Math.min(phMax, Math.max(phMin, Math.round(spanne * wahl * proMeter)));
+  const fenster = Math.max(spanne, ph / (wahl * proMeter));
+  const y0 = (zmax + zmin) / 2 - fenster / 2;
+  return { ph, y0, y1: y0 + fenster, k: (ph / fenster) / proMeter };
+}
+
 /* Das Diagramm, in der tatsächlichen Breite der Leiste gezeichnet: Mit
  * width = viewBox liegen die 1-px-Gitterlinien auf der Pixelmitte und bleiben
  * scharf, statt beim Skalieren über zwei Pixel zu verschwimmen. */
@@ -5827,18 +6294,11 @@ function profBildSetzen(el) {
   const L = profDgm.laenge || 1;
   const proMeter = pw / L;               // px je Meter Station
 
-  let zmin = Infinity, zmax = -Infinity;
-  for (const reihe of [profDgm.hoehe, profDom ? profDom.hoehe : []]) {
-    for (const z of reihe) if (Number.isFinite(z)) { if (z < zmin) zmin = z; if (z > zmax) zmax = z; }
-  }
+  const [zmin, zmax] = profZSpanne({ dgm: profDgm, dom: profDom, geb: profGeb });
   if (!(zmax >= zmin)) { el.innerHTML = ''; return; }
 
-  // 1 m Höhe ist im Bild so lang wie „wahl" Meter Station
   const wahl = profUeberWahl();
-  const spanne = Math.max(zmax - zmin, 0.5) * 1.15;
-  const ph = Math.min(PROF_PLOT_MAX, Math.max(PROF_PLOT_MIN, Math.round(spanne * wahl * proMeter)));
-  const fenster = Math.max(spanne, ph / (wahl * proMeter));
-  const y0 = (zmax + zmin) / 2 - fenster / 2, y1 = y0 + fenster;
+  const { ph, y0, y1 } = profHoehenfenster(zmin, zmax, L, pw, wahl, PROF_PLOT_MIN, PROF_PLOT_MAX);
   const h = ob + ph + un;
   const yStep = profSchritt((y1 - y0) / 3);
   const X = s => li + s / L * pw, Y = z => ob + (y1 - z) / (y1 - y0) * ph;
@@ -5868,11 +6328,14 @@ function profBildSetzen(el) {
   const basis = ob + ph;
   const flaeche = dgm.map(t => `${t.d}L${t.x1} ${basis}L${t.x0} ${basis}Z`).join('');
   const dom = profDom ? profPfad(profDom.station, profDom.hoehe, X, Y).map(t => t.d).join('') : '';
+  // Gebäude als Blöcke über dem Gelände, unter der Geländelinie
+  const geb = profGeb ? profGeb.map(b => 'M' + b.umriss.map(([st, z]) => `${X(st).toFixed(1)} ${Y(z).toFixed(1)}`).join('L') + 'Z').join('') : '';
 
   el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${achse.name}">` +
     `<path class="gitter" d="${gitter}"/>` +
     (ecken ? `<path class="ecken" d="${ecken}"/>` : '') +
     `<path class="flaeche" d="${flaeche}"/>` +
+    (geb ? `<path class="geb" d="${geb}"/>` : '') +
     `<path class="dgm" d="${dgm.map(t => t.d).join('')}"/>` +
     (dom ? `<path class="dom" d="${dom}"/>` : '') +
     `<g class="beschr">${beschr}</g>` +
@@ -5938,6 +6401,15 @@ function profZeigerSetzen() {
   text.setAttribute('x', rechts ? x + 6 : x - 6);
   text.setAttribute('y', a.ob + 12);
   text.setAttribute('text-anchor', rechts ? 'start' : 'end');
+  // Steht der Finger auf einem Gebäude: was es ist, in einer zweiten Zeile
+  const b = profGeb && profGeb.find(x2 => s >= x2.s0 && s <= x2.s1);
+  if (b) {
+    const zweite = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+    zweite.setAttribute('x', rechts ? x + 6 : x - 6);
+    zweite.setAttribute('dy', '13');
+    zweite.textContent = [b.fn, b.dachform, b.hoehe ? `${nfH.format(b.hoehe)} m hoch` : '', b.adr].filter(Boolean).join(' · ');
+    text.appendChild(zweite);
+  }
 
   const ll = utm32Zurueck(profDgm.ost[i], profDgm.nord[i]);
   if (!profRing) {
