@@ -17,7 +17,9 @@
  * Vom DGM kommt deshalb die ganze Datei — eine schräge Linie bräuchte ohnehin
  * fast alle Streifen —, vom DOM per Range-Abfrage nur die Blöcke entlang der
  * Linie. Damit sind auch die rund 100 MB, die eine DOM-Kachel entpackt hätte,
- * kein Thema für den Speicher des Handys.
+ * kein Thema für den Speicher des Handys. Für eine einzelne Höhe (hoehenPunkt)
+ * holt auch das DGM nur Kopf und Streifen: am 10.10.2026 24 kB bzw. 37 kB
+ * beim ersten Punkt einer Kachel, 5–13 kB für jeden weiteren.
  *
  * Bewusst ohne geotiff.js und proj4: Der Aufbau ist bekannt und eng. Weicht
  * eine Datei davon ab, bricht das Lesen mit einer klaren Meldung ab, statt
@@ -365,9 +367,14 @@ async function vorratSchreiben(schluessel, bytes) {
   }
 }
 
-/** Lädt Kopf (und beim DGM die Datei) einer Kachel; null, wenn sie fehlt. */
-function hoehenKachel(art, e, n) {
-  const schluessel = `${art}/${e}_${n}`;
+/** Lädt Kopf (und beim DGM die Datei) einer Kachel; null, wenn sie fehlt.
+ *  teil: vom DGM nur die nötigen Streifen per Range-Abfrage, wie beim DOM —
+ *  für einzelne Höhen, wo eine ganze Kachel von 2–4 MB unverhältnismäßig wäre.
+ *  Liegt die ganze Datei schon im Speicher oder im Vorrat, wird die genommen. */
+function hoehenKachel(art, e, n, teil = false) {
+  const voll = `${art}/${e}_${n}`;
+  if (teil && hoehenKacheln.has(voll)) teil = false;
+  const schluessel = teil ? `${art}-teil/${e}_${n}` : voll;
   const bekannt = hoehenKacheln.get(schluessel);
   if (bekannt) {
     hoehenKacheln.delete(schluessel);        // nach hinten: zuletzt benutzt
@@ -378,13 +385,14 @@ function hoehenKachel(art, e, n) {
   const laden = (async () => {
     const def = HOEHEN_ARTEN[art], url = hoehenAdresse(art, e, n);
     let lies, anfang;
-    if (def.ganz) {
-      let datei = await vorratLesen(schluessel);
-      if (!datei) {
-        datei = await hoehenHolen(url);
-        if (!datei) return null;             // keine Kachel: außerhalb Bayerns
-        vorratSchreiben(schluessel, datei);  // im Hintergrund
-      }
+    // Beim teilweisen Lesen zuerst nachsehen, ob die ganze Datei im Vorrat liegt
+    const imVorrat = def.ganz ? await vorratLesen(voll) : null;
+    if (imVorrat) {
+      lies = async (von, laenge) => imVorrat.subarray(von, Math.min(von + laenge, imVorrat.byteLength));
+    } else if (def.ganz && !teil) {
+      const datei = await hoehenHolen(url);
+      if (!datei) return null;               // keine Kachel: außerhalb Bayerns
+      vorratSchreiben(voll, datei);          // im Hintergrund
       lies = async (von, laenge) => datei.subarray(von, Math.min(von + laenge, datei.byteLength));
     } else {
       anfang = await hoehenHolen(url, 0, 16384);
@@ -490,8 +498,9 @@ async function hoehenBloeckeLaden(kachel, indizes) {
 /* ============================ Abgreifen ============================ */
 
 /** Höhen an UTM-Koordinaten (Float64Array ost, nord). Verfahren „bilinear"
- *  oder „nachbar". Wo es keine Daten gibt (außerhalb Bayerns, Lücke), NaN. */
-async function hoehenWerte(art, ost, nord, verfahren = 'bilinear') {
+ *  oder „nachbar". Wo es keine Daten gibt (außerhalb Bayerns, Lücke), NaN.
+ *  teil: vom DGM nur die nötigen Streifen holen (siehe hoehenKachel). */
+async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = false } = {}) {
   const def = HOEHEN_ARTEN[art], res = def.aufloesung, npx = def.pixel;
   const anzahl = ost.length;
   const aus = new Float32Array(anzahl).fill(NaN);
@@ -504,7 +513,7 @@ async function hoehenWerte(art, ost, nord, verfahren = 'bilinear') {
       const s = `${Math.floor(ost[i] / 1000)}_${Math.floor(nord[i] / 1000)}`;
       if (versucht.has(s)) continue;
       versucht.add(s);
-      await hoehenKachel(art, Math.floor(ost[i] / 1000), Math.floor(nord[i] / 1000));
+      await hoehenKachel(art, Math.floor(ost[i] / 1000), Math.floor(nord[i] / 1000), teil);
     }
     if (!def.schema) return aus;
   }
@@ -539,7 +548,7 @@ async function hoehenWerte(art, ost, nord, verfahren = 'bilinear') {
 
   const geladen = new Map();     // Kachel → { kopf, bloecke }
   await hoehenParallel([...bedarf.values()], 4, async b => {
-    const kachel = await hoehenKachel(art, b.e, b.n);
+    const kachel = await hoehenKachel(art, b.e, b.n, teil);
     if (!kachel) return;
     const k = kachel.kopf, noetig = new Set();
     for (let j = 0; j < b.pixel.length; j += 2) {
@@ -572,6 +581,23 @@ async function hoehenWerte(art, ost, nord, verfahren = 'bilinear') {
     }
   }
   return aus;
+}
+
+/* Geländehöhe an einem einzelnen Punkt — für das Ergebnis, die Sprechblasen und
+ * das Abstecken. Vom DGM kommt nur der Streifen, in dem der Punkt liegt, samt
+ * Kopf der Datei: rund 25 kB statt 2–4 MB. Liegt die Kachel schon im Vorrat,
+ * kostet es nichts. Klar außerhalb Bayerns wird gar nicht erst gefragt. */
+const BAYERN_RAHMEN = { s: 47.26, n: 50.57, w: 8.97, o: 13.84 };
+
+function inBayernRahmen(lat, lon) {
+  const r = BAYERN_RAHMEN;
+  return lat >= r.s && lat <= r.n && lon >= r.w && lon <= r.o;
+}
+
+async function hoehenPunkt(lat, lon) {
+  if (!inBayernRahmen(lat, lon)) return NaN;
+  const [e, n] = utm32Hin(lat, lon);
+  return (await hoehenWerte('dgm1', Float64Array.of(e), Float64Array.of(n), 'bilinear', { teil: true }))[0];
 }
 
 /** Profil entlang eines Linienzugs [[lat, lon], …].
@@ -613,5 +639,5 @@ async function hoehenProfil(punkte, art, { abstand, maxPunkte = 8000 } = {}) {
 // Für die Prüfung unter Node (werkzeug/hoehen-pruefen.mjs); im Browser ohne Wirkung
 if (typeof module === 'object' && module.exports) {
   module.exports = { HOEHEN, HOEHEN_ARTEN, utm32Hin, utm32Zurueck, ellipsoidAbstand,
-    lzwEntpacken, tiffKopf, hoehenKachel, hoehenWerte, hoehenProfil };
+    lzwEntpacken, tiffKopf, hoehenKachel, hoehenWerte, hoehenPunkt, hoehenProfil };
 }

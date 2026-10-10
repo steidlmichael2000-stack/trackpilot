@@ -1649,6 +1649,8 @@ let prefs = {
   abKompass: false,                      // Abstecken: Pfeil nach dem Handy statt nach der Karte
   parzFarbe: 'auto',                     // 'auto' (nach Grundkarte) oder '#rrggbb'
   profUeber: 1,                          // Querprofil: Überhöhung (1, 2, 5 oder 10)
+  gpArt: 'quer', gpBreite: 50, gpLaenge: 250,   // Profil am Gleis: Quer/Längs, je Seite bzw. Richtung in m
+  gpUeberLaengs: 10,                     // Profil am Gleis, längs: eigene Überhöhung
   tourAngeboten: false,                  // die Tour wurde beim ersten Start schon einmal angeboten
   wms: { url: '', layers: '', opacity: 75, on: false }   // nur Adresse und Layer, nie Zugangsdaten
 };
@@ -3620,6 +3622,8 @@ function kmlPopup(o, akte) {
   for (const [k, v] of (o.daten || [])) zeilen.push(`<span><i>${esc(k)}</i> ${esc(v)}</span>`);
   if (o.art === 'p') {
     zeilen.push(`<span>${fmtCoord(o.koord[0], o.koord[1])}</span>`);
+    const hoehe = hoeheZeile(o.koord[0], o.koord[1]);
+    if (hoehe) zeilen.push(hoehe);
     zeilen.push(`<a href="${gmapsUrl(o.koord[0], o.koord[1])}" target="_blank" rel="noopener">In Google Maps öffnen</a>`);
   }
   const herkunft = [akte.name, o.ordner].filter(Boolean).join(' › ');
@@ -3700,6 +3704,7 @@ function kmlEbene(akte) {
       }).setLatLng(wo).setContent(html).openOn(map);
 
       const el = blase.getElement();
+      hoeheFuellen(el);
       const knopf = el && el.querySelector('[data-kmlkm]');
       if (knopf) knopf.addEventListener('click', () => {
         map.closePopup();          // ohne Argument, sonst behält Leaflet _popup gesetzt
@@ -4207,6 +4212,7 @@ function merkPunkt(lat, lon) {
   }).setLatLng(wo).setContent(
     `<b>Gesetzter Punkt</b>` +
     `<span>${fmtCoord(lat, lon)}</span>` +
+    hoeheZeile(lat, lon) +
     `<a href="${gmapsUrl(lat, lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>` +
     `<button type="button" class="kml-km" data-merkkm>Kilometer bestimmen` +
     `<small>rechnet die Stelle auf die Strecke</small></button>`
@@ -4223,6 +4229,7 @@ function merkPunkt(lat, lon) {
   map.on('popupclose', aufraeumen);
 
   const el = blase.getElement();
+  hoeheFuellen(el);
   const knopf = el && el.querySelector('[data-merkkm]');
   if (knopf) knopf.addEventListener('click', () => {
     map.closePopup();
@@ -4732,6 +4739,52 @@ function messMenueTaste(ev) {
   if (ev.key === 'Escape') messMenueAuf(false);
 }
 
+/* ============================ Höhe am Punkt ============================
+ *
+ * Geländehöhe aus dem DGM1 unter dem Ergebnis, in den Sprechblasen (langer
+ * Druck, KML-Punkte) und beim Abstecken. hoehenPunkt holt dafür nur Kopf und
+ * Streifen der Kachel, rund 25 kB. Die Zeile steht sofort als Platzhalter da
+ * und füllt sich, sobald der Wert kommt — so springt die Leiste nicht. Klar
+ * außerhalb Bayerns gibt es sie gar nicht; liegt der Punkt zwar im Rahmen, aber
+ * außerhalb (Thüringen, Württemberg) oder fehlt das Netz, verschwindet sie
+ * wieder, statt eine Fehlermeldung in jede Sprechblase zu schreiben. */
+const HOEHE_MERK_MAX = 200;
+const hoeheMerk = new Map();             // "lat,lon" → Versprechen der Höhe
+
+function hoeheHolen(lat, lon) {
+  const s = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+  let p = hoeheMerk.get(s);
+  if (!p) {
+    // Ein Netzfehler wird nicht gemerkt: beim nächsten Mal neu versuchen
+    p = hoehenPunkt(lat, lon).catch(() => { hoeheMerk.delete(s); return NaN; });
+    hoeheMerk.set(s, p);
+    while (hoeheMerk.size > HOEHE_MERK_MAX) hoeheMerk.delete(hoeheMerk.keys().next().value);
+  }
+  return p;
+}
+
+/** Platzhalter für die Höhe; leer, wo es keine geben kann. */
+function hoeheZeile(lat, lon) {
+  if (!inBayernRahmen(lat, lon)) return '';
+  return `<span class="hoehe" data-hoehe="${lat},${lon}" title="Geländehöhe in Metern über Normalhöhennull ` +
+    `aus dem DGM1 der Bayerischen Vermessungsverwaltung, CC BY 4.0">Höhe … m ü. NHN</span>`;
+}
+
+/** Füllt die Platzhalter in el, sobald die Werte da sind. */
+function hoeheFuellen(el) {
+  if (!el) return;
+  el.querySelectorAll('[data-hoehe]').forEach(z => {
+    const [lat, lon] = z.dataset.hoehe.split(',').map(Number);
+    hoeheHolen(lat, lon).then(h => {
+      if (!z.isConnected) return;
+      const imBalken = z.closest('#bottom, #ziel');
+      if (Number.isFinite(h)) z.innerHTML = `Höhe <b>${nfH.format(h)} m</b> ü. NHN · DGM1`;
+      else z.remove();
+      if (imBalken) updateBH();
+    });
+  });
+}
+
 /* ============================ Querprofil ============================
  *
  * Geländeschnitt entlang angetippter Punkte aus dem DGM1 der Bayerischen
@@ -4769,6 +4822,15 @@ const PROF_DOM_BLOCK_KB = 110;         // DOM20: 13–64 MB je Kachel aus 400 Bl
 const PROF_QUELLE = '<a href="https://www.geodaten.bayern.de/" target="_blank" rel="noopener">' +
   'Bayerischen Vermessungsverwaltung</a>, CC BY 4.0';
 
+/* Profil am Gleis (Knopf in der Ergebnisleiste): quer zum Gleis oder längs
+ * daran entlang. Breite (je Seite) und Länge (je Richtung) sind Chips, die bei
+ * jedem Tipp weiterschalten. Die Sprungreihe schiebt den Schnitt die
+ * Kilometrierung entlang — im freien Profil verschieben dieselben Knöpfe ihn
+ * parallel zur Seite. */
+const GP_BREITEN = [10, 25, 50, 100, 200];
+const GP_LAENGEN = [100, 250, 500, 1000];
+const PROF_SPRUENGE = { quer: [1, 5, 10], laengs: [10, 50, 100], frei: [1, 5, 10] };
+
 let profModus = false;
 let profPunkte = [];
 let profLayer = null;
@@ -4785,14 +4847,22 @@ let profLauf = 0;                      // überholte Antworten verwerfen
 let profWahl = -1;                     // Stützpunkt unter dem Finger
 let profLetzterTipp = 0;
 let profAbbild = null;                 // Maßstab des gezeichneten Diagramms
+let profGleis = null;                  // Profil am Gleis: { ref, km, art, mitte, kms, mitteIndex }
+let profVersatz = 0;                   // freies Profil, parallel verschoben in m; plus = links von A→B
 
 const profName = i => i < 26 ? String.fromCharCode(65 + i) : String(i + 1);
 const profMB = byte => nfH.format(Math.max(0.1, byte / 2 ** 20)) + ' MB';
+const gpBreite = () => GP_BREITEN.includes(prefs.gpBreite) ? prefs.gpBreite : 50;
+const gpLaenge = () => GP_LAENGEN.includes(prefs.gpLaenge) ? prefs.gpLaenge : 250;
+// Vorzeichen immer ausgeschrieben, unter 5 cm „±"
+const profVz = d => (d > 0.05 ? '+' : d < -0.05 ? '−' : '±') + nfH.format(Math.abs(d));
 
 function profStart() {
   if (messModus) messEnde();
   profModus = true;
   profPunkte = [];
+  profGleis = null;
+  profVersatz = 0;
   profDgm = profDom = profDomDgm = null;
   profDomAn = false;
   profLaedt = profFehler = '';
@@ -4809,19 +4879,24 @@ function profStart() {
   syncButtons();
 }
 
-function profEnde() {
+/** zeigen: danach wieder das Ergebnis in die Leiste — renderBottom selbst ruft
+ *  ohne, wenn ein neues Ergebnis ein offenes Profil ablöst. */
+function profEnde(zeigen = true) {
   profModus = false;
   profPunkte = [];
+  profGleis = null;
+  profVersatz = 0;
   profDgm = profDom = profDomDgm = null;
   profLauf++;
   if (profLayer) profLayer.clearLayers();
   profRing = null;
   if (map.doubleClickZoom) map.doubleClickZoom.enable();
   syncButtons();
-  renderBottom();      // zeigt wieder den vorherigen Punkt, falls es einen gibt
+  if (zeigen) renderBottom();      // zeigt wieder den vorherigen Punkt, falls es einen gibt
 }
 
 function profTipp(latlng) {
+  if (profGleis) return;           // am Gleis legt die Strecke den Schnitt fest
   latlng = L.latLng(latlng);
   // Doppelt gemeldeter Tipp (siehe messTipp)
   const jetzt = Date.now();
@@ -4843,31 +4918,67 @@ function profTipp(latlng) {
   profGeaendert();
 }
 
+/** Neuer Punkt, Zurück oder Leeren: Ein Versatz gehörte zur alten Linie. */
 function profGeaendert() {
+  profVersatz = 0;
   profZeichnen();
   profWahl = -1;
   profRechnen();
+}
+
+/** Die Punkte, entlang derer gerechnet wird. Im freien Profil um den Versatz
+ *  verschoben, senkrecht zur Linie vom ersten zum letzten Punkt — bei zwei
+ *  Punkten also genau quer zu A→B. Plus heißt links davon: Wer den Schnitt
+ *  ansieht wie im Diagramm, A links und B rechts, schiebt ihn damit nach vorn. */
+function profLinie() {
+  if (!profVersatz || profGleis || profPunkte.length < 2) return profPunkte;
+  const utm = profPunkte.map(p => utm32Hin(p[0], p[1]));
+  const a = utm[0], b = utm[utm.length - 1];
+  const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (l < 0.01) return profPunkte;
+  const ve = -(b[1] - a[1]) / l * profVersatz, vn = (b[0] - a[0]) / l * profVersatz;
+  return utm.map(([e, n]) => utm32Zurueck(e + ve, n + vn));
 }
 
 function profZeichnen() {
   if (!profLayer) return;
   profLayer.clearLayers();
   profRing = null;
-  if (profPunkte.length > 1) {
-    L.polyline(profPunkte, {
-      color: MESS_FARBE, weight: 3, opacity: 0.95, dashArray: '7 5', interactive: false
-    }).addTo(profLayer);
+  const linie = (pts, extra) => L.polyline(pts, {
+    color: MESS_FARBE, weight: 3, opacity: 0.95, dashArray: '7 5', interactive: false, ...extra
+  }).addTo(profLayer);
+  const punkt = p => L.circleMarker(p, {
+    radius: 5, color: '#fff', weight: 2, fillColor: MESS_FARBE, fillOpacity: 1, interactive: false
+  }).addTo(profLayer);
+  const schild = (p, text) => L.marker(p, {
+    interactive: false, keyboard: false,
+    icon: L.divIcon({ className: '', iconSize: null, iconAnchor: [-7, 7],
+      html: `<span class="mess-lbl">${esc(text)}</span>` })
+  }).addTo(profLayer);
+
+  const g = profGleis;
+  if (g) {
+    const n = profPunkte.length;
+    if (n < 2) return;
+    const a = profPunkte[0], b = profPunkte[n - 1];
+    // Quer gestrichelt wie das freie Profil, längs durchgezogen auf dem Gleis
+    linie(profPunkte, g.art === 'quer' ? {} : { dashArray: null, weight: 4, opacity: 0.85 });
+    punkt(a); punkt(b);
+    if (g.art === 'quer') { schild(a, 'links'); schild(b, 'rechts'); }
+    else { schild(a, 'km ' + fmtKm(g.kms[0])); schild(b, 'km ' + fmtKm(g.kms[g.kms.length - 1])); }
+    if (g.mitte) {
+      L.circleMarker(g.mitte, {
+        radius: 4, color: MESS_FARBE, weight: 2.5, fillColor: '#fff', fillOpacity: 1, interactive: false
+      }).addTo(profLayer);
+    }
+    return;
   }
-  profPunkte.forEach((p, i) => {
-    L.circleMarker(p, {
-      radius: 5, color: '#fff', weight: 2, fillColor: MESS_FARBE, fillOpacity: 1, interactive: false
-    }).addTo(profLayer);
-    L.marker(p, {
-      interactive: false, keyboard: false,
-      icon: L.divIcon({ className: '', iconSize: null, iconAnchor: [-7, 7],
-        html: `<span class="mess-lbl">${profName(i)}</span>` })
-    }).addTo(profLayer);
-  });
+
+  const pts = profLinie();
+  // Verschoben: die getippte Linie bleibt blass stehen, zur Orientierung
+  if (pts !== profPunkte) linie(profPunkte, { weight: 2, opacity: 0.45, dashArray: '2 5' });
+  if (pts.length > 1) linie(pts);
+  pts.forEach((p, i) => { punkt(p); schild(p, profName(i)); });
 }
 
 /** Wie viele Rasterzellen der Linienzug berührt: DGM-Kacheln (1000 m) oder
@@ -4887,21 +4998,30 @@ function profZellen(punkte, zelle) {
   return satz.size;
 }
 
-async function profRechnen() {
+/** behalten: Das bisherige Diagramm bleibt stehen, bis das neue da ist — beim
+ *  Springen und Verschieben, sonst flackerte jeder Schritt über „wird geladen". */
+async function profRechnen({ behalten = false } = {}) {
   const lauf = ++profLauf;
-  profDgm = profDom = profDomDgm = null;
+  const linie = profLinie();
+  if (!behalten) profDgm = profDom = profDomDgm = null;
   profFehler = '';
   profLaedt = '';
-  if (profPunkte.length < 2) { profLeiste(); return; }
   // Lange Linien: erst fragen, die Leiste bietet dann „Gelände laden" an
-  if (profZellen(profPunkte, 1000) > PROF_KACHELN_FRAGEN && !profFreigabe) { profLeiste(); return; }
+  if (linie.length < 2 || (profZellen(linie, 1000) > PROF_KACHELN_FRAGEN && !profFreigabe)) {
+    profDgm = profDom = profDomDgm = null;
+    profLeiste();
+    return;
+  }
 
-  profLaedt = 'dgm';
-  profLeiste();
+  if (!profDgm) {
+    profLaedt = 'dgm';
+    profLeiste();
+  }
   try {
-    const dgm = await hoehenProfil(profPunkte, 'dgm1');
+    const dgm = await hoehenProfil(linie, 'dgm1');
     if (lauf !== profLauf) return;
     profDgm = dgm;
+    profDom = profDomDgm = null;           // gehörte zur vorigen Linie, kommt unten neu
     if (!dgm.hoehe.some(Number.isFinite)) {
       profFehler = 'Hier gibt es keine Höhendaten — DGM1 und DOM20 decken nur Bayern ab.';
       profNochmal = false;
@@ -4927,7 +5047,7 @@ async function profDomLaden() {
   profLeiste();
   try {
     // 0,2 m Abstand, damit kein Mast und kein Baum zwischen zwei Stützpunkte fällt
-    const dom = await hoehenProfil(profPunkte, 'dom20', { maxPunkte: 6000 });
+    const dom = await hoehenProfil(profLinie(), 'dom20', { maxPunkte: 6000 });
     const dgmDort = await hoehenWerte('dgm1', dom.ost, dom.nord);
     if (lauf !== profLauf) return;
     profDom = dom;
@@ -4961,7 +5081,7 @@ function profKennwerte() {
 
 function profDomKnopf() {
   // „+0,8 MB": dazuladen, und was es kostet — kurz, damit die Legende einzeilig bleibt
-  const mb = profMB(profZellen(profPunkte, 51.2) * PROF_DOM_BLOCK_KB * 1024);
+  const mb = profMB(profZellen(profLinie(), 51.2) * PROF_DOM_BLOCK_KB * 1024);
   const [zusatz, titel] = profLaedt === 'dom' ? ['lädt …', 'Oberfläche wird geladen']
     : profDomAn ? ['×', 'Oberfläche ausblenden']
     : ['+' + mb, `Gebäude und Bewuchs aus dem DOM20 dazuladen, rund ${mb}`];
@@ -4969,75 +5089,381 @@ function profDomKnopf() {
     `title="${titel}" aria-label="${titel}">Oberfläche<small>${zusatz}</small></button>`;
 }
 
+/** Höhe im Profil an einer Station, zwischen den Stützpunkten linear. */
+function profWertBei(p, s) {
+  const st = p.station;
+  let i = profIndex(st, s);
+  if (st[i] > s && i > 0) i--;
+  const j = Math.min(i + 1, st.length - 1);
+  const a = p.hoehe[i], b = p.hoehe[j];
+  if (!Number.isFinite(a) || !Number.isFinite(b) || st[j] <= st[i]) return Number.isFinite(a) ? a : b;
+  return a + (s - st[i]) / (st[j] - st[i]) * (b - a);
+}
+
+/** Mittlere Neigung in ‰ als Ausgleichsgerade — zwei Endpunkte allein hingen
+ *  an einem Graben oder einer Böschung genau dort. */
+function profNeigung(p) {
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  const x0 = p.laenge / 2;                // um die Mitte, damit die Summen klein bleiben
+  for (let i = 0; i < p.station.length; i++) {
+    const z = p.hoehe[i];
+    if (!Number.isFinite(z)) continue;
+    const x = p.station[i] - x0;
+    n++; sx += x; sy += z; sxx += x * x; sxy += x * z;
+  }
+  const d = n * sxx - sx * sx;
+  return n > 1 && d > 0 ? (n * sxy - sx * sy) / d * 1000 : NaN;
+}
+
+/** Die Zeile mit den Kennwerten über dem Diagramm. */
+function profZahlen() {
+  const kw = profKennwerte(), g = profGleis;
+  const obj = kw.obj ? `<span>Objekte bis ${nfH.format(kw.obj.hoehe)} m` +
+    (g ? '' : ` bei ${nfM.format(kw.obj.station)} m`) + '</span>' : '';
+  const gleis = h => `<b><i>Gleis</i> ${Number.isFinite(h) ? nfH.format(h) + ' m' : '–'}</b>`;
+  if (g && g.art === 'quer') {
+    // Links und rechts außen gegen das Gleis: Liegt es im Einschnitt, steht beides im Plus
+    const L = profDgm.laenge, h = profWertBei(profDgm, L / 2);
+    const li = profWertBei(profDgm, 0) - h, re = profWertBei(profDgm, L) - h;
+    const seiten = [Number.isFinite(li) && `links ${profVz(li)}`, Number.isFinite(re) && `rechts ${profVz(re)}`].filter(Boolean);
+    return `<p class="prof-zahlen">${gleis(h)}` +
+      (seiten.length ? `<span>${seiten.join(' · ')} m</span>` : '') + obj + '</p>';
+  }
+  if (g) {
+    const h = profWertBei(profDgm, profDgm.ecken[g.mitteIndex]);
+    const ng = profNeigung(profDgm);
+    return `<p class="prof-zahlen">${gleis(h)}` +
+      (Number.isFinite(ng) ? `<b title="Ausgleichsgerade über den ganzen Schnitt; plus heißt: steigt mit dem Kilometer">` +
+        `<i>Neigung</i> ${profVz(ng)} ‰</b>` : '') +
+      (Number.isFinite(kw.dh) ? `<span>Δh ${profVz(kw.dh)} m</span>` : '') + obj + '</p>';
+  }
+  // Die Spanne von tiefstem bis höchstem Punkt steht an der Achse
+  return `<p class="prof-zahlen"><b>${esc(messText(profDgm.laenge))}</b><b>Δh ${profVz(kw.dh)} m</b>${obj}</p>`;
+}
+
+/* Die Leiste besteht aus drei Teilen: oben Kopf und Diagramm, in der Mitte die
+ * Sprungreihe, unten Knöpfe und Quelle. Ändert sich nur der Inhalt — nach einem
+ * Sprung, wenn das Gelände kommt —, werden oben und unten neu geschrieben, die
+ * Sprungreihe bleibt stehen. Sonst ginge ein schneller zweiter Tipp verloren:
+ * Wird ein Knopf zwischen Drücken und Loslassen ersetzt, gibt es keinen Klick. */
 function profLeiste() {
   const b = $('#bottom');
   b.hidden = false;
+  const g = profGleis;
   const n = profPunkte.length;
-  const teile = [];
+  const springen = g || n > 1;
+  const ansicht = g ? 'gleis-' + g.art : springen ? 'frei-sprung' : 'frei';
 
-  if (n < 2) {
-    teile.push(`<p class="bb-note plain">${n ? 'Punkt B antippen — dann lädt das Profil.'
-      : 'Auf die Karte tippen setzt Punkt A. Kilometersteine und KML-Punkte werden gefangen.'}</p>`);
-  } else if (profFehler) {
+  const teile = [];
+  if (profFehler) {
     teile.push(`<p class="bb-note">${esc(profFehler)}</p>`);
     if (profNochmal) teile.push('<button type="button" class="refine" id="profNochmal">Erneut versuchen</button>');
+  } else if (g && n < 2) {
+    teile.push('<p class="bb-note plain">Gleislage wird bestimmt …</p>');
+  } else if (n < 2) {
+    teile.push(`<p class="bb-note plain">${n ? 'Punkt B antippen — dann lädt das Profil.'
+      : 'Auf die Karte tippen setzt Punkt A. Kilometersteine und KML-Punkte werden gefangen.'}</p>`);
   } else if (!profDgm && profLaedt !== 'dgm') {
-    const k = profZellen(profPunkte, 1000);
+    const k = profZellen(profLinie(), 1000);
     teile.push('<button type="button" class="refine" id="profFreigeben">Gelände laden' +
       `<small>${k} Kacheln, rund ${k * PROF_KACHEL_MB} MB — danach liegen sie auf dem Gerät</small></button>`);
   } else if (!profDgm) {
     teile.push('<p class="bb-note plain">Gelände wird geladen …</p>');
   } else {
-    const kw = profKennwerte();
-    const dh = (kw.dh > 0.05 ? '+' : kw.dh < -0.05 ? '−' : '±') + nfH.format(Math.abs(kw.dh));
-    // Die Spanne von tiefstem bis höchstem Punkt steht an der Achse
-    teile.push(`<p class="prof-zahlen"><b>${esc(messText(profDgm.laenge))}</b><b>Δh ${dh} m</b>` +
-      (kw.obj ? `<span>Objekte bis ${nfH.format(kw.obj.hoehe)} m bei ${nfM.format(kw.obj.station)} m</span>` : '') +
-      '</p>',
+    /* Am Gleis braucht die Legende den Platz für den Breiten-Chip; das Gelände
+     * ist auch ohne Eintrag die Fläche, und die Oberfläche trägt ihren Strich
+     * im eigenen Knopf. Sonst bräche die Zeile auf dem Handy um. */
+    teile.push(profZahlen(),
       '<div class="prof-bild" id="profBild"></div>',
-      `<div class="prof-legende"><span class="prof-leg-dgm">Gelände</span>${profDomKnopf()}` +
+      `<div class="prof-legende">${g ? '' : '<span class="prof-leg-dgm">Gelände</span>'}${profDomKnopf()}` +
+      (g ? gpWeiteKnopf() : '') +
       '<button type="button" class="prof-ueber" id="profUeber"></button></div>');
     if (profDgm.hoehe.some(z => !Number.isFinite(z))) {
       teile.push('<p class="bb-note">Teilweise außerhalb Bayerns — dort fehlen die Höhen.</p>');
     }
   }
 
-  b.innerHTML = `
+  let kopf;
+  if (g) {
+    const art = (wert, text) => `<button type="button" data-gpart="${wert}" aria-pressed="${g.art === wert}"` +
+      `${g.art === wert ? ' class="is-on"' : ''}>${text}</button>`;
+    kopf = `<p class="bb-title">${g.art === 'quer' ? 'Querprofil' : 'Längsprofil'}</p>` +
+      `<span class="tag warn" title="Strecke ${esc(g.ref)}">km ${fmtKm(g.km)}</span>` +
+      `<span class="prof-art" role="group" aria-label="Schnitt">${art('quer', 'Quer')}${art('laengs', 'Längs')}</span>`;
+  } else {
+    const v = `${profVersatz > 0 ? '+' : '−'}${nfM.format(Math.abs(profVersatz))} m`;
+    kopf = '<p class="bb-title">Profil</p>' +
+      `<span class="tag warn">${profDom ? 'DGM1 · DOM20' : 'Gelände DGM1'}</span>` +
+      // Der Versatz ist zugleich sein Rücksetzer — antippen holt die getippte Linie zurück
+      (profVersatz ? `<button type="button" class="tag prof-versatz" id="profVersatz" ` +
+        `title="Parallel verschoben, plus nach links von A→B — antippen: zurück auf die getippte Linie">${v}</button>` : '');
+  }
+
+  const oben = `
     <button type="button" id="bbClose" class="bb-close" aria-label="Profil beenden">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
-    <div class="bb-head">
-      <p class="bb-title">Profil</p>
-      <span class="tag warn">${profDom ? 'DGM1 · DOM20' : 'Gelände DGM1'}</span>
-    </div>
-    ${teile.join('')}
+    <div class="bb-head">${kopf}</div>
+    ${teile.join('')}`;
+  const unten = (g ? '' : `
     <div class="bb-actions knapp">
       <button type="button" id="profZurueck"${n ? '' : ' disabled'}>Zurück</button>
       <button type="button" id="profLeer"${n ? '' : ' disabled'}>Leeren</button>
-    </div>
-    ${profDgm ? `<p class="prof-quelle">Profil aus Daten der ${PROF_QUELLE}</p>` : ''}`;
+    </div>`) +
+    (profDgm ? `<p class="prof-quelle">Profil aus Daten der ${PROF_QUELLE}</p>` : '');
+
+  const rahmen = $('#profRahmen');
+  if (rahmen && rahmen.dataset.ansicht === ansicht) {
+    $('#profOben').innerHTML = oben;
+    $('#profUnten').innerHTML = unten;
+  } else {
+    b.innerHTML = `<div id="profRahmen" data-ansicht="${ansicht}"><div id="profOben">${oben}</div>` +
+      (springen ? `<div class="prof-sprung" id="profSprung" role="group" aria-label="Schnitt verschieben">${profSprungReihe()}</div>` : '') +
+      `<div id="profUnten">${unten}</div></div>`;
+    b.querySelectorAll('[data-sprung]').forEach(k =>
+      k.addEventListener('click', () => profSpringen(Number(k.dataset.sprung))));
+  }
 
   const an = (sel, f) => { const el = b.querySelector(sel); if (el) el.addEventListener('click', f); };
-  an('#bbClose', profEnde);
+  an('#bbClose', () => profEnde());
   an('#profZurueck', () => { profPunkte.pop(); profGeaendert(); });
   an('#profLeer', () => { profPunkte = []; profFreigabe = false; profGeaendert(); });
-  an('#profNochmal', profRechnen);
+  an('#profNochmal', () => g ? gpRechnen() : profRechnen());
   an('#profFreigeben', () => { profFreigabe = true; profRechnen(); });
+  an('#profVersatz', () => { profVersatz = 0; profWahl = -1; profZeichnen(); profRechnen({ behalten: true }); });
   an('#profDom', () => {
     if (profLaedt) return;
     if (profDomAn) { profDomAn = false; profDom = profDomDgm = null; profLeiste(); }
     else profDomLaden();
   });
   an('#profUeber', () => {
-    prefs.profUeber = PROF_UEBER[(PROF_UEBER.indexOf(profUeberWahl()) + 1) % PROF_UEBER.length];
+    prefs[profUeberSchluessel()] = PROF_UEBER[(PROF_UEBER.indexOf(profUeberWahl()) + 1) % PROF_UEBER.length];
     saveStore();
     const el = $('#profBild');
     if (el) profBildSetzen(el);
   });
+  an('#profWeite', gpWeiter);
+  b.querySelectorAll('[data-gpart]').forEach(k => k.addEventListener('click', () => gpArtWechseln(k.dataset.gpart)));
 
   const bild = $('#profBild');
   if (bild) profBildSetzen(bild);
   updateBH();
+}
+
+/** −10 −5 −1 +1 +5 +10 — am Gleis Meter entlang der Kilometrierung, frei quer zur Linie. */
+function profSprungReihe() {
+  const art = profGleis ? profGleis.art : 'frei';
+  const titel = d => {
+    const m = `${nfM.format(Math.abs(d))} m`;
+    if (art === 'frei') return `Schnitt ${m} parallel nach ${d > 0 ? 'links' : 'rechts'} von A→B verschieben`;
+    return `${m} ${d > 0 ? 'vor (Kilometer steigt)' : 'zurück (Kilometer fällt)'}`;
+  };
+  const knopf = d => `<button type="button" data-sprung="${d}" title="${titel(d)}" aria-label="${titel(d)}">` +
+    `${d > 0 ? '+' : '−'}${nfM.format(Math.abs(d))}</button>`;
+  const s = PROF_SPRUENGE[art];
+  return [...s].reverse().map(d => knopf(-d)).join('') + s.map(d => knopf(d)).join('');
+}
+
+function profSpringen(d) {
+  if (!profModus) return;
+  if (profGleis) {
+    // Auf Millimeter gerundet, sonst sammelt sich über viele Sprünge Rechenrauschen an
+    profGleis.km = Math.round((profGleis.km + d / 1000) * 1e6) / 1e6;
+    gpRechnen();
+  } else if (profPunkte.length > 1) {
+    profVersatz += d;
+    profWahl = -1;
+    profZeichnen();
+    profRechnen({ behalten: true });
+  }
+}
+
+/** Am Rechner: ← und → springen den kleinen Schritt, mit Umschalt den großen. */
+function profTaste(ev) {
+  if (!profModus || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+  if (!profGleis && profPunkte.length < 2) return;
+  const tour = $('#tour');
+  if (tour && !tour.hidden) return;
+  if (ev.target.closest && ev.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  const s = PROF_SPRUENGE[profGleis ? profGleis.art : 'frei'];
+  const d = ev.shiftKey ? s[s.length - 1] : s[0];
+  // Vor Leaflet, das mit den Pfeiltasten sonst die Karte verschöbe
+  ev.preventDefault();
+  ev.stopPropagation();
+  profSpringen(ev.key === 'ArrowRight' ? d : -d);
+}
+
+/* ---- Profil am Gleis ----
+ *
+ * Wo liegt Kilometer km auf dem Gleis? Für Sprünge von einem Meter muss die
+ * Antwort glatt sein: jedes Mal dieselbe Rechnung. resolvePoint taugt dafür
+ * nicht — es rastet bis 0,5 m an einen Stein ein und zeigt dann dessen Lage,
+ * die einige Meter neben dem Gleis liegen kann. Hier deshalb immer das
+ * Steinpaar A ≤ km < B und darauf der Gleisweg aus den mitgelieferten Kacheln,
+ * genau wie gleisGenau es für das Ergebnis tut. Fehlt der Weg, die Sehne
+ * zwischen den Steinen; über weite Lücken (mehr als MAX_GAP_KM) der Weg über
+ * Overpass, den die Suche dort meist schon geholt hat. Hinter dem letzten
+ * Stein läuft es wie bei der Suche am Gleis hinaus. null: kein Gleis zu finden. */
+async function gleisLage(ref, km) {
+  const e = await coverage(ref, km);
+  let A = null, B = null;
+  for (const p of e.sorted) {
+    if (p.km <= km + 1e-9) A = p;
+    else { B = p; break; }
+  }
+  if (A && B && segmentOk(A, B, MAX_GLEIS_GAP_KM)) {
+    const t = (km - A.km) / (B.km - A.km);
+    let weg = null;
+    try {
+      weg = await gleisWegZwischen(A, B, true);
+      if (!weg && !segmentOk(A, B)) weg = await gleisWegZwischen(A, B);
+    } catch { weg = null; }
+    if (weg) return pointAlong(weg.path, t * weg.length);
+    if (segmentOk(A, B)) return { lat: A.lat + t * (B.lat - A.lat), lon: A.lon + t * (B.lon - A.lon) };
+    return null;
+  }
+  if (A && B) return null;                 // Paar passt nicht zusammen — nicht quer durchs Land
+  const res = await resolvePoint(ref, km);
+  return res && (res.quality === 'exakt' || res.quality === 'extrapoliert') ? { lat: res.lat, lon: res.lon } : null;
+}
+
+/** Einheitsvektor [Ost, Nord] in Richtung steigender Kilometer, aus der Lage
+ *  5 m davor und danach. Nacheinander, nicht gleichzeitig: Beide fragen sonst
+ *  denselben noch fehlenden Abschnitt der Strecke doppelt ab. */
+async function gleisRichtung(ref, km) {
+  const a = await gleisLage(ref, km - 0.005);
+  const b = await gleisLage(ref, km + 0.005);
+  if (!a || !b) return null;
+  const [ea, na] = utm32Hin(a.lat, a.lon), [eb, nb] = utm32Hin(b.lat, b.lon);
+  const l = Math.hypot(eb - ea, nb - na);
+  return l > 2 ? [(eb - ea) / l, (nb - na) / l] : null;
+}
+
+/** Vom Ergebnis aus: der Knopf mit dem Profilzeichen in der Ergebnisleiste.
+ *  art: für die Tour, ohne die gemerkte Wahl zu ändern. */
+function gpStart(art = prefs.gpArt) {
+  if (!view.ref || view.km == null) return;
+  const ref = view.ref, km = view.km;
+  profStart();
+  profGleis = { ref, km, art: art === 'laengs' ? 'laengs' : 'quer',
+    mitte: null, kms: null, mitteIndex: 0, neuZeigen: true };
+  gpRechnen();
+}
+
+async function gpRechnen() {
+  const g = profGleis;
+  if (!g) return;
+  const lauf = ++profLauf;
+  profFehler = '';
+  profLeiste();                            // der Kilometer oben stimmt sofort
+
+  let punkte = [], kms = null, mitte = null, mitteIndex = 0;
+  try {
+    if (g.art === 'quer') {
+      const c = await gleisLage(g.ref, g.km);
+      const r = c && await gleisRichtung(g.ref, g.km);
+      if (lauf !== profLauf) return;
+      if (c && r) {
+        /* Links in Richtung steigender Kilometer ist (−Nord, Ost) der Richtung.
+         * Von links nach rechts gezogen, damit links im Diagramm links liegt. */
+        const [e, n] = utm32Hin(c.lat, c.lon), W = gpBreite();
+        punkte = [utm32Zurueck(e - r[1] * W, n + r[0] * W), utm32Zurueck(e + r[1] * W, n - r[0] * W)];
+        mitte = [c.lat, c.lon];
+      }
+    } else {
+      /* Längs: alle 2–10 m eine Lage, je nach Länge rund 200 Stück. Die Stationen
+       * im Diagramm sind dann Meter Gleis; welcher Kilometer wo liegt, sagen die
+       * Stützpunkte (kms zu den Ecken des Linienzugs). */
+      const L = gpLaenge(), schritt = Math.max(2, L / 100), anzahl = Math.round(2 * L / schritt);
+      kms = [];
+      for (let i = 0; i <= anzahl; i++) {
+        const k = Math.round((g.km + (i * schritt - L) / 1000) * 1e6) / 1e6;
+        const p = await gleisLage(g.ref, k);
+        if (lauf !== profLauf) return;
+        if (!p) continue;
+        if (2 * i === anzahl) { mitte = [p.lat, p.lon]; mitteIndex = punkte.length; }
+        kms.push(k);
+        punkte.push([p.lat, p.lon]);
+      }
+    }
+  } catch (err) {
+    if (lauf !== profLauf) return;
+    profFehler = `Die Kilometersteine der Strecke sind gerade nicht zu bekommen (${err.message}).`;
+    profNochmal = true;
+  }
+  if (!profFehler && (!mitte || punkte.length < 2)) {
+    profFehler = `Bei km ${fmtKm(g.km)} liegt kein Gleisverlauf vor — dort fehlen Kilometersteine, ` +
+      `oder die Steine passen nicht zusammen.`;
+    profNochmal = false;
+  }
+  if (profFehler) {
+    profPunkte = [];
+    profDgm = profDom = profDomDgm = null;
+    profLaedt = '';
+    profZeichnen();
+    profLeiste();
+    return;
+  }
+
+  profPunkte = punkte;
+  g.kms = kms;
+  g.mitte = mitte;
+  g.mitteIndex = mitteIndex;
+  profWahl = -1;
+  profZeichnen();
+  if (g.neuZeigen) { g.neuZeigen = false; gpKarteZeigen(); }
+  else gpNachfuehren();
+  profRechnen({ behalten: true });
+}
+
+/* Der Chip ±50 m: Breite je Seite (quer) oder Länge je Richtung (längs). */
+function gpWeiteKnopf() {
+  const quer = profGleis.art === 'quer', w = quer ? gpBreite() : gpLaenge();
+  const titel = (quer ? `${w} m zu jeder Seite des Gleises` : `${w} m in jede Richtung am Gleis entlang`) +
+    ' · antippen: umschalten';
+  return `<button type="button" class="prof-ueber prof-weite" id="profWeite" title="${titel}" ` +
+    `aria-label="${titel}">±${nfM.format(w)} m</button>`;
+}
+
+function gpWeiter() {
+  if (!profGleis) return;
+  if (profGleis.art === 'quer') prefs.gpBreite = GP_BREITEN[(GP_BREITEN.indexOf(gpBreite()) + 1) % GP_BREITEN.length];
+  else prefs.gpLaenge = GP_LAENGEN[(GP_LAENGEN.indexOf(gpLaenge()) + 1) % GP_LAENGEN.length];
+  saveStore();
+  profGleis.neuZeigen = true;
+  gpRechnen();
+}
+
+function gpArtWechseln(art) {
+  const g = profGleis;
+  if (!g || g.art === art) return;
+  g.art = prefs.gpArt = art;
+  saveStore();
+  g.neuZeigen = true;
+  // Das alte Diagramm zeigte den anderen Schnitt — es bleibt nicht stehen
+  profPunkte = [];
+  profDgm = profDom = profDomDgm = null;
+  profZeichnen();
+  gpRechnen();
+}
+
+/** Beim ersten Bild und nach Wechsel von Art oder Weite: den ganzen Schnitt zeigen, über der Leiste. */
+function gpKarteZeigen() {
+  if (profPunkte.length < 2) return;
+  // Rechts steht die Knopfsäule, darunter die Leiste — so hoch, wie sie mit Diagramm wird
+  const unten = Math.min(Math.round(window.innerHeight * 0.6), Math.max($('#bottom').offsetHeight, 290) + 24);
+  map.fitBounds(L.latLngBounds(profPunkte), { paddingTopLeft: [40, 100], paddingBottomRight: [76, unten], maxZoom: 18 });
+}
+
+/** Nach einem Sprung: nur nachschieben, wenn die Stelle aus dem freien Teil der Karte läuft. */
+function gpNachfuehren() {
+  const m = profGleis && profGleis.mitte;
+  if (!m) return;
+  const p = map.latLngToContainerPoint(m), gr = map.getSize();
+  const leiste = $('#bottom');
+  const unten = gr.y - (leiste.hidden ? 0 : leiste.getBoundingClientRect().height + 14);
+  if (p.x < 30 || p.x > gr.x - 30 || p.y < 90 || p.y > unten - 20) map.panTo(m);
 }
 
 /** Eine runde Schrittweite für Gitter und Beschriftung: 1, 2 oder 5 mal 10ⁿ. */
@@ -5096,9 +5522,88 @@ function profPfad(station, werte, X, Y) {
   return teile;
 }
 
-/** Die gewählte Überhöhung; was nicht in der Liste steht, gilt als 1:1. */
+/** Linear zwischen zwei aufsteigenden Reihen umrechnen, an den Enden festgehalten. */
+function profUmrechnen(xs, ys, x) {
+  const n = xs.length;
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[n - 1]) return ys[n - 1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) {
+    const m = (lo + hi) >> 1;
+    if (xs[m] <= x) lo = m; else hi = m;
+  }
+  return xs[hi] > xs[lo] ? ys[lo] + (x - xs[lo]) / (xs[hi] - xs[lo]) * (ys[hi] - ys[lo]) : ys[lo];
+}
+
+/* Was unter und über dem Diagramm steht. Frei: die Station in Metern (ab 2 km
+ * in km) und oben die Ecken A, B, … Quer: der Abstand vom Gleis, oben links,
+ * Gleis und rechts — links in Richtung steigender Kilometer. Längs: der
+ * Kilometer; die Station sind dort Meter Gleis, umgerechnet über die
+ * Stützpunkte, und oben steht der Kilometer des Schnitts. */
+function profAchse(L) {
+  const g = profGleis;
+  const a = { gitter: [], unten: [], oben: [], marken: [], zeiger: null, name: 'Geländeprofil' };
+
+  if (g && g.art === 'quer') {
+    const W = gpBreite(), mitte = L / 2, proM = L / (2 * W);
+    const schritt = profSchritt(W / 2);
+    for (let v = -Math.floor(W / schritt + 1e-9) * schritt; v <= W + 1e-9; v += schritt) {
+      a.gitter.push(mitte + v * proM);
+      a.unten.push({ s: mitte + v * proM, text: nfM.format(Math.abs(v)) });
+    }
+    a.unten[a.unten.length - 1].text += ' m';
+    a.oben.push({ s: 0, text: 'links', anker: 'start' }, { s: mitte, text: 'Gleis', anker: 'middle' },
+      { s: L, text: 'rechts', anker: 'end' });
+    a.marken.push(mitte);
+    a.zeiger = s => {
+      const v = (s - mitte) / proM;
+      return Math.abs(v) < 0.5 ? 'am Gleis' : `${nfM.format(Math.abs(v))} m ${v < 0 ? 'links' : 'rechts'}`;
+    };
+    a.name = 'Querprofil am Gleis';
+    return a;
+  }
+
+  if (g) {
+    const kms = g.kms, ecken = profDgm.ecken;
+    const k0 = kms[0], k1 = kms[kms.length - 1];
+    const schritt = profSchritt((k1 - k0) / 4);
+    for (let k = Math.ceil(k0 / schritt - 1e-9) * schritt; k <= k1 + 1e-9; k += schritt) {
+      const kk = Math.round(k * 1e6) / 1e6, s = profUmrechnen(kms, ecken, kk);
+      a.gitter.push(s);
+      a.unten.push({ s, text: fmtKm(kk) });
+    }
+    const sm = ecken[g.mitteIndex];
+    a.oben.push({ s: sm, text: 'km ' + fmtKm(g.km), anker: 'middle' });
+    a.marken.push(sm);
+    a.zeiger = s => 'km ' + fmtKm(profUmrechnen(ecken, kms, s));
+    a.name = 'Längsprofil am Gleis';
+    return a;
+  }
+
+  const xStep = profSchritt(L / 4), inKm = L >= 2000;
+  for (let s = 0; s <= L + 1e-6; s += xStep) a.gitter.push(s);
+  for (let s = 0; s < L - xStep * 0.4; s += xStep) {
+    a.unten.push({ s, text: inKm ? fmtKm(s / 1000) : nfM.format(s), anker: s ? 'middle' : 'start' });
+  }
+  a.unten.push({ s: L, text: messText(L), anker: 'end' });
+  const letzte = profDgm.ecken.length - 1;
+  profDgm.ecken.forEach((s, i) => {
+    if (i > 0 && i < letzte) a.marken.push(s);
+    a.oben.push({ s, text: profName(i), anker: i === 0 ? 'start' : i === letzte ? 'end' : 'middle' });
+  });
+  a.zeiger = s => `${nfM.format(s)} m`;
+  return a;
+}
+
+/* Das Längsprofil am Gleis merkt sich seine Überhöhung getrennt, Vorgabe 10×:
+ * Unüberhöht sind ein paar Promille Neigung auf 500 m ein flacher Strich, und
+ * wer zwischen Quer und Längs wechselt, müsste sonst jedes Mal umschalten. */
+const profUeberSchluessel = () => profGleis && profGleis.art === 'laengs' ? 'gpUeberLaengs' : 'profUeber';
+
+/** Die gewählte Überhöhung; was nicht in der Liste steht, gilt als Vorgabe. */
 function profUeberWahl() {
-  return PROF_UEBER.includes(prefs.profUeber) ? prefs.profUeber : 1;
+  const k = profUeberSchluessel();
+  return PROF_UEBER.includes(prefs[k]) ? prefs[k] : k === 'gpUeberLaengs' ? 10 : 1;
 }
 
 /* Das Diagramm, in der tatsächlichen Breite der Leiste gezeichnet: Mit
@@ -5124,13 +5629,12 @@ function profBildSetzen(el) {
   const fenster = Math.max(spanne, ph / (wahl * proMeter));
   const y0 = (zmax + zmin) / 2 - fenster / 2, y1 = y0 + fenster;
   const h = ob + ph + un;
-  const yStep = profSchritt((y1 - y0) / 3), xStep = profSchritt(L / 4);
+  const yStep = profSchritt((y1 - y0) / 3);
   const X = s => li + s / L * pw, Y = z => ob + (y1 - z) / (y1 - y0) * ph;
   const halb = v => Math.round(v) + 0.5;
   const stellen = yStep < 1 ? 1 : 0;
   const nfY = new Intl.NumberFormat('de-DE', { minimumFractionDigits: stellen, maximumFractionDigits: stellen });
-  const inKm = L >= 2000;
-  const stationText = s => inKm ? fmtKm(s / 1000) : nfM.format(s);
+  const achse = profAchse(L);
 
   let gitter = '', beschr = '', ecken = '';
   for (let z = Math.ceil(y0 / yStep - 1e-9) * yStep; z <= y1 + 1e-9; z += yStep) {
@@ -5138,24 +5642,23 @@ function profBildSetzen(el) {
     gitter += `M${li} ${y}H${li + pw}`;
     beschr += `<text x="${li - 5}" y="${y + 4}" text-anchor="end">${nfY.format(z)}</text>`;
   }
-  for (let s = 0; s <= L + 1e-6; s += xStep) gitter += `M${halb(X(s))} ${ob}V${ob + ph}`;
-  for (let s = 0; s < L - xStep * 0.4; s += xStep) {
-    beschr += `<text x="${X(s)}" y="${h - 3}" text-anchor="${s ? 'middle' : 'start'}">${stationText(s)}</text>`;
+  for (const s of achse.gitter) gitter += `M${halb(X(s))} ${ob}V${ob + ph}`;
+  for (const t of achse.unten) {
+    // Ohne feste Angabe: am Rand bündig, damit nichts über das Bild hinaussteht
+    const x = X(t.s), anker = t.anker || (x - li < 12 ? 'start' : li + pw - x < 12 ? 'end' : 'middle');
+    beschr += `<text x="${x}" y="${h - 3}" text-anchor="${anker}">${esc(t.text)}</text>`;
   }
-  beschr += `<text x="${li + pw}" y="${h - 3}" text-anchor="end">${esc(messText(L))}</text>`;
-  const letzte = profDgm.ecken.length - 1;
-  profDgm.ecken.forEach((s, i) => {
-    if (i > 0 && i < letzte) ecken += `M${halb(X(s))} ${ob}V${ob + ph}`;
-    beschr += `<text class="ecke" x="${X(s)}" y="${ob - 4}" ` +
-      `text-anchor="${i === 0 ? 'start' : i === letzte ? 'end' : 'middle'}">${profName(i)}</text>`;
-  });
+  for (const s of achse.marken) ecken += `M${halb(X(s))} ${ob}V${ob + ph}`;
+  for (const t of achse.oben) {
+    beschr += `<text class="ecke" x="${X(t.s)}" y="${ob - 4}" text-anchor="${t.anker}">${esc(t.text)}</text>`;
+  }
 
   const dgm = profPfad(profDgm.station, profDgm.hoehe, X, Y);
   const basis = ob + ph;
   const flaeche = dgm.map(t => `${t.d}L${t.x1} ${basis}L${t.x0} ${basis}Z`).join('');
   const dom = profDom ? profPfad(profDom.station, profDom.hoehe, X, Y).map(t => t.d).join('') : '';
 
-  el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Geländeprofil">` +
+  el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${achse.name}">` +
     `<path class="gitter" d="${gitter}"/>` +
     (ecken ? `<path class="ecken" d="${ecken}"/>` : '') +
     `<path class="flaeche" d="${flaeche}"/>` +
@@ -5181,7 +5684,7 @@ function profBildSetzen(el) {
     ueber.setAttribute('aria-label', 'Überhöhung: ' + ueber.title);
   }
 
-  profAbbild = { X, Y, li, pw, ob, ph, L };
+  profAbbild = { X, Y, li, pw, ob, ph, L, zeiger: achse.zeiger };
   updateBH();            // die Bildhöhe hängt am Maßstab
   const svg = el.querySelector('svg');
   const zeigen = ev => {
@@ -5213,7 +5716,7 @@ function profZeigerSetzen() {
     kreis.setAttribute('cy', a.Y(z).toFixed(1));
   }
 
-  let t = `${nfM.format(s)} m · ${Number.isFinite(z) ? nfH.format(z) + ' m' : 'ohne Wert'}`;
+  let t = `${a.zeiger(s)} · ${Number.isFinite(z) ? nfH.format(z) + ' m' : 'ohne Wert'}`;
   if (profDom) {
     const j = profIndex(profDom.station, s), d = profDom.hoehe[j] - profDomDgm[j];
     if (Number.isFinite(d)) t += ` · Objekt ${nfH.format(Math.max(0, d))} m`;
@@ -5751,6 +6254,9 @@ function qualityTag(p) {
 }
 
 function renderBottom() {
+  /* Ein neues Ergebnis löst ein offenes Profil ab — sonst stünde der Schnitt
+   * weiter auf der Karte, während die Leiste von etwas anderem redet. */
+  if (profModus) profEnde(false);
   const b = $('#bottom');
   const p = view.point;
   if (!p) { b.hidden = true; updateBH(); return; }
@@ -5911,6 +6417,16 @@ function renderBottom() {
     ? `<p class="bb-note">Nicht bestimmbar: ${esc(reiheFehler.join(' · '))}</p>`
     : '';
 
+  /* Profil am Gleis nur, wo ein Kilometer auf dem Gleis gemeint ist — nicht bei
+   * Ort und Betriebsstelle, und nicht, wenn statt des Kilometers nur der
+   * nächste Stein dasteht. Orange wie Messen und Profil auf der Karte. */
+  const mitProfil = view.ref && view.km != null && !['betriebsstelle', 'ort', 'naechster'].includes(p.quality);
+  const profilKnopf = mitProfil
+    ? `<button type="button" id="gpBtn" class="bb-ikon gp" aria-label="Querprofil am Gleis" title="Querprofil am Gleis">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 20h19"/><path d="M2.5 16.5 7 10l3.5 3.8 3.6-6.3 3.9 5.4 3.5-3.2"/></svg>
+      </button>`
+    : '';
+
   b.hidden = false;
   b.innerHTML = `
     ${umschalt}
@@ -5919,6 +6435,7 @@ function renderBottom() {
       <p class="bb-title">${esc(title)}</p>
       <span class="tag ${tag.cls}">${esc(tag.text)}</span>
     </div>
+    ${hoeheZeile(p.lat, p.lon)}
     ${warn}
     ${refine}
     <!-- Koordinaten und Herkunft klappt der i-Knopf unten auf. Das Feld steht
@@ -5936,6 +6453,7 @@ function renderBottom() {
          Teilen als Symbole, damit der Hauptknopf Platz hat. -->
     <div class="bb-actions">
       <a class="maps" href="${gmapsUrl(p.lat, p.lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>
+      ${profilKnopf}
       <button type="button" id="infoBtn" class="bb-ikon${infoOffen ? ' is-on' : ''}" aria-label="Koordinaten und Herkunft"
               title="Koordinaten und Herkunft" aria-controls="bbInfo" aria-expanded="${infoOffen}">
         <!-- Dieselbe Zeichnung wie vor „Hinweise" im Menü -->
@@ -5950,6 +6468,7 @@ function renderBottom() {
     </div>`;
 
   bindBottom();
+  hoeheFuellen(b);
   updateBH();
 }
 
@@ -5969,6 +6488,9 @@ function bindBottom() {
 
   const teilen = $('#shareBtn');
   if (teilen) teilen.addEventListener('click', share);
+
+  const gp = $('#gpBtn');
+  if (gp) gp.addEventListener('click', () => gpStart());
 
   const refine = $('#refineBtn');
   if (refine) refine.addEventListener('click', refineOnTrack);
@@ -7189,6 +7711,7 @@ function abZielZeigen(el) {
       <div class="ab-kopf-txt">
         <p id="abWeite" class="ab-weite">—</p>
         <p class="ab-name">${esc(o.name || '(ohne Namen)')}<small>${esc(abUnterzeile(a, o))}</small></p>
+        ${hoeheZeile(k[0], k[1])}
       </div>
       <span id="abTag" class="tag ok" hidden>am Ziel</span>
     </div>
@@ -7208,6 +7731,7 @@ function abZielZeigen(el) {
   el.querySelector('[data-abzurueck]').addEventListener('click', abZurueck);
   el.querySelector('[data-abweiter]').addEventListener('click', abWeiter);
   el.querySelector('[data-abkompass]').addEventListener('click', abKompassSchalten);
+  hoeheFuellen(el);
   abZielWerte();
 }
 
@@ -7910,6 +8434,8 @@ function bind() {
     if (b.dataset.messart === 'profil') profStart();
     else messStart(b.dataset.messart);
   }));
+  // In der Einfangphase, damit Leaflet die Pfeiltasten nicht zum Verschieben bekommt
+  document.addEventListener('keydown', profTaste, true);
   // Das Diagramm richtet sich nach der Breite der Leiste
   let profNeu = 0;
   window.addEventListener('resize', () => {

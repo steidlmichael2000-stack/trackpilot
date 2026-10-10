@@ -4,17 +4,18 @@
  *
  * 1. UTM gegen proj4 2.6.2 (die Werte unten wurden einmalig damit gerechnet)
  * 2. Rundlauf geografisch → UTM → geografisch über ganz Bayern
- * 3. DGM1 gegen die XYZ-Fassung derselben Kachel: Die nennt zu jedem Wert die
+ * 3. Einzelne Höhe per Teilabfrage (hoehenPunkt) gegen die ganze Kachel
+ * 4. DGM1 gegen die XYZ-Fassung derselben Kachel: Die nennt zu jedem Wert die
  *    Koordinate im Klartext und ist damit der Maßstab für die Lage im Raster.
  *    Verglichen werden die ersten Zeilen (aus dem Anfang der ZIP-Datei).
- * 4. DGM1 gegen den Höhendienst der BVV, als zweite Gegenprobe. Der Dienst
+ * 5. DGM1 gegen den Höhendienst der BVV, als zweite Gegenprobe. Der Dienst
  *    nimmt den nächsten Rasterwert, rundet auf 0,1 m — und liegt einen halben
  *    Meter versetzt: Er ordnet jeden Wert der Pixelecke zu, während GeoTIFF und
  *    XYZ ihn in die Pixelmitte setzen (636000,50 / 5528999,50 für den ersten
  *    Wert der Kachel 636_5528). Am 10.10.2026 traf er mit diesem Versatz 400 von
  *    400 Stellen, ohne nur 308 bzw. 120.
- * 5. Über eine Kachelgrenze hinweg
- * 6. DOM20: Datenmenge, Dauer und DOM − DGM
+ * 6. Über eine Kachelgrenze hinweg
+ * 7. DOM20: Datenmenge, Dauer und DOM − DGM
  *
  * Der Höhendienst dient hier allein als Prüfwert; aus der App heraus wird er
  * nicht benutzt (im Browser lässt er nur die Portale der BVV und localhost zu).
@@ -100,6 +101,35 @@ async function hoehendienst(ost, nord) {
   pruefe(groesste < 0.001, `Rundlauf geografisch ↔ UTM: größte Abweichung ${zahl(groesste * 1000, 4)} mm an ${n} Punkten`);
 }
 
+/* ---- 3. Einzelne Höhe per Teilabfrage ----
+ * Vor allen anderen Prüfungen: Liegt die ganze Kachel schon im Speicher, nimmt
+ * hoehenPunkt die, und die Teilabfrage wäre gar nicht geprüft. Beide Bauarten
+ * der DGM-Dateien — Verzeichnis vorn (636_5528) und hinten (778_5292). */
+for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 5292]]) {
+  const r = zufall(ke + kn);
+  const orte = Array.from({ length: 6 }, () => H.utm32Zurueck(ke * 1000 + 5 + r() * 990, kn * 1000 + 5 + r() * 990));
+  let vorher = H.HOEHEN.geladen;
+  const t0 = performance.now();
+  const teil = [await H.hoehenPunkt(...orte[0])];
+  const erste = { kb: (H.HOEHEN.geladen - vorher) / 1024, ms: performance.now() - t0 };
+  vorher = H.HOEHEN.geladen;
+  for (const o of orte.slice(1)) teil.push(await H.hoehenPunkt(...o));
+  const weitere = (H.HOEHEN.geladen - vorher) / 1024 / (orte.length - 1);
+  const utm = orte.map(o => H.utm32Hin(...o));
+  const ganz = await H.hoehenWerte('dgm1', Float64Array.from(utm, u => u[0]), Float64Array.from(utm, u => u[1]));
+  const groesste = Math.max(...teil.map((z, i) => Math.abs(z - ganz[i])));
+  pruefe(teil.every(Number.isFinite) && groesste < 1e-3 && erste.kb < 60,
+    `Höhe am Punkt ${name}: ${orte.length} Punkte wie aus der ganzen Kachel (größte Abweichung ${zahl(groesste * 1000, 3)} mm); ` +
+    `erster ${zahl(erste.kb, 1)} kB in ${zahl(erste.ms, 0)} ms, weitere je ${zahl(weitere, 1)} kB`);
+}
+{
+  const vorher = H.HOEHEN.geladen;
+  const berlin = await H.hoehenPunkt(52.52, 13.40);
+  pruefe(Number.isNaN(berlin) && H.HOEHEN.geladen === vorher, 'Höhe am Punkt außerhalb des Rahmens (Berlin): kein Wert, nichts geladen');
+  const stuttgart = await H.hoehenPunkt(48.78, 9.18);
+  pruefe(Number.isNaN(stuttgart), 'Höhe am Punkt im Rahmen, aber außerhalb Bayerns (Stuttgart): kein Wert');
+}
+
 /** Die ersten Zeilen der XYZ-Fassung einer DGM1-Kachel, aus den ersten 64 kB
  *  der ZIP-Datei — der Rest des Archivs wird nicht gebraucht. */
 async function xyzAnfang(ke, kn) {
@@ -113,7 +143,7 @@ async function xyzAnfang(ke, kn) {
   return zeilen.map(z => z.trim().split(/\s+/).map(Number)).filter(z => z.length === 3);
 }
 
-/* ---- 3. DGM1 gegen die XYZ-Fassung ---- */
+/* ---- 4. DGM1 gegen die XYZ-Fassung ---- */
 for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 5292]]) {
   const xyz = (await xyzAnfang(ke, kn)).slice(0, 4000);
   const ost = Float64Array.from(xyz, z => z[0]), nord = Float64Array.from(xyz, z => z[1]);
@@ -129,7 +159,7 @@ for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 529
     `(nächster Nachbar und bilinear an der Pixelmitte)`);
 }
 
-/* ---- 4. DGM1 gegen den Höhendienst ---- */
+/* ---- 5. DGM1 gegen den Höhendienst ---- */
 for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 5292]]) {
   const r = zufall(ke * 7919 + kn);
   const ost = [], nord = [];
@@ -165,7 +195,7 @@ for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 529
     `ohne Versatz ${b.gleich} gleich, größte ${zahl(b.groesste)} m`);
 }
 
-/* ---- 5. Über die Kachelgrenze 636/637 ---- */
+/* ---- 6. Über die Kachelgrenze 636/637 ---- */
 {
   const ost = [], nord = [];
   for (let x = 636980.3; x <= 637020.3; x += 0.25) { ost.push(x); nord.push(5528500.3); }
@@ -176,7 +206,7 @@ for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 529
     `Kachelgrenze: ${z.length} Werte über 40 m, alle vorhanden, größter Schritt ${zahl(sprung, 3)} m je 0,25 m`);
 }
 
-/* ---- 6. DOM20 ---- */
+/* ---- 7. DOM20 ---- */
 {
   // 300 m quer durch die Kachel 638_5526 (Bamberg), als Linienzug wie aus der App
   const a = H.utm32Zurueck(638150, 5526250), b = H.utm32Zurueck(638440, 5526330);

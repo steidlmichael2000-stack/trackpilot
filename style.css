@@ -1108,6 +1108,19 @@ body {
   border-color: var(--accent); color: var(--accent);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
+/* Profil am Gleis: orange wie Messen und Profil auf der Karte */
+.bb-actions .bb-ikon.gp { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+
+/* Geländehöhe unter dem Ergebnis, in den Sprechblasen und beim Abstecken.
+   Steht als Platzhalter da, bis der Wert kommt — die Leiste springt nicht. */
+.hoehe {
+  display: block; margin: 4px 0 0;
+  font-size: .76rem; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.hoehe b { font-weight: 650; color: var(--text); }
+.kml-pop .hoehe { margin-top: 2px; }
+.kml-pop .hoehe b { display: inline; margin: 0; font-size: inherit; }
+.ab-kopf-txt .hoehe { margin-top: 1px; }
 
 .pick { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
 .pick button {
@@ -1217,7 +1230,38 @@ body {
   font-size: .9rem; font-variant-numeric: tabular-nums;
 }
 .prof-zahlen b { font-weight: 650; }
+.prof-zahlen i { font-style: normal; font-weight: 400; color: var(--muted); }
 .prof-zahlen span { color: var(--muted); }
+
+/* Quer | Längs im Kopf, rechts vor dem Schließkreuz */
+.prof-art {
+  margin-left: auto; align-self: center; display: inline-flex;
+  border: 1px solid var(--line); border-radius: var(--r-knopf); overflow: hidden;
+}
+.prof-art button {
+  padding: 3px 9px; border: 0; background: var(--panel-2); color: var(--muted);
+  font: inherit; font-size: .74rem; font-weight: 600; cursor: pointer;
+}
+.prof-art button + button { border-left: 1px solid var(--line); }
+.prof-art button.is-on { background: var(--accent); color: var(--accent-ink); }
+/* Der Versatz im freien Profil: Angabe und Rücksetzer in einem */
+.tag.prof-versatz {
+  font-family: inherit; cursor: pointer; font-variant-numeric: tabular-nums;
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background-color: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+/* −10 −5 −1 +1 +5 +10: sechs gleich breite Knöpfe, mittig ein Spalt zwischen zurück und vor */
+.prof-sprung {
+  display: grid; grid-template-columns: repeat(3, 1fr) 6px repeat(3, 1fr); gap: 5px; margin-top: 9px;
+}
+.prof-sprung button:nth-child(4) { grid-column: 5; }
+.prof-sprung button {
+  padding: 8px 0; border: 1px solid var(--line); border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--text); cursor: pointer;
+  font: inherit; font-size: .84rem; font-weight: 650; font-variant-numeric: tabular-nums;
+  touch-action: manipulation;          /* zwei schnelle Tipps sind zwei Sprünge, kein Zoom */
+}
+.prof-sprung button:active { background: color-mix(in srgb, var(--warn) 18%, var(--panel-2)); }
 
 /* Wischen im Diagramm führt den Zeiger, statt die Seite zu verschieben */
 .prof-bild { margin-top: 6px; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -1262,6 +1306,8 @@ body {
   white-space: nowrap; cursor: pointer;
 }
 .prof-ueber.gestaucht { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+/* Breite bzw. Länge am Gleis steht vor der Überhöhung; nur der erste Chip schiebt nach rechts */
+.prof-weite + .prof-ueber { margin-left: 0; }
 .prof-quelle { margin: 7px 0 0; font-size: .68rem; line-height: 1.45; color: var(--muted-2); }
 .prof-quelle a { color: inherit; }
 /* Im Profil braucht das Diagramm den Platz: flachere Knöpfe als in der Ergebnisleiste */

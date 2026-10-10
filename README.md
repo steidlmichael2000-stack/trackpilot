@@ -67,8 +67,13 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   die App die Tour einmal an (siehe unten).
 - **Querprofil** — zwei oder mehr Punkte antippen, unten steht der Geländeschnitt aus dem amtlichen
   DGM1 (1 m Gitter); auf Knopfdruck kommt die Oberfläche mit Gebäuden und Bewuchs aus dem DOM20 als
-  gestrichelte Linie dazu. Ein Finger auf dem Diagramm zeigt die Stelle auf der Karte. Nur in Bayern
-  (siehe unten).
+  gestrichelte Linie dazu. Ein Finger auf dem Diagramm zeigt die Stelle auf der Karte, die Knöpfe
+  −10 bis +10 schieben den Schnitt parallel zur Seite. Nur in Bayern (siehe unten).
+- **Profil am Gleis** — der orange Knopf im Ergebnis zeichnet den Querschnitt senkrecht zum Gleis
+  (±10 bis ±200 m) oder das Längsprofil am Gleis entlang mit der mittleren Neigung in Promille. Die
+  Knöpfe darunter springen meterweise die Kilometrierung entlang.
+- **Geländehöhe** unter dem Ergebnis, in den Sprechblasen und beim Abstecken — aus dem DGM1, für
+  rund 25 kB je Punkt. Nur in Bayern.
 - **Polygon aus Punkten** — Punkte auf der Karte antippen, die Luftlinie steht als Maßzahl an jedem
   Abschnitt und als Summe in der Leiste; ein Tipp auf den ersten Punkt schließt die Fläche, dann
   stehen Fläche und Umfang da. Liegen Anfang und Ende auf der geladenen Strecke, steht die Differenz
@@ -723,7 +728,8 @@ Die neun Schritte: Suchzeile, Ergebnis, langer Druck setzt einen Punkt, Standort
 Kilometer, Messmenü, Geländeprofil, Karten und Auflagen, eigene Dateien und Abstecken, Quellen und
 das ?. Was sie erklärt, führt sie vor: Sie tippt `5100 12,5` Zeichen für Zeichen ein (ohne die
 Tastatur des Handys aufzuklappen), sucht die Strecke wirklich, setzt einen Punkt, öffnet Messmenü
-und Einstellungen und zeichnet ein 300-m-Profil am Ergebnis. Klappt eine Vorführung nicht — ohne
+und Einstellungen und zeichnet den Querschnitt am Gleis des Ergebnisses (ohne Ergebnis ein freies
+300-m-Profil durch die Kartenmitte). Klappt eine Vorführung nicht — ohne
 Netz, außerhalb Bayerns —, sagt die Blase das, statt zu warten; nach höchstens 12 s geht es weiter.
 
 Die Blase steht unter dem Ziel, wenn dort Platz ist, sonst darüber, sonst daneben (am großen
@@ -756,6 +762,51 @@ sahen dann wie ein Berg aus.
 Datenmenge; danach kommt die Oberfläche gestrichelt dazu und bei den Kennwerten die größte
 Objekthöhe (DOM − DGM) mit Station.
 
+**Parallel verschieben.** Ab zwei Punkten steht unter dem Diagramm die Reihe −10 −5 −1 +1 +5 +10
+(am Rechner ← und →, mit Umschalt 10 m). Sie schiebt den ganzen Schnitt senkrecht zur Linie vom
+ersten zum letzten Punkt, plus nach links von A → B — wer den Schnitt ansieht wie im Diagramm, A links
+und B rechts, schiebt ihn damit nach vorn. Die getippte Linie bleibt blass auf der Karte, oben steht
+der Versatz; ein Tipp darauf holt sie zurück, ein neuer Punkt, *Zurück* oder *Leeren* ebenso.
+
+### Profil am Gleis
+
+Aus dem Ergebnis heraus, über den orangen Knopf neben *Google Maps* — bei jedem Ergebnis mit
+Kilometer, nicht bei Orten, Betriebsstellen und wenn statt des Kilometers nur der nächste Stein
+dasteht.
+
+- **Quer**: senkrecht zum Gleis, 0 = Gleisachse, links und rechts in Richtung steigender Kilometer.
+  Die Richtung kommt aus der Lage 5 m davor und danach. Oben stehen die Höhe am Gleis und wie hoch
+  das Gelände außen links und rechts dagegen liegt — im Einschnitt beides im Plus. Der Chip
+  *±50 m* schaltet die Breite um: 10, 25, 50, 100, 200 m je Seite.
+- **Längs**: das Gelände am Gleis entlang von km − L bis km + L, alle 2–10 m eine Lage auf dem
+  Gleis. Die Achse zeigt Kilometer, die Neigung ist eine Ausgleichsgerade über den ganzen Schnitt
+  (zwei Endpunkte allein hingen an einem Graben). Länge 100, 250, 500 oder 1000 m je Richtung.
+  Überhöht 10×, getrennt gemerkt — unüberhöht sind ein paar Promille auf 500 m ein flacher Strich.
+- **Springen**: quer 1, 5, 10 m, längs 10, 50, 100 m entlang der Kilometrierung; am Rechner ← und
+  →, mit Umschalt der große Schritt. Das Diagramm bleibt stehen, bis das nächste da ist, und die
+  Sprungreihe wird dabei nicht neu gezeichnet — sonst ginge ein schneller zweiter Tipp verloren.
+
+**Die Lage auf dem Gleis** ist dieselbe Rechnung wie beim Suchergebnis: das Steinpaar um den
+Kilometer und darauf der Gleisweg aus dem mitgelieferten Netz, sonst die Sehne. Nur rastet sie nicht
+an Steinen ein (das Ergebnis zeigt bis 0,5 m daneben den Stein selbst) — für Meterschritte muss
+jeder Kilometer gleich gerechnet werden. Am 10.10.2026 auf Strecke 5100 zwischen km 12,0 und 13,2
+alle 2 m nachgeprüft: Profil und Suchergebnis liegen auf 0,0 m beieinander. Zurück über den
+Kartentipp trafen 488 von 601 Stellen auf unter 1 m. Die übrigen liegen dort, wo zwei Steinreihen
+durcheinanderstehen (12,0/12,2/12,4 … auf dem einen Gleis, 12,227/12,393/12,612 … auf dem Nachbargleis,
+4–5 m daneben): Zwischen Steinen verschiedener Reihen findet sich kein Gleisweg oder einer über die
+nächste Weiche, und Suche und Kartentipp rechnen dort verschieden — bis 55 m bei km 12,2. Das ist
+keine Eigenheit des Profils, es macht sie nur sichtbar; dort schwankt auch die Schrittweite.
+
+## Höhe am Punkt
+
+Unter dem Ergebnis, in der Sprechblase nach langem Druck, bei KML-Punkten und beim Abstecken steht
+die Geländehöhe aus dem DGM1 in m ü. NHN. Für eine einzelne Höhe holt `hoehenPunkt` nicht die ganze
+Kachel, sondern per Range-Abfrage nur Kopf und Streifen: gemessen 24 kB bzw. 37 kB beim ersten Punkt
+einer Kachel (das TIFF-Verzeichnis steht mal vorn, mal hinten), 5–13 kB für jeden weiteren. Liegt die
+Kachel schon auf dem Gerät, kostet es nichts. Die Zeile steht als Platzhalter da, bis der Wert kommt
+— die Leiste springt nicht. Klar außerhalb Bayerns gibt es sie nicht; liegt der Punkt im Rahmen um
+Bayern, aber außerhalb (Württemberg, Thüringen), oder fehlt das Netz, verschwindet sie wieder.
+
 ### Woher die Höhen kommen
 
 DGM1 und DOM20 der Bayerischen Vermessungsverwaltung, OpenData unter CC BY 4.0, als GeoTIFF-Kacheln
@@ -768,8 +819,9 @@ von 1 km × 1 km. Am 10.10.2026 nachgemessen:
 | Aufbau | Streifen zu je 2 Zeilen, kein COG | intern 256 × 256 Pixel gekachelt |
 | Größe je Kachel | 1,5–3,9 MB (Median 2,1 flach, 3,5 Alpen) | 13–64 MB (Median 42 bzw. 55) |
 
-Vom DGM holt die App deshalb die ganze Kachel — eine schräge Linie braucht ohnehin fast alle
-Streifen —, vom DOM per Range-Abfrage nur die Blöcke entlang der Linie: rund 100 kB je 51 × 51 m,
+Vom DGM holt die App fürs Profil deshalb die ganze Kachel — eine schräge Linie braucht ohnehin fast
+alle Streifen; für eine einzelne Höhe nur ein Stück, siehe *Höhe am Punkt* —, vom DOM per
+Range-Abfrage nur die Blöcke entlang der Linie: rund 100 kB je 51 × 51 m,
 auf 300 m gemessen 0,6 MB statt 40 MB. Gelesen wird ohne Fremdbibliothek (`hoehen.js`: TIFF-Kopf,
 LZW, UTM-Umrechnung nach Krüger), bilinear zwischen den Rasterwerten.
 
@@ -799,6 +851,7 @@ ersten Bereich erst die ganze DOM-Kachel, und der erste Abruf dauerte 4,8 s stat
 | Prüfung | Ergebnis |
 | --- | --- |
 | UTM gegen proj4 2.6.2, 8 Punkte über Bayern | höchstens 0,05 mm |
+| Höhe am Punkt per Teilabfrage gegen die ganze Kachel, beide Bauarten | gleich auf 0,000 mm |
 | DGM1 gegen die XYZ-Fassung derselben Kachel, je 4000 Werte | Bamberg exakt, Berchtesgaden 0,5 cm (Rundung der XYZ-Datei) |
 | DGM1 gegen den Höhendienst, je 400 Stellen | 400 von 400 — mit ½ m Versatz, siehe unten |
 | DOM − DGM auf 300 m | 5-%-Wert +0,06 m, Lage und Höhenbezug passen |
@@ -1186,7 +1239,7 @@ Bahn-Layer von
 [OpenRailwayMap](https://www.openrailwaymap.org/) (CC-BY-SA 2.0), Luftbilder von Esri,
 dunkle Karte, Straßen und Ortsnamen von [OpenFreeMap](https://openfreemap.org/) (© OpenMapTiles,
 Daten © OpenStreetMap). Regenradar: Quelle [Deutscher Wetterdienst](https://www.dwd.de/).
-DOP20, Geländerelief, Parzellarkarte und die Höhen im Querprofil (DGM1, DOM20): Bayerische
+DOP20, Geländerelief, Parzellarkarte und die Höhen in Profil und Höhenangabe (DGM1, DOM20): Bayerische
 Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de/) (CC BY 4.0); das
 Profil ist daraus berechnet.
 Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause),

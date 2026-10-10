@@ -78,8 +78,9 @@ const TOUR_SCHRITTE = [
   },
   {
     titel: 'Das Ergebnis',
-    text: 'Unten steht, wo der Kilometer liegt — mit der Genauigkeit, dem Weg zu Google Maps und ' +
-      'zum Teilen. Die Kilometersteine der Strecke stehen beschriftet auf der Karte.',
+    text: 'Unten steht, wo der Kilometer liegt — mit der Genauigkeit, der Geländehöhe, dem Weg zu ' +
+      'Google Maps und zum Teilen. Der orange Knopf zeichnet das Profil am Gleis. Die Kilometersteine ' +
+      'der Strecke stehen beschriftet auf der Karte.',
     ziel: () => tourSichtbar('#bottom'),
     vorher: async lauf => {
       if ($('#q').value.trim() !== TOUR_BEISPIEL) await tourTippen(TOUR_BEISPIEL, lauf);
@@ -120,20 +121,26 @@ const TOUR_SCHRITTE = [
   },
   {
     titel: 'Das Geländeprofil',
-    text: 'Zwei Punkte, und unten steht der Schnitt aus dem amtlichen Geländemodell, unüberhöht. ' +
-      '„Oberfläche" legt Gebäude und Bewuchs dazu, ein Finger auf dem Diagramm zeigt die Stelle auf ' +
-      'der Karte. Nur in Bayern.',
+    text: 'Der Querschnitt am Gleis aus dem amtlichen Geländemodell, unüberhöht. Die Knöpfe darunter ' +
+      'springen meterweise die Strecke entlang, „Längs" zeigt den Verlauf am Gleis. Über den Messknopf ' +
+      'geht das Profil auch frei zwischen getippten Punkten. „Oberfläche" legt Gebäude und Bewuchs dazu. ' +
+      'Nur in Bayern.',
     ziel: () => tourSichtbar('#bottom'),
     vorher: async lauf => {
-      // 300 m quer zur Blickrichtung durch die Kartenmitte
-      const c = map.getCenter(), d = 150 / (111320 * Math.cos(c.lat * Math.PI / 180));
-      profStart();
-      profPunkte = [[c.lat, c.lng - d], [c.lat, c.lng + d]];
-      profGeaendert();
+      /* Am Gleis, wenn das Ergebnis aus Schritt 2 noch dasteht — sonst frei,
+       * 300 m quer zur Blickrichtung durch die Kartenmitte */
+      if (view.point && view.ref && view.km != null) {
+        gpStart('quer');           // die Tour zeigt den Querschnitt, ohne die gemerkte Wahl zu ändern
+      } else {
+        const c = map.getCenter(), d = 150 / (111320 * Math.cos(c.lat * Math.PI / 180));
+        profStart();
+        profPunkte = [[c.lat, c.lng - d], [c.lat, c.lng + d]];
+        profGeaendert();
+      }
       await tourBis(() => lauf !== tourLauf || (!profLaedt && (profDgm || profFehler)));
       if (lauf === tourLauf && !profDgm) {
         return 'Hier kam kein Profil zustande — es braucht Netz und geht nur in Bayern. Sonst steht unten ' +
-          'der Geländeschnitt zwischen den Punkten, auf Wunsch mit Gebäuden und Bewuchs.';
+          'der Geländeschnitt am Gleis oder zwischen getippten Punkten, auf Wunsch mit Gebäuden und Bewuchs.';
       }
     },
     nachher: () => { if (profModus) profEnde(); }

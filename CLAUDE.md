@@ -145,12 +145,34 @@ Messwerte stehen in der README, hier nur, was beim Weiterbauen nicht übersehen 
   gegen die XYZ-Fassung, Höhendienst, Kachelgrenze, DOM. Alles muss „ok" melden.
 - Die DGM1-Dateien sind nicht einheitlich gebaut (TIFF-Verzeichnis mal am Anfang, mal am Ende).
   Wer den Leser vereinfacht, prüft mindestens 636_5528 und 778_5292.
+- **Höhe am Punkt** (`hoehenPunkt`, in der App `hoeheZeile`/`hoeheFuellen`): vom DGM nur Kopf und
+  Streifen per Range (`teil`), rund 25 kB. Die Teilkachel liegt im Speicher unter `dgm1-teil/…`, nicht
+  im Vorrat; liegt die ganze Datei schon da, wird die genommen. Die Prüfung dafür läuft in
+  `hoehen-pruefen.mjs` vor allen anderen — danach läge die ganze Kachel im Speicher.
+
+## Profil am Gleis (Oktober 2026)
+
+Oranger Knopf in der Ergebnisleiste → `gpStart`; Zustand `profGleis`, sonst dieselbe Profil-Engine
+(`profRechnen`, `profLeiste`, `profBildSetzen`). Quer: zwei Punkte aus `gleisLage` und `gleisRichtung`;
+längs: rund 200 Lagen als Linienzug, `g.kms` gehört zu `profDgm.ecken`.
+
+- **`gleisLage` muss dieselbe Lage liefern wie das Suchergebnis** (Steinpaar A ≤ km < B, Gleisweg aus
+  den Kacheln, sonst Sehne — wie `gleisGenau`), nur ohne das Einrasten an Steinen. Wer an
+  `resolvePoint`, `gleisGenau` oder `kmEntlangGleis` dreht, prüft beide Richtungen mit dem Rundlauf
+  aus der README (Abschnitt *Profil am Gleis*). Bekannt: Auf 5100 bei km 12,0–12,227 rechnen Suche und
+  Kartentipp schon heute bis 55 m verschieden, weil zwei Steinreihen auf Nachbargleisen gemischt sind.
+- **Die Sprungreihe wird nicht neu gezeichnet** (`#profRahmen` mit `data-ansicht`, nur `#profOben`
+  und `#profUnten` wechseln). Sonst verliert ein schneller zweiter Tipp seinen Klick.
+- Pfeiltasten: `profTaste` hängt in der Einfangphase, damit Leaflet die Karte nicht verschiebt.
+- Ein neues Ergebnis (`renderBottom`) beendet ein offenes Profil.
+- Freies Profil: `profVersatz` und `profLinie()` — gerechnet wird immer auf `profLinie()`, nicht auf
+  `profPunkte`.
 
 ## Tour (`tour.js`, Oktober 2026)
 
 Das ? im ©-Kasten startet sie; beim ersten Start einmal angeboten (`prefs.tourAngeboten`). Die
 Tour führt vor, indem sie dieselben Funktionen aufruft wie die Knöpfe: `search`, `merkPunkt`,
-`messMenueAuf`, `profStart`/`profGeaendert`/`profEnde`, `openSheet`/`closeSheet`, `suchAuf`,
+`messMenueAuf`, `profStart`/`profGeaendert`/`profEnde`, `gpStart`, `openSheet`/`closeSheet`, `suchAuf`,
 `closeSuggest` und die Variablen `view`, `profDgm`, `profLaedt`, `profFehler`. **Wer davon etwas
 umbenennt oder neue Funktionen einbaut, zieht die Schritte in `TOUR_SCHRITTE` nach** — sonst
 erklärt die Tour eine App, die es so nicht mehr gibt.

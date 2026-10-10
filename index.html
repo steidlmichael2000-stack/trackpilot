@@ -358,7 +358,7 @@
       Kilometerfeld hat weder <code>&amp;</code> noch Leertaste.</p>
       <p class="fine"><strong>Tour.</strong> Das <em>?</em> unten links neben dem © führt in neun
       Schritten durch die App und zeigt dabei live vor, was es erklärt — mit Netz sucht es eine
-      Beispielstrecke und zeichnet ein Profil. Escape oder × beendet sie jederzeit.</p>
+      Beispielstrecke und zeichnet das Profil am Gleis. Escape oder × beendet sie jederzeit.</p>
       <p class="fine"><strong>Polygon und Live.</strong> Unter <em>Polygon aus Punkten</em> stehen an
       jedem Abschnitt die Länge und unten die Summe; ab drei Punkten schließt ein Tipp auf den ersten
       Punkt (gestrichelter Ring) die Fläche, dann stehen Fläche und Umfang da. <em>Live</em> misst vom
@@ -372,7 +372,19 @@
       oder 10-fach.
       <em>Oberfläche DOM20</em> legt Gebäude und Bewuchs als gestrichelte Linie dazu; der Knopf
       nennt vorher die Datenmenge. Nur in Bayern. Geladene Geländekacheln bleiben auf dem Gerät und
-      sind danach auch ohne Netz da.</p>
+      sind danach auch ohne Netz da. Die Knöpfe −10 bis +10 schieben den Schnitt parallel zur Seite
+      (plus nach links von A&nbsp;→&nbsp;B); oben steht der Versatz, ein Tipp darauf holt die
+      getippte Linie zurück.</p>
+      <p class="fine"><strong>Profil am Gleis.</strong> Der orange Knopf im Ergebnis zeichnet den
+      Querschnitt senkrecht zum Gleis — links und rechts gelten in Richtung steigender Kilometer.
+      Die Knöpfe darunter springen 1, 5 oder 10&nbsp;m die Kilometrierung entlang, am Rechner auch
+      ← und → (mit Umschalt 10&nbsp;m). Der Chip <em>±50&nbsp;m</em> schaltet die Breite um.
+      <em>Längs</em> zeigt das Gelände am Gleis entlang mit der mittleren Neigung in Promille,
+      10-fach überhöht. Die Lage auf dem Gleis ist dieselbe wie beim Suchergebnis; wo die Steine
+      ungleichmäßig oder auf verschiedenen Gleisen stehen, schwankt die Schrittweite.</p>
+      <p class="fine"><strong>Höhe.</strong> Unter dem Ergebnis, in den Sprechblasen und beim
+      Abstecken steht die Geländehöhe aus dem DGM1 in Metern über Normalhöhennull. Dafür holt die
+      App nur ein Stück der Geländekachel, rund 25&nbsp;kB. Nur in Bayern.</p>
       <p class="fine"><strong>Keine amtliche Quelle.</strong> Die Positionen stammen aus in
       OpenStreetMap erfassten Kilometersteinen und taugen zur groben Verortung — nicht für
       Vermessung, Disposition oder sicherheitsrelevante Entscheidungen. Zwischen zwei Steinen
@@ -380,7 +392,7 @@
       <p class="fine">Daten © OpenStreetMap-Mitwirkende · Abfrage über die OpenRailwayMap-API ·
       Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild Esri, Maxar · Dunkle Karte, Straßen
       und Ortsnamen OpenFreeMap © OpenMapTiles, Daten © OpenStreetMap, gezeichnet mit MapLibre GL
-      (BSD-3) · DOP20, Geländerelief, Parzellarkarte sowie DGM1 und DOM20 im Profil:
+      (BSD-3) · DOP20, Geländerelief, Parzellarkarte sowie DGM1 und DOM20 in Profil und Höhe:
       Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0) · Regenradar: Quelle
       Deutscher Wetterdienst</p>
       <p class="fine"><a href="https://github.com/steidlmichael2000-stack/trackpilot" target="_blank" rel="noopener">Quellcode auf GitHub</a></p>
