@@ -54,14 +54,33 @@
   </svg>
 </button>
 
-<!-- Messen: Luftlinie zwischen angetippten Punkten -->
+<!-- Messen: Der Knopf fragt zuerst, was gemessen werden soll. Läuft schon
+     etwas, beendet er es. -->
 <button id="mapMessBtn" class="mapmess" type="button" aria-pressed="false"
-        aria-label="Strecke auf der Karte messen">
+        aria-haspopup="menu" aria-expanded="false" aria-controls="messMenue"
+        aria-label="Messen und Profil">
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <path d="M2.8 14.9 14.9 2.8l6.3 6.3L9.1 21.2z"/>
     <path d="M6.5 11.2l1.9 1.9M9.9 7.8l1.9 1.9M13.3 4.4l1.9 1.9"/>
   </svg>
 </button>
+
+<!-- Messmenü links neben dem Knopf: drei getrennte Abläufe statt eines Modus,
+     der alles zugleich anbietet -->
+<div id="messMenue" class="mess-menue" role="menu" aria-label="Messen" hidden>
+  <button type="button" role="menuitem" data-messart="profil">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 20h19"/><path d="M2.5 16.5 7 10l3.5 3.8 3.6-6.3 3.9 5.4 3.5-3.2"/></svg>
+    <span><b>Profil</b><small>Geländeschnitt zwischen Punkten</small></span>
+  </button>
+  <button type="button" role="menuitem" data-messart="polygon">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 3 9.5 11.5 4 20.5 9 18 18.5z"/><circle class="voll" cx="5" cy="19" r="1.7"/><circle class="voll" cx="3" cy="9.5" r="1.7"/><circle class="voll" cx="11.5" cy="4" r="1.7"/><circle class="voll" cx="20.5" cy="9" r="1.7"/><circle class="voll" cx="18" cy="18.5" r="1.7"/></svg>
+    <span><b>Polygon aus Punkten</b><small>Strecke, geschlossen mit Fläche</small></span>
+  </button>
+  <button type="button" role="menuitem" data-messart="live">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="voll" cx="4.5" cy="19.5" r="1.9"/><path d="M6.5 17.5 13 11" stroke-dasharray="2 2.2"/><circle cx="17" cy="7" r="3.4"/><path d="M17 1.8v2.4M17 9.8v2.4M11.8 7h2.4M19.8 7h2.4"/></svg>
+    <span><b>Live</b><small>Vom Start zum Fadenkreuz</small></span>
+  </button>
+</div>
 
 <!-- Fadenkreuz in der Kartenmitte, nur beim Messen: Ziel für „Kartenmitte setzen" -->
 <div id="mitteKreuz" class="mittekreuz" hidden aria-hidden="true">
@@ -337,6 +356,20 @@
       Antippen des Pins durchgehen. Höchstens 20 auf einmal. Auf dem Handy am besten in die
       Suchzeile oben tippen: Die hat eine vollständige Tastatur, der Zahlenblock am
       Kilometerfeld hat weder <code>&amp;</code> noch Leertaste.</p>
+      <p class="fine"><strong>Polygon und Live.</strong> Unter <em>Polygon aus Punkten</em> stehen an
+      jedem Abschnitt die Länge und unten die Summe; ab drei Punkten schließt ein Tipp auf den ersten
+      Punkt (gestrichelter Ring) die Fläche, dann stehen Fläche und Umfang da. <em>Live</em> misst vom
+      Startpunkt zum Fadenkreuz, während die Karte geschoben wird. Kilometersteine und KML-Punkte
+      werden gefangen, <em>Mitte</em> und <em>Standort</em> setzen den Punkt aufs Fadenkreuz bzw. den
+      eigenen Standort. Gerechnet wird auf dem Ellipsoid.</p>
+      <p class="fine"><strong>Profil.</strong> Der Messknopf rechts unten öffnet ein kleines Menü;
+      unter <em>Profil</em> Punkte antippen — ab zwei Punkten steht der Geländeschnitt aus dem DGM1
+      (1&nbsp;m Gitter) unten. Ein Finger auf dem Diagramm zeigt die Stelle auf der Karte.
+      Gezeichnet wird unüberhöht; ein Tipp auf die Angabe rechts in der Legende überhöht 2-, 5-
+      oder 10-fach.
+      <em>Oberfläche DOM20</em> legt Gebäude und Bewuchs als gestrichelte Linie dazu; der Knopf
+      nennt vorher die Datenmenge. Nur in Bayern. Geladene Geländekacheln bleiben auf dem Gerät und
+      sind danach auch ohne Netz da.</p>
       <p class="fine"><strong>Keine amtliche Quelle.</strong> Die Positionen stammen aus in
       OpenStreetMap erfassten Kilometersteinen und taugen zur groben Verortung — nicht für
       Vermessung, Disposition oder sicherheitsrelevante Entscheidungen. Zwischen zwei Steinen
@@ -344,8 +377,8 @@
       <p class="fine">Daten © OpenStreetMap-Mitwirkende · Abfrage über die OpenRailwayMap-API ·
       Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild Esri, Maxar · Dunkle Karte, Straßen
       und Ortsnamen OpenFreeMap © OpenMapTiles, Daten © OpenStreetMap, gezeichnet mit MapLibre GL
-      (BSD-3) · DOP20, Geländerelief und
-      Parzellarkarte: Bayerische Vermessungsverwaltung (CC BY 4.0) · Regenradar: Quelle
+      (BSD-3) · DOP20, Geländerelief, Parzellarkarte sowie DGM1 und DOM20 im Profil:
+      Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0) · Regenradar: Quelle
       Deutscher Wetterdienst</p>
       <p class="fine"><a href="https://github.com/steidlmichael2000-stack/trackpilot" target="_blank" rel="noopener">Quellcode auf GitHub</a></p>
     </details>
@@ -387,6 +420,8 @@
      es. Die Erweiterung steht unter GPL-3.0 — deshalb ist dieses Projekt
      ebenfalls GPL-3.0 lizenziert. -->
 <script src="vendor/leaflet-rotate.js"></script>
+<!-- Höhendaten fürs Querprofil (DGM1/DOM20 der BVV über den eigenen Worker) -->
+<script src="hoehen.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

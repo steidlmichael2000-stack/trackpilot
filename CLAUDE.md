@@ -116,6 +116,36 @@ ist, steht die dunkle Karte unverändert.
   512 px (DWD spricht nur HTTP/1.1 — weniger Abfragen, weniger Nachzügler). Nähte an Kachelkanten
   nur über mehrere Bilder messen, ein einzelnes streut.
 
+## Messmenü und Querprofil (Oktober 2026)
+
+Messknopf → Menü mit drei Abläufen: *Profil* (`prof…`, Höhen aus `hoehen.js`), *Polygon aus
+Punkten* und *Live* (beide `mess…`, unterschieden durch `messArt`). Der Nutzer wollte das Menü
+ausdrücklich so — getrennte Abläufe statt eines Modus mit allem; die sonstige Vorliebe für Gesten
+statt Knöpfen tritt hier zurück. Messen und Fläche rechnen auf dem Ellipsoid (`ellipsoidAbstand`,
+`utm32Hin`), nicht mit `haversine` — die Kugel ist Ost-West 0,31 % zu kurz. Einzelheiten und
+Messwerte stehen in der README, hier nur, was beim Weiterbauen nicht übersehen werden darf:
+
+- **Die Kacheln kommen über den Worker `trackpilot-hoehen`** (Cloudflare, Code in
+  `werkzeug/proxy/worker.js`, Adresse in `HOEHEN.proxy`). Der Server der BVV gibt kein CORS frei.
+  Der Worker ist **nicht** an Git gebunden: Eine Änderung an `worker.js` wirkt erst, wenn sie im
+  Dashboard unter *Edit code* eingefügt und bereitgestellt ist. Der Editor dort lief in Brave erst
+  ohne Shields.
+- **Teilabfragen im Worker mit `cache: 'no-store'`.** Sonst holt Cloudflare beim ersten Bereich die
+  ganze DOM-Kachel (bis 64 MB) in seinen Zwischenspeicher: 4,8 s statt 0,19 s.
+- **Den Worker nicht in `TILE_HOSTS` von `sw.js` aufnehmen.** Teilantworten (206) kann Cache Storage
+  nicht ablegen, und die DGM-Kacheln liegen bewusst in IndexedDB (`trackpilot-hoehen`, Stores
+  `dateien` und `genutzt`): Der Service Worker löscht beim Aktivieren die Caches alter Versionen, der
+  Offline-Vorrat wäre bei jedem Deploy weg.
+- **Auch auf localhost nimmt die App den Worker auf Cloudflare.** Die CSP lässt nur `https` zu;
+  `werkzeug/proxy/lokal.mjs` ist nur zum Prüfen des Workers selbst.
+- **Den Höhendienst der BVV nicht einbauen.** Er lässt im Browser nur die eigenen Portale zu (den
+  über den Worker zu umgehen widerspräche dem Betreiber), und er liegt ½ m versetzt gegenüber
+  GeoTIFF und XYZ. In `werkzeug/hoehen-pruefen.mjs` dient er nur als Gegenprobe.
+- **Nach Änderungen an `hoehen.js`:** `node werkzeug/hoehen-pruefen.mjs` — UTM gegen proj4, DGM1
+  gegen die XYZ-Fassung, Höhendienst, Kachelgrenze, DOM. Alles muss „ok" melden.
+- Die DGM1-Dateien sind nicht einheitlich gebaut (TIFF-Verzeichnis mal am Anfang, mal am Ende).
+  Wer den Leser vereinfacht, prüft mindestens 636_5528 und 778_5292.
+
 ## Beim Deployen
 
 `VERSION` in `sw.js` hochzählen. Der Worker arbeitet zwar „erst Netz, dann

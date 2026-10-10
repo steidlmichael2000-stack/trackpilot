@@ -129,6 +129,7 @@ const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev,
 const setVal = (sel, v) => { const el = $(sel); if (el) el.value = v; };
 const nfKm = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 3 });
 const nfM = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
+const nfH = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 const fmtKm = v => nfKm.format(v);
 const fmtCoord = (lat, lon) => `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
@@ -1647,6 +1648,7 @@ let prefs = {
   abSort: 'nah',                         // Abstecken: Punktliste nach Entfernung, Name oder Datei
   abKompass: false,                      // Abstecken: Pfeil nach dem Handy statt nach der Karte
   parzFarbe: 'auto',                     // 'auto' (nach Grundkarte) oder '#rrggbb'
+  profUeber: 1,                          // Querprofil: Überhöhung, 0 = Höhe füllt das Bild
   wms: { url: '', layers: '', opacity: 75, on: false }   // nur Adresse und Layer, nie Zugangsdaten
 };
 let recent = [];   // nicht "history" nennen — das ist window.history
@@ -3648,11 +3650,12 @@ function kmlEbene(akte) {
 
     /* Sprechblase erst beim Tippen bauen: Das spart bei einer Datei mit tausend
      * Objekten tausend vorgefertigte Textbausteine, und vor allem lässt sich so
-     * entscheiden, was ein Tipp bedeutet. Beim Messen ist ein KML-Objekt ein
-     * Fangpunkt und keine Auskunft. */
+     * entscheiden, was ein Tipp bedeutet. Beim Messen und im Profil ist ein
+     * KML-Objekt ein Fangpunkt und keine Auskunft. */
     l.on('click', ev => {
       L.DomEvent.stopPropagation(ev);
-      if (messModus) { messTipp(ev.latlng); return; }     // Fangen erledigt messTipp
+      const ziel = tippZiel();
+      if (ziel) { ziel(ev.latlng); return; }               // Fangen erledigt das Ziel
       const html = kmlPopup(o, akte);
       if (!html) return;
       /* Bei einem Punkt gilt seine eigene Koordinate, sonst die angetippte
@@ -4058,8 +4061,9 @@ function drawMilestones() {
       bubblingMouseEvents: false
     }).on('click', ev => {
       L.DomEvent.stopPropagation(ev);
-      // Beim Messen ist ein Stein ein bequemer Fangpunkt, kein neues Suchergebnis
-      if (messModus) { messTipp(ev.latlng || L.latLng(p.lat, p.lon)); return; }
+      // Beim Messen und im Profil ist ein Stein ein bequemer Fangpunkt, kein neues Suchergebnis
+      const ziel = tippZiel();
+      if (ziel) { ziel(ev.latlng || L.latLng(p.lat, p.lon)); return; }
       applyPoint(view.ref, p.km, {
         lat: p.lat, lon: p.lon, quality: 'exakt', operator: p.operator, lineRef: p.ref
       });
@@ -4155,7 +4159,7 @@ const MERK_DAUER = 500;      // ms, ab wann ein Druck als „lang" gilt
 const MERK_WACKEL = 12;      // px, so viel darf der Finger dabei wandern
 
 function merkPunkt(lat, lon) {
-  if (messModus) return;
+  if (tippZiel()) return;
   merkLayer.clearLayers();
   const wo = [lat, lon];
 
@@ -4237,13 +4241,27 @@ function merkPunktBinden() {
 
 /* ============================ Messen ============================ */
 
-/* Luftlinie zwischen angetippten Punkten, bewusst ohne Netzabfrage: Im Gelände
- * zählt zuerst, wie weit es geradeaus ist, und das rechnet der Browser selbst.
- * Liegen Anfang und Ende auf der geladenen Strecke, steht zusätzlich die
- * Differenz nach Kilometrierung dabei — die ist für die Arbeit oft die
- * eigentliche Antwort.
+/* Zwei Abläufe im Messmenü, beide ohne Netzabfrage — im Gelände zählt zuerst,
+ * wie weit es geradeaus ist, und das rechnet der Browser selbst:
  *
- * Die Linie liegt in der normalen Vektorebene von Leaflet und nicht in einer
+ * Polygon aus Punkten — Punkte antippen, Luftlinie je Abschnitt und als Summe.
+ * Ab drei Punkten schließt ein Tipp auf den ersten den Zug; dann stehen Fläche
+ * und Umfang da. Liegen Anfang und Ende eines offenen Zugs auf der geladenen
+ * Strecke, steht die Differenz nach Kilometrierung dabei — für die Arbeit oft
+ * die eigentliche Antwort.
+ *
+ * Live — ein Startpunkt, und die Entfernung zum Fadenkreuz läuft beim Schieben
+ * der Karte mit, bei laufender Ortung oben auch die zum eigenen Standort.
+ * „Genau 20 m von hier" wird so zur Schiebe- oder Laufaufgabe.
+ *
+ * Bis Oktober 2026 war beides ein Modus, der alles zugleich anbot: fünf Knöpfe,
+ * eine Linie zur Mitte, die immer mitlief, und keine Fläche.
+ *
+ * Gerechnet wird auf dem Ellipsoid (ellipsoidAbstand aus hoehen.js), nicht auf
+ * der Kugel wie bei den Kilometern: Die Kugel liegt in Ost-West-Richtung um
+ * 0,31 % zu kurz — 31 cm auf 100 m, nachgerechnet bei Bamberg; Nord-Süd 0,03 %.
+ *
+ * Die Linien liegen in der normalen Vektorebene von Leaflet und nicht in einer
  * eigenen Pane: Eigene Panes rechnet leaflet-rotate falsch, siehe kmlPane. */
 const MESS_FARBE = '#f59e0b';        // Amber, damit es sich von Steinen (blau) und Gleisweg (grün) abhebt
 const MESS_TOL = 60;                 // bis zu so viel Abstand gilt ein Punkt als auf der Strecke
@@ -4259,23 +4277,70 @@ const MESS_FANG_PX = 26;             // Umkreis, in dem Fangpunkte angeboten wer
  * 18 sind 26 px selbst nur noch 15 m, dort bestimmt also der Bildabstand. Beim
  * groben Messen weiter außen bleibt der Punkt dagegen dort, wo getippt wurde. */
 const MESS_FANG_MAX_M = 20;
+/* So nah am ersten Punkt schließt ein Tipp das Polygon — in Bildpunkten, denn
+ * gemeint ist „den Punkt getroffen", gleich auf welcher Zoomstufe. */
+const MESS_SCHLIESS_PX = 24;
 
 let messModus = false;
-let messPunkte = [];
+let messArt = 'polygon';             // 'polygon' oder 'live'
+let messPunkte = [];                 // beim Live genau einer: der Startpunkt
+let messZu = false;                  // Polygon geschlossen?
 let messLayer = null;
-let messLiveLayer = null;            // nur die laufende Linie zum Standort
+let messLiveLayer = null;            // nur die laufende Linie zum Fadenkreuz
 let messKandidaten = [];             // Auswahl für den zuletzt gesetzten Punkt
 let messWahl = 0;
 let messLetzterTipp = 0;             // Zeitpunkt des letzten angenommenen Tipps
 
 const messText = m => m < 1000 ? nfM.format(m) + ' m' : fmtKm(m / 1000) + ' km';
+/** Beim Messen unter 100 m auf Dezimeter: Auf kurze Strecken zählt jeder halbe Meter. */
+const messTextFein = m => m < 100 ? nfH.format(m) + ' m' : messText(m);
+
+function flaecheText(m2) {
+  if (m2 < 100) return nfH.format(m2) + ' m²';
+  if (m2 < 10000) return nfM.format(m2) + ' m²';
+  return new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(m2 / 10000) + ' ha';
+}
 
 function messLaenge() {
   let summe = 0;
-  for (let i = 1; i < messPunkte.length; i++) {
-    summe += haversine(messPunkte[i - 1][0], messPunkte[i - 1][1], messPunkte[i][0], messPunkte[i][1]);
-  }
+  for (let i = 1; i < messPunkte.length; i++) summe += ellipsoidAbstand(messPunkte[i - 1], messPunkte[i]);
+  if (messZu) summe += ellipsoidAbstand(messPunkte[messPunkte.length - 1], messPunkte[0]);
   return summe;
+}
+
+/** Fläche des geschlossenen Zugs in m², auf dem Ellipsoid: Gaußsche
+ *  Trapezformel in UTM, geteilt durch das Quadrat des Maßstabs in der Mitte —
+ *  UTM vergrößert in Bayern um bis zu 0,12 %, die Fläche also um bis zu 0,24 %.
+ *  Gerechnet relativ zum ersten Punkt, sonst fräßen die großen Koordinaten die
+ *  Stellen hinter dem Komma. */
+function messFlaeche() {
+  const utm = messPunkte.map(p => utm32Hin(p[0], p[1]));
+  const [x0, y0] = utm[0];
+  let doppelt = 0, ostSumme = 0;
+  utm.forEach(([x, y], i) => {
+    const [x2, y2] = utm[(i + 1) % utm.length];
+    doppelt += (x - x0) * (y2 - y0) - (x2 - x0) * (y - y0);
+    ostSumme += x;
+  });
+  const abMitte = ostSumme / utm.length - 500000;
+  const k = 0.9996 * (1 + abMitte * abMitte / (2 * 6381000 ** 2));   // 6381 km: mittlerer Krümmungsradius
+  return Math.abs(doppelt) / 2 / (k * k);
+}
+
+/** Kreuzt sich der Umring? Dann ergibt die Trapezformel keine sinnvolle Fläche. */
+function messKreuzt() {
+  const n = messPunkte.length;
+  if (n < 4) return false;
+  const u = messPunkte.map(p => utm32Hin(p[0], p[1]));
+  const seite = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;           // über den Schluss benachbart
+      const a = u[i], b = u[(i + 1) % n], c = u[j], d = u[(j + 1) % n];
+      if (seite(a, b, c) * seite(a, b, d) < 0 && seite(c, d, a) * seite(c, d, b) < 0) return true;
+    }
+  }
+  return false;
 }
 
 /** Kilometerdifferenz zwischen erstem und letztem Punkt, falls beide auf der Strecke liegen. */
@@ -4332,32 +4397,28 @@ function messKandidatenFinden(latlng) {
   return eindeutig.slice(0, 4);
 }
 
-/* Livemessen: Steht ein Punkt, läuft die Strecke vom letzten Punkt zur
- * Kartenmitte mit — beim Schieben der Karte, bei jedem Bild. Damit bekommt man
- * eine Entfernung sofort, ohne erst einen zweiten Punkt zu setzen; „Mitte"
- * friert sie als Punkt ein.
- *
- * Die Linie wird dabei nicht neu gebaut, sondern nur umgesetzt, und die Zahl
- * steht am Fadenkreuz selbst — also immer an derselben Stelle des Bildschirms,
- * ruhig zu lesen, während sich die Karte bewegt. Ein Neuaufbau je Bild würde
- * flackern und wäre auf dem Handy zäh. */
+/* Live: Vom Startpunkt läuft eine Linie zur Kartenmitte mit — beim Schieben
+ * der Karte, bei jedem Bild. Die Linie wird dabei nicht neu gebaut, sondern nur
+ * umgesetzt, und die Zahl steht am Fadenkreuz selbst — also immer an derselben
+ * Stelle des Bildschirms, ruhig zu lesen, während sich die Karte bewegt. Ein
+ * Neuaufbau je Bild würde flackern und wäre auf dem Handy zäh. */
 
 let messLiveLinie = null;
 
 function messLiveZeichnen() {
   const zahl = $('#mitteZahl');
-  const zeile = $('#messLive');
+  const gross = $('#liveZahl');
 
-  if (!messModus || !messPunkte.length) {
+  if (!messModus || messArt !== 'live' || !messPunkte.length) {
     if (messLiveLinie) { messLiveLinie.remove(); messLiveLinie = null; }
     if (zahl) zahl.textContent = '';
-    if (zeile) zeile.textContent = '';
+    if (gross) gross.textContent = '—';
     return;
   }
 
-  const von = messPunkte[messPunkte.length - 1];
+  const von = messPunkte[0];
   const mitte = map.getCenter();
-  const d = haversine(von[0], von[1], mitte.lat, mitte.lng);
+  const d = ellipsoidAbstand(von, [mitte.lat, mitte.lng]);
 
   if (!messLiveLinie) {
     messLiveLinie = L.polyline([von, [mitte.lat, mitte.lng]], {
@@ -4367,12 +4428,16 @@ function messLiveZeichnen() {
     messLiveLinie.setLatLngs([von, [mitte.lat, mitte.lng]]);
   }
 
-  if (zahl) zahl.textContent = messText(d);
-  if (zeile) {
-    zeile.textContent = messPunkte.length > 1
-      ? `bis Kartenmitte ${messText(d)} · mit diesem Abschnitt ${messText(messLaenge() + d)}`
-      : `bis Kartenmitte ${messText(d)}`;
-  }
+  if (zahl) zahl.textContent = messTextFein(d);
+  if (gross) gross.textContent = messTextFein(d);
+}
+
+function messBeschriften(wo, text, klasse = '') {
+  L.marker(wo, {
+    interactive: false, keyboard: false,
+    icon: L.divIcon({ className: '', iconSize: null, iconAnchor: klasse ? [0, 0] : [-7, 7],
+      html: `<span class="mess-lbl ${klasse}">${esc(text)}</span>` })
+  }).addTo(messLayer);
 }
 
 function messZeichnen() {
@@ -4382,101 +4447,135 @@ function messZeichnen() {
   messLiveLinie = null;
   messLiveZeichnen();
 
-
-  if (messPunkte.length > 1) {
-    L.polyline(messPunkte, {
-      color: MESS_FARBE, weight: 3, opacity: 0.95, dashArray: '7 5', interactive: false
-    }).addTo(messLayer);
+  const n = messPunkte.length;
+  if (messArt === 'polygon') {
+    if (messZu) {
+      L.polygon(messPunkte, {
+        color: MESS_FARBE, weight: 3, opacity: 0.95, fillColor: MESS_FARBE, fillOpacity: 0.14, interactive: false
+      }).addTo(messLayer);
+    } else if (n > 1) {
+      L.polyline(messPunkte, {
+        color: MESS_FARBE, weight: 3, opacity: 0.95, dashArray: '7 5', interactive: false
+      }).addTo(messLayer);
+    }
+    // Maßzahl an jedem Abschnitt, beim geschlossenen auch am letzten zurück zum ersten
+    for (let i = 0; i < (messZu ? n : n - 1); i++) {
+      const a = messPunkte[i], b = messPunkte[(i + 1) % n];
+      messBeschriften([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], messTextFein(ellipsoidAbstand(a, b)));
+    }
+    if (messZu && !messKreuzt()) {
+      const mitte = [messPunkte.reduce((s, p) => s + p[0], 0) / n, messPunkte.reduce((s, p) => s + p[1], 0) / n];
+      messBeschriften(mitte, flaecheText(messFlaeche()), 'mess-flaeche');
+    }
   }
 
-  messPunkte.forEach((p, i) => {
+  messPunkte.forEach(p => {
     L.circleMarker(p, {
       radius: 5, color: '#fff', weight: 2, fillColor: MESS_FARBE, fillOpacity: 1, interactive: false
     }).addTo(messLayer);
-
-    if (!i) return;
-    const vor = messPunkte[i - 1];
-    const d = haversine(vor[0], vor[1], p[0], p[1]);
-    L.marker([(vor[0] + p[0]) / 2, (vor[1] + p[1]) / 2], {
-      interactive: false, keyboard: false,
-      icon: L.divIcon({ className: '', iconSize: null, iconAnchor: [-7, 7],
-        html: `<span class="mess-lbl">${esc(messText(d))}</span>` })
-    }).addTo(messLayer);
   });
+
+  /* Der Hinweis, dass ein Tipp auf den ersten Punkt schließt: ein gestrichelter
+   * Ring, solange es etwas zu schließen gibt. Ohne ihn fände das niemand. */
+  if (messArt === 'polygon' && !messZu && n >= 3) {
+    L.circleMarker(messPunkte[0], {
+      radius: 11, color: MESS_FARBE, weight: 2, dashArray: '3 3', fill: false, interactive: false
+    }).addTo(messLayer);
+  }
 }
 
 function messLeiste() {
   const b = $('#bottom');
   b.hidden = false;
+  const n = messPunkte.length;
+  const live = messArt === 'live';
 
-  const laenge = messLaenge();
-  const kd = messKmDifferenz();
-  const letzte = messPunkte.length > 1
-    ? haversine(...messPunkte[messPunkte.length - 2], ...messPunkte[messPunkte.length - 1])
-    : 0;
-
-  const gewaehlt = messPunkte.length ? messKandidaten[messWahl] : null;
-  const gefangen = gewaehlt && messWahl > 0 ? ` · gefangen auf ${gewaehlt.name}` : '';
-
-  const zeilen = [];
-  if (!messPunkte.length) zeilen.push('Auf die Karte tippen setzt den ersten Punkt.');
-  else if (messPunkte.length === 1) zeilen.push('Erster Punkt steht — nächsten Punkt antippen' + gefangen + '.');
-  else zeilen.push(`${messPunkte.length} Punkte · letzter Abschnitt ${messText(letzte)}${gefangen}`);
+  const gewaehlt = n ? messKandidaten[messWahl] : null;
+  const gefangen = gewaehlt && messWahl > 0 ? `gefangen auf ${gewaehlt.name}` : '';
 
   /* Auswahl nur zeigen, wenn es überhaupt etwas zu wählen gibt: der Tippstelle
    * gegenüber mindestens ein Fangpunkt. */
-  const wahl = messKandidaten.length > 1 && messPunkte.length
+  const wahl = messKandidaten.length > 1 && n && !messZu
     ? `<div class="pick">${messKandidaten.map((k, i) =>
         `<button type="button" data-mw="${i}"${i === messWahl ? ' class="is-on"' : ''}>${esc(k.name)}` +
         `<small>${i ? esc(nfM.format(k.dist) + ' m · ' + k.quelle) : 'Tippstelle'}</small></button>`).join('')}</div>`
     : '';
+
+  let titel, schild, zahl, notizen = [];
+  if (live) {
+    titel = 'Live';
+    schild = '<span class="tag warn">Luftlinie</span>';
+    zahl = `<span id="liveZahl">—</span>${n ? ' <small>bis zum Fadenkreuz</small>' : ''}`;
+    if (!n) notizen.push('Startpunkt antippen — dann die Karte schieben: Die Entfernung zum Fadenkreuz läuft mit.');
+    else {
+      notizen.push((gefangen ? `Start ${gefangen}. ` : '') + 'Ein neuer Tipp setzt den Start neu.');
+      if (!ortAn()) notizen.push('Mit Standortverfolgung steht oben auch die Entfernung vom Start zum eigenen Standort.');
+    }
+  } else if (messZu) {
+    titel = 'Polygon';
+    schild = '<span class="tag warn">Fläche</span>';
+    const kreuzt = messKreuzt();
+    zahl = kreuzt ? '—' : esc(flaecheText(messFlaeche()));
+    notizen.push(`Umfang ${messTextFein(messLaenge())} · ${n} Punkte`);
+    if (kreuzt) notizen.push({ warn: 'Der Umring kreuzt sich — eine Fläche ergibt das nicht. „Zurück" öffnet ihn wieder.' });
+  } else {
+    titel = 'Polygon';
+    schild = '<span class="tag warn">Luftlinie</span>';
+    zahl = n > 1 ? esc(messTextFein(messLaenge())) : '—';
+    const letzte = n > 1 ? ellipsoidAbstand(messPunkte[n - 2], messPunkte[n - 1]) : 0;
+    if (!n) notizen.push('Auf die Karte tippen setzt den ersten Punkt.');
+    else if (n === 1) notizen.push('Nächsten Punkt antippen' + (gefangen ? ` — ${gefangen}` : '') + '.');
+    else notizen.push(`${n} Punkte · letzter Abschnitt ${messTextFein(letzte)}${gefangen ? ' · ' + gefangen : ''}`);
+    if (n >= 3) notizen.push('Tipp auf den ersten Punkt schließt die Fläche.');
+    const kd = messKmDifferenz();
+    if (kd) {
+      notizen.push(`Nach Kilometrierung ${messText(kd.km * 1000)} — von km ${fmtKm(kd.von)} bis km ${fmtKm(kd.bis)} ` +
+        `der Strecke ${view.ref}.`);
+    }
+  }
 
   b.innerHTML = `
     <button type="button" id="bbClose" class="bb-close" aria-label="Messen beenden">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
     <div class="bb-head">
-      <p class="bb-title">Messen</p>
-      <span class="tag warn">Luftlinie</span>
+      <p class="bb-title">${titel}</p>
+      ${schild}
     </div>
-    <p class="bb-coord">${messPunkte.length > 1 ? esc(messText(laenge)) : '—'}</p>
-    <p class="bb-note plain">${esc(zeilen[0])}</p>
-    <p class="bb-note plain" id="messLive"></p>
+    <p class="bb-coord mess-zahl">${zahl}</p>
+    ${notizen.map(t => typeof t === 'string'
+      ? `<p class="bb-note plain">${esc(t)}</p>` : `<p class="bb-note">${esc(t.warn)}</p>`).join('')}
     ${wahl}
-    ${kd ? `<p class="bb-note plain">Nach Kilometrierung ${esc(messText(kd.km * 1000))} — von km ${esc(fmtKm(kd.von))} bis km ${esc(fmtKm(kd.bis))} der Strecke ${esc(view.ref)}.</p>` : ''}
-    <div class="bb-actions wrap">
+    <div class="bb-actions knapp">
       <button type="button" id="messMitte">Mitte</button>
       <button type="button" id="messHier"${ortAn() ? '' : ' disabled'}>Standort</button>
-      <button type="button" id="messZurueck">Zurück</button>
-      <button type="button" id="messLeer">Leeren</button>
-      <button type="button" id="messFertig">Fertig</button>
+      ${live ? '' : `<button type="button" id="messZurueck"${n ? '' : ' disabled'}>Zurück</button>
+      <button type="button" id="messLeer"${n ? '' : ' disabled'}>Leeren</button>`}
     </div>`;
 
-  const zu = $('#bbClose');
-  if (zu) zu.addEventListener('click', messEnde);
-  const zurueck = $('#messZurueck');
-  if (zurueck) zurueck.addEventListener('click', () => {
-    messPunkte.pop();
+  const an = (sel, f) => { const el = b.querySelector(sel); if (el) el.addEventListener('click', f); };
+  an('#bbClose', messEnde);
+  // Zurück öffnet eine geschlossene Fläche wieder, sonst nimmt es den letzten Punkt
+  an('#messZurueck', () => {
+    if (messZu) messZu = false;
+    else messPunkte.pop();
     messKandidaten = [];      // gehören zum entfernten Punkt
     messZeichnen();
     messLeiste();
+    liveLeiste();
   });
-  const leer = $('#messLeer');
-  if (leer) leer.addEventListener('click', () => {
+  an('#messLeer', () => {
     messPunkte = [];
+    messZu = false;
     messKandidaten = [];
     messZeichnen();
     messLeiste();
+    liveLeiste();
   });
-
   /* Die Kartenmitte als Punkt: Auf dem Handy trifft der Finger keine 20 cm, die
    * Karte lässt sich aber beliebig genau unter das feste Kreuz schieben. */
-  const mitte = $('#messMitte');
-  if (mitte) mitte.addEventListener('click', () => messTipp(map.getCenter()));
-  messLiveZeichnen();      // die laufende Zahl gehört sofort in die neue Leiste
-
-  const hier = $('#messHier');
-  if (hier) hier.addEventListener('click', () => {
+  an('#messMitte', () => messTipp(map.getCenter()));
+  an('#messHier', () => {
     if (!ortLetzt) { toast('Erst den Standort verfolgen lassen.'); return; }
     messTipp(L.latLng(ortLetzt.lat, ortLetzt.lon));
   });
@@ -4491,15 +4590,17 @@ function messLeiste() {
     messLeiste();
     liveLeiste();
   }));
-  const fertig = $('#messFertig');
-  if (fertig) fertig.addEventListener('click', messEnde);
 
+  messLiveZeichnen();      // die laufende Zahl gehört sofort in die neue Leiste
   updateBH();
 }
 
-function messStart() {
+function messStart(art = 'polygon') {
+  if (profModus) profEnde();
   messModus = true;
+  messArt = art === 'live' ? 'live' : 'polygon';
   messPunkte = [];
+  messZu = false;
   messKandidaten = [];
   messLetzterTipp = 0;
   map.closePopup();          // eine offene KML-Auskunft stört beim Messen
@@ -4515,12 +4616,12 @@ function messStart() {
   liveLeiste();
   closeSheet();
   syncButtons();
-  toast('Messen: auf die Karte tippen. Kilometersteine und KML-Punkte werden gefangen.');
 }
 
 function messEnde() {
   messModus = false;
   messPunkte = [];
+  messZu = false;
   messKandidaten = [];
   if (messLayer) messLayer.clearLayers();
   if (messLiveLayer) messLiveLayer.clearLayers();
@@ -4547,13 +4648,559 @@ function messTipp(latlng) {
   }
   messLetzterTipp = jetzt;
 
+  if (messArt === 'polygon') {
+    if (messZu) { toast('Die Fläche ist geschlossen — „Zurück" öffnet sie wieder.'); return; }
+    /* Ein Tipp auf den ersten Punkt schließt — vor dem Fangen geprüft, sonst
+     * spränge der Tipp womöglich auf einen Stein gleich daneben. */
+    if (messPunkte.length >= 3) {
+      const a = map.latLngToContainerPoint(latlng);
+      const b = map.latLngToContainerPoint(L.latLng(messPunkte[0][0], messPunkte[0][1]));
+      if (a.distanceTo(b) <= MESS_SCHLIESS_PX) {
+        messZu = true;
+        messKandidaten = [];
+        messZeichnen();
+        messLeiste();
+        liveLeiste();
+        return;
+      }
+    }
+  }
+
   const nah = messKandidatenFinden(latlng);
   messKandidaten = [{ name: 'Getippt', quelle: '', koord: [latlng.lat, latlng.lng], dist: 0 }, ...nah];
   // Nur fangen, wenn der Punkt auch in Metern nah liegt — sonst bleibt die Tippstelle
   messWahl = nah.length && nah[0].dist <= MESS_FANG_MAX_M ? 1 : 0;
-  messPunkte.push(messKandidaten[messWahl].koord);
+  if (messArt === 'live') messPunkte = [messKandidaten[messWahl].koord];   // Live kennt nur den Start
+  else messPunkte.push(messKandidaten[messWahl].koord);
   messZeichnen();
   messLeiste();
+  liveLeiste();
+}
+
+/* ---- Messmenü ----
+ * Der Messknopf fragt zuerst, was gemessen werden soll. Ein Tipp daneben
+ * schließt das Menü wieder, ebenso Escape. */
+function messMenueAuf(auf) {
+  const m = $('#messMenue'), k = $('#mapMessBtn');
+  if (!m || !k) return;
+  m.hidden = !auf;
+  k.setAttribute('aria-expanded', String(auf));
+  if (auf) {
+    document.addEventListener('pointerdown', messMenueDraussen, true);
+    document.addEventListener('keydown', messMenueTaste);
+  } else {
+    document.removeEventListener('pointerdown', messMenueDraussen, true);
+    document.removeEventListener('keydown', messMenueTaste);
+  }
+}
+function messMenueDraussen(ev) {
+  if (!ev.target.closest('#messMenue, #mapMessBtn')) messMenueAuf(false);
+}
+function messMenueTaste(ev) {
+  if (ev.key === 'Escape') messMenueAuf(false);
+}
+
+/* ============================ Querprofil ============================
+ *
+ * Geländeschnitt entlang angetippter Punkte aus dem DGM1 der Bayerischen
+ * Vermessungsverwaltung (hoehen.js), auf Wunsch mit der Oberfläche aus dem
+ * DOM20 als zweiter Linie. Ein eigener Ablauf im Messmenü: Punkte antippen,
+ * mit Fang auf Steine und KML-Punkte wie beim Messen; ab zwei Punkten lädt das
+ * Profil von selbst. Ein ungefragter Netzabruf ist das nicht: Wer den
+ * Profilmodus wählt, will genau das. Fadenkreuz, „Mitte" und „Standort" gibt es
+ * hier bewusst nicht — für eine Geländeübersicht reicht der Finger, und die
+ * Leiste bleibt frei fürs Diagramm.
+ *
+ * Das DOM kommt nur auf Knopfdruck, und der Knopf nennt die Datenmenge vorher:
+ * Blöcke von 51 × 51 m zu rund 100 kB, auf 300 m gemessen 0,6 MB. Einmal
+ * eingeschaltet, lädt es bei jedem neuen Punkt mit, bis man es abschaltet. Vom
+ * DGM kommt je berührter Kilometerkachel die ganze Datei (1,5–3,9 MB); bei mehr
+ * als PROF_KACHELN_FRAGEN Kacheln fragt die Leiste erst. Danach liegen sie im
+ * Gerätespeicher.
+ */
+
+/* Überhöhung: unüberhöht als Vorgabe, ein Tipp auf die Angabe schaltet weiter.
+ * Die Bildhöhe richtet sich nach dem Gelände — flaches Gelände unüberhöht gibt
+ * ein flaches Bild und eine kleinere Leiste. Wäre es höher als PROF_PLOT_MAX,
+ * wird gestaucht, und die Angabe nennt den tatsächlichen Faktor. Eine Stufe,
+ * in der die Höhe einfach das Bild füllt, gab es anfangs; sie zeichnete zwei
+ * Meter auf 300 m wie einen Berg und ist wieder raus. */
+const PROF_UEBER = [1, 2, 5, 10];
+const PROF_PLOT_MIN = 56;              // px Zeichenfläche, darunter wird es unleserlich
+const PROF_PLOT_MAX = 160;
+const PROF_KACHELN_FRAGEN = 4;
+const PROF_KACHEL_MB = 3;              // DGM1, gemessen 1,5–3,9 MB je Kachel
+const PROF_DOM_BLOCK_KB = 110;         // DOM20: 13–64 MB je Kachel aus 400 Blöcken
+/* Quellenvermerk nach CC BY 4.0: Urheber mit Verweis auf die Quelle, Lizenz,
+ * und dass bearbeitet wurde — „Profil aus …" sagt das. Eine Zeile, damit die
+ * Leiste nicht wächst; der volle Wortlaut steht unter Hinweise. */
+const PROF_QUELLE = '<a href="https://www.geodaten.bayern.de/" target="_blank" rel="noopener">' +
+  'Bayerischen Vermessungsverwaltung</a>, CC BY 4.0';
+
+let profModus = false;
+let profPunkte = [];
+let profLayer = null;
+let profRing = null;                   // die Stelle unter dem Finger, auf der Karte
+let profDgm = null;                    // Ergebnis von hoehenProfil
+let profDom = null;
+let profDomDgm = null;                 // Gelände an den Stützpunkten des DOM
+let profDomAn = false;
+let profLaedt = '';                    // '', 'dgm' oder 'dom'
+let profFehler = '';
+let profNochmal = false;               // lohnt ein zweiter Versuch? Nur bei Netzfehlern
+let profFreigabe = false;              // viele Kacheln bestätigt
+let profLauf = 0;                      // überholte Antworten verwerfen
+let profWahl = -1;                     // Stützpunkt unter dem Finger
+let profLetzterTipp = 0;
+let profAbbild = null;                 // Maßstab des gezeichneten Diagramms
+
+const profName = i => i < 26 ? String.fromCharCode(65 + i) : String(i + 1);
+const profMB = byte => nfH.format(Math.max(0.1, byte / 2 ** 20)) + ' MB';
+
+function profStart() {
+  if (messModus) messEnde();
+  profModus = true;
+  profPunkte = [];
+  profDgm = profDom = profDomDgm = null;
+  profDomAn = false;
+  profLaedt = profFehler = '';
+  profFreigabe = false;
+  profWahl = -1;
+  profLauf++;
+  map.closePopup();
+  if (!profLayer) profLayer = L.layerGroup().addTo(map);
+  // Wie beim Messen: Zwei schnelle Tipps wären sonst ein Doppeltipp-Zoom
+  if (map.doubleClickZoom) map.doubleClickZoom.disable();
+  profZeichnen();
+  profLeiste();
+  closeSheet();
+  syncButtons();
+}
+
+function profEnde() {
+  profModus = false;
+  profPunkte = [];
+  profDgm = profDom = profDomDgm = null;
+  profLauf++;
+  if (profLayer) profLayer.clearLayers();
+  profRing = null;
+  if (map.doubleClickZoom) map.doubleClickZoom.enable();
+  syncButtons();
+  renderBottom();      // zeigt wieder den vorherigen Punkt, falls es einen gibt
+}
+
+function profTipp(latlng) {
+  latlng = L.latLng(latlng);
+  // Doppelt gemeldeter Tipp (siehe messTipp)
+  const jetzt = Date.now();
+  if (profPunkte.length && jetzt - profLetzterTipp < 350) {
+    const vor = profPunkte[profPunkte.length - 1];
+    if (map.latLngToContainerPoint(latlng).distanceTo(map.latLngToContainerPoint(L.latLng(vor[0], vor[1]))) < 8) return;
+  }
+  profLetzterTipp = jetzt;
+
+  /* Gefangen wird wie beim Messen, nur ohne Auswahlzeile — den Platz in der
+   * Leiste braucht das Diagramm. */
+  const nah = messKandidatenFinden(latlng);
+  if (nah.length && nah[0].dist <= MESS_FANG_MAX_M) {
+    profPunkte.push(nah[0].koord);
+    toast(`${profName(profPunkte.length - 1)} gefangen auf ${nah[0].name}`);
+  } else {
+    profPunkte.push([latlng.lat, latlng.lng]);
+  }
+  profGeaendert();
+}
+
+function profGeaendert() {
+  profZeichnen();
+  profWahl = -1;
+  profRechnen();
+}
+
+function profZeichnen() {
+  if (!profLayer) return;
+  profLayer.clearLayers();
+  profRing = null;
+  if (profPunkte.length > 1) {
+    L.polyline(profPunkte, {
+      color: MESS_FARBE, weight: 3, opacity: 0.95, dashArray: '7 5', interactive: false
+    }).addTo(profLayer);
+  }
+  profPunkte.forEach((p, i) => {
+    L.circleMarker(p, {
+      radius: 5, color: '#fff', weight: 2, fillColor: MESS_FARBE, fillOpacity: 1, interactive: false
+    }).addTo(profLayer);
+    L.marker(p, {
+      interactive: false, keyboard: false,
+      icon: L.divIcon({ className: '', iconSize: null, iconAnchor: [-7, 7],
+        html: `<span class="mess-lbl">${profName(i)}</span>` })
+    }).addTo(profLayer);
+  });
+}
+
+/** Wie viele Rasterzellen der Linienzug berührt: DGM-Kacheln (1000 m) oder
+ *  DOM-Blöcke (51,2 m, an der linken oberen Kachelecke ausgerichtet). */
+function profZellen(punkte, zelle) {
+  const satz = new Set();
+  const utm = punkte.map(p => utm32Hin(p[0], p[1]));
+  for (let i = 1; i < utm.length; i++) {
+    const [e0, n0] = utm[i - 1], [e1, n1] = utm[i];
+    const schritte = Math.max(1, Math.ceil(Math.hypot(e1 - e0, n1 - n0) / (zelle / 4)));
+    for (let j = 0; j <= schritte; j++) {
+      const e = e0 + (e1 - e0) * j / schritte, n = n0 + (n1 - n0) * j / schritte;
+      const ke = Math.floor(e / 1000), kn = Math.floor(n / 1000);
+      satz.add(`${ke}_${kn}_${Math.floor((e - ke * 1000) / zelle)}_${Math.floor((kn * 1000 + 1000 - n) / zelle)}`);
+    }
+  }
+  return satz.size;
+}
+
+async function profRechnen() {
+  const lauf = ++profLauf;
+  profDgm = profDom = profDomDgm = null;
+  profFehler = '';
+  profLaedt = '';
+  if (profPunkte.length < 2) { profLeiste(); return; }
+  // Lange Linien: erst fragen, die Leiste bietet dann „Gelände laden" an
+  if (profZellen(profPunkte, 1000) > PROF_KACHELN_FRAGEN && !profFreigabe) { profLeiste(); return; }
+
+  profLaedt = 'dgm';
+  profLeiste();
+  try {
+    const dgm = await hoehenProfil(profPunkte, 'dgm1');
+    if (lauf !== profLauf) return;
+    profDgm = dgm;
+    if (!dgm.hoehe.some(Number.isFinite)) {
+      profFehler = 'Hier gibt es keine Höhendaten — DGM1 und DOM20 decken nur Bayern ab.';
+      profNochmal = false;
+    }
+  } catch (err) {
+    if (lauf !== profLauf) return;
+    profFehler = navigator.onLine === false
+      ? 'Ohne Netz gibt es hier keine Höhen — die Geländekachel war noch nicht auf dem Gerät.'
+      : `Höhendaten nicht erreichbar (${err.message}).`;
+    profNochmal = true;
+  }
+  profLaedt = '';
+  if (profFehler) profDgm = null;
+  profLeiste();
+  if (profDomAn && profDgm) profDomLaden();
+}
+
+async function profDomLaden() {
+  if (!profDgm) return;
+  const lauf = profLauf;
+  profDomAn = true;
+  profLaedt = 'dom';
+  profLeiste();
+  try {
+    // 0,2 m Abstand, damit kein Mast und kein Baum zwischen zwei Stützpunkte fällt
+    const dom = await hoehenProfil(profPunkte, 'dom20', { maxPunkte: 6000 });
+    const dgmDort = await hoehenWerte('dgm1', dom.ost, dom.nord);
+    if (lauf !== profLauf) return;
+    profDom = dom;
+    profDomDgm = dgmDort;
+  } catch (err) {
+    if (lauf !== profLauf) return;
+    profDomAn = false;
+    toast(`Oberfläche nicht geladen (${err.message}).`);
+  }
+  profLaedt = '';
+  profLeiste();
+}
+
+function profKennwerte() {
+  let min = Infinity, max = -Infinity, erst = NaN, letzt = NaN;
+  for (const z of profDgm.hoehe) {
+    if (!Number.isFinite(z)) continue;
+    if (Number.isNaN(erst)) erst = z;
+    letzt = z;
+    if (z < min) min = z;
+    if (z > max) max = z;
+  }
+  let obj = null;
+  if (profDom) {
+    let best = -Infinity, wo = -1;
+    profDom.hoehe.forEach((z, i) => { const d = z - profDomDgm[i]; if (d > best) { best = d; wo = i; } });
+    if (wo >= 0) obj = { hoehe: best, station: profDom.station[wo] };
+  }
+  return { min, max, dh: letzt - erst, obj };
+}
+
+function profDomKnopf() {
+  // „+0,8 MB": dazuladen, und was es kostet — kurz, damit die Legende einzeilig bleibt
+  const mb = profMB(profZellen(profPunkte, 51.2) * PROF_DOM_BLOCK_KB * 1024);
+  const [zusatz, titel] = profLaedt === 'dom' ? ['lädt …', 'Oberfläche wird geladen']
+    : profDomAn ? ['×', 'Oberfläche ausblenden']
+    : ['+' + mb, `Gebäude und Bewuchs aus dem DOM20 dazuladen, rund ${mb}`];
+  return `<button type="button" class="prof-dom${profDomAn ? ' is-on' : ''}" id="profDom" ` +
+    `title="${titel}" aria-label="${titel}">Oberfläche<small>${zusatz}</small></button>`;
+}
+
+function profLeiste() {
+  const b = $('#bottom');
+  b.hidden = false;
+  const n = profPunkte.length;
+  const teile = [];
+
+  if (n < 2) {
+    teile.push(`<p class="bb-note plain">${n ? 'Punkt B antippen — dann lädt das Profil.'
+      : 'Auf die Karte tippen setzt Punkt A. Kilometersteine und KML-Punkte werden gefangen.'}</p>`);
+  } else if (profFehler) {
+    teile.push(`<p class="bb-note">${esc(profFehler)}</p>`);
+    if (profNochmal) teile.push('<button type="button" class="refine" id="profNochmal">Erneut versuchen</button>');
+  } else if (!profDgm && profLaedt !== 'dgm') {
+    const k = profZellen(profPunkte, 1000);
+    teile.push('<button type="button" class="refine" id="profFreigeben">Gelände laden' +
+      `<small>${k} Kacheln, rund ${k * PROF_KACHEL_MB} MB — danach liegen sie auf dem Gerät</small></button>`);
+  } else if (!profDgm) {
+    teile.push('<p class="bb-note plain">Gelände wird geladen …</p>');
+  } else {
+    const kw = profKennwerte();
+    const dh = (kw.dh > 0.05 ? '+' : kw.dh < -0.05 ? '−' : '±') + nfH.format(Math.abs(kw.dh));
+    // Die Spanne von tiefstem bis höchstem Punkt steht an der Achse
+    teile.push(`<p class="prof-zahlen"><b>${esc(messText(profDgm.laenge))}</b><b>Δh ${dh} m</b>` +
+      (kw.obj ? `<span>Objekte bis ${nfH.format(kw.obj.hoehe)} m bei ${nfM.format(kw.obj.station)} m</span>` : '') +
+      '</p>',
+      '<div class="prof-bild" id="profBild"></div>',
+      `<div class="prof-legende"><span class="prof-leg-dgm">Gelände</span>${profDomKnopf()}` +
+      '<button type="button" class="prof-ueber" id="profUeber"></button></div>');
+    if (profDgm.hoehe.some(z => !Number.isFinite(z))) {
+      teile.push('<p class="bb-note">Teilweise außerhalb Bayerns — dort fehlen die Höhen.</p>');
+    }
+  }
+
+  b.innerHTML = `
+    <button type="button" id="bbClose" class="bb-close" aria-label="Profil beenden">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div class="bb-head">
+      <p class="bb-title">Profil</p>
+      <span class="tag warn">${profDom ? 'DGM1 · DOM20' : 'Gelände DGM1'}</span>
+    </div>
+    ${teile.join('')}
+    <div class="bb-actions knapp">
+      <button type="button" id="profZurueck"${n ? '' : ' disabled'}>Zurück</button>
+      <button type="button" id="profLeer"${n ? '' : ' disabled'}>Leeren</button>
+    </div>
+    ${profDgm ? `<p class="prof-quelle">Profil aus Daten der ${PROF_QUELLE}</p>` : ''}`;
+
+  const an = (sel, f) => { const el = b.querySelector(sel); if (el) el.addEventListener('click', f); };
+  an('#bbClose', profEnde);
+  an('#profZurueck', () => { profPunkte.pop(); profGeaendert(); });
+  an('#profLeer', () => { profPunkte = []; profFreigabe = false; profGeaendert(); });
+  an('#profNochmal', profRechnen);
+  an('#profFreigeben', () => { profFreigabe = true; profRechnen(); });
+  an('#profDom', () => {
+    if (profLaedt) return;
+    if (profDomAn) { profDomAn = false; profDom = profDomDgm = null; profLeiste(); }
+    else profDomLaden();
+  });
+  an('#profUeber', () => {
+    prefs.profUeber = PROF_UEBER[(PROF_UEBER.indexOf(profUeberWahl()) + 1) % PROF_UEBER.length];
+    saveStore();
+    const el = $('#profBild');
+    if (el) profBildSetzen(el);
+  });
+
+  const bild = $('#profBild');
+  if (bild) profBildSetzen(bild);
+  updateBH();
+}
+
+/** Eine runde Schrittweite für Gitter und Beschriftung: 1, 2 oder 5 mal 10ⁿ. */
+function profSchritt(roh) {
+  const p = 10 ** Math.floor(Math.log10(roh || 1));
+  for (const f of [1, 2, 5]) if (f * p >= roh) return f * p;
+  return 10 * p;
+}
+
+/** Nächster Stützpunkt zu einer Station (die Stationen steigen an). */
+function profIndex(stationen, s) {
+  let lo = 0, hi = stationen.length - 1;
+  while (hi - lo > 1) {
+    const m = (lo + hi) >> 1;
+    if (stationen[m] < s) lo = m; else hi = m;
+  }
+  return s - stationen[lo] <= stationen[hi] - s ? lo : hi;
+}
+
+/* Linienzug fürs Diagramm. Je halbe Bildspalte bleiben erster, kleinster,
+ * größter und letzter Wert stehen: Bei langen Profilen fallen Hunderte
+ * Stützpunkte auf ein Pixel, und eine schmale Spitze — ein Mast im DOM, ein
+ * Graben im DGM — darf dabei nicht verschwinden. Wo Werte fehlen, reißt die
+ * Linie ab, statt die Lücke zu überbrücken. */
+function profPfad(station, werte, X, Y) {
+  const teile = [];
+  let teil = null, spalte = null, puffer = null;
+  const raus = () => {
+    if (!puffer) return;
+    const pkt = [puffer.erst, puffer.min, puffer.max, puffer.letzt].sort((a, b) => a.i - b.i);
+    let vor = -1;
+    for (const p of pkt) {
+      if (p.i === vor) continue;
+      vor = p.i;
+      const y = Y(p.z).toFixed(1);
+      if (!teil) { teil = { d: `M${spalte} ${y}`, x0: spalte, x1: spalte }; teile.push(teil); }
+      else teil.d += `L${spalte} ${y}`;
+      teil.x1 = spalte;
+    }
+    puffer = null;
+  };
+  for (let i = 0; i < werte.length; i++) {
+    const z = werte[i];
+    if (!Number.isFinite(z)) { raus(); teil = null; spalte = null; continue; }
+    const c = Math.round(X(station[i]) * 2) / 2;
+    if (c !== spalte) { raus(); spalte = c; }
+    const p = { i, z };
+    if (!puffer) puffer = { erst: p, min: p, max: p, letzt: p };
+    else {
+      if (z < puffer.min.z) puffer.min = p;
+      if (z > puffer.max.z) puffer.max = p;
+      puffer.letzt = p;
+    }
+  }
+  raus();
+  return teile;
+}
+
+/** Die gewählte Überhöhung; was nicht in der Liste steht, gilt als 1:1. */
+function profUeberWahl() {
+  return PROF_UEBER.includes(prefs.profUeber) ? prefs.profUeber : 1;
+}
+
+/* Das Diagramm, in der tatsächlichen Breite der Leiste gezeichnet: Mit
+ * width = viewBox liegen die 1-px-Gitterlinien auf der Pixelmitte und bleiben
+ * scharf, statt beim Skalieren über zwei Pixel zu verschwimmen. */
+function profBildSetzen(el) {
+  const w = Math.max(160, Math.round(el.clientWidth));
+  const li = 38, re = 4, ob = 14, un = 16;
+  const pw = w - li - re;
+  const L = profDgm.laenge || 1;
+  const proMeter = pw / L;               // px je Meter Station
+
+  let zmin = Infinity, zmax = -Infinity;
+  for (const reihe of [profDgm.hoehe, profDom ? profDom.hoehe : []]) {
+    for (const z of reihe) if (Number.isFinite(z)) { if (z < zmin) zmin = z; if (z > zmax) zmax = z; }
+  }
+  if (!(zmax >= zmin)) { el.innerHTML = ''; return; }
+
+  // 1 m Höhe ist im Bild so lang wie „wahl" Meter Station
+  const wahl = profUeberWahl();
+  const spanne = Math.max(zmax - zmin, 0.5) * 1.15;
+  const ph = Math.min(PROF_PLOT_MAX, Math.max(PROF_PLOT_MIN, Math.round(spanne * wahl * proMeter)));
+  const fenster = Math.max(spanne, ph / (wahl * proMeter));
+  const y0 = (zmax + zmin) / 2 - fenster / 2, y1 = y0 + fenster;
+  const h = ob + ph + un;
+  const yStep = profSchritt((y1 - y0) / 3), xStep = profSchritt(L / 4);
+  const X = s => li + s / L * pw, Y = z => ob + (y1 - z) / (y1 - y0) * ph;
+  const halb = v => Math.round(v) + 0.5;
+  const stellen = yStep < 1 ? 1 : 0;
+  const nfY = new Intl.NumberFormat('de-DE', { minimumFractionDigits: stellen, maximumFractionDigits: stellen });
+  const inKm = L >= 2000;
+  const stationText = s => inKm ? fmtKm(s / 1000) : nfM.format(s);
+
+  let gitter = '', beschr = '', ecken = '';
+  for (let z = Math.ceil(y0 / yStep - 1e-9) * yStep; z <= y1 + 1e-9; z += yStep) {
+    const y = halb(Y(z));
+    gitter += `M${li} ${y}H${li + pw}`;
+    beschr += `<text x="${li - 5}" y="${y + 4}" text-anchor="end">${nfY.format(z)}</text>`;
+  }
+  for (let s = 0; s <= L + 1e-6; s += xStep) gitter += `M${halb(X(s))} ${ob}V${ob + ph}`;
+  for (let s = 0; s < L - xStep * 0.4; s += xStep) {
+    beschr += `<text x="${X(s)}" y="${h - 3}" text-anchor="${s ? 'middle' : 'start'}">${stationText(s)}</text>`;
+  }
+  beschr += `<text x="${li + pw}" y="${h - 3}" text-anchor="end">${esc(messText(L))}</text>`;
+  const letzte = profDgm.ecken.length - 1;
+  profDgm.ecken.forEach((s, i) => {
+    if (i > 0 && i < letzte) ecken += `M${halb(X(s))} ${ob}V${ob + ph}`;
+    beschr += `<text class="ecke" x="${X(s)}" y="${ob - 4}" ` +
+      `text-anchor="${i === 0 ? 'start' : i === letzte ? 'end' : 'middle'}">${profName(i)}</text>`;
+  });
+
+  const dgm = profPfad(profDgm.station, profDgm.hoehe, X, Y);
+  const basis = ob + ph;
+  const flaeche = dgm.map(t => `${t.d}L${t.x1} ${basis}L${t.x0} ${basis}Z`).join('');
+  const dom = profDom ? profPfad(profDom.station, profDom.hoehe, X, Y).map(t => t.d).join('') : '';
+
+  el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Geländeprofil">` +
+    `<path class="gitter" d="${gitter}"/>` +
+    (ecken ? `<path class="ecken" d="${ecken}"/>` : '') +
+    `<path class="flaeche" d="${flaeche}"/>` +
+    `<path class="dgm" d="${dgm.map(t => t.d).join('')}"/>` +
+    (dom ? `<path class="dom" d="${dom}"/>` : '') +
+    `<g class="beschr">${beschr}</g>` +
+    '<g class="zeiger" hidden><path d=""/><circle r="3"/><text></text></g></svg>';
+
+  /* Die Angabe ist zugleich der Schalter. Gestaucht (steiler, als das Bild hoch
+   * werden darf) steht sie in der Signalfarbe mit dem tatsächlichen Faktor. */
+  const k = (ph / (y1 - y0)) / proMeter;
+  // Unter 10 mit einer Stelle: „gestaucht auf 5×" bei tatsächlich 4,8 wäre irreführend
+  const kText = v => (v >= 10 ? nfM.format(v) : nfH.format(v).replace(/,0$/, '')) + '×';
+  const gestaucht = k < wahl * 0.97;
+  const ueber = $('#profUeber');
+  if (ueber) {
+    ueber.textContent = gestaucht ? `${kText(k)} überhöht` : wahl === 1 ? 'unüberhöht' : `${kText(wahl)} überhöht`;
+    ueber.classList.toggle('gestaucht', gestaucht);
+    ueber.title = (gestaucht
+      ? (wahl === 1 ? 'Unüberhöht' : `${kText(wahl)} überhöht`) + ` wäre höher als die Leiste — gestaucht auf ${kText(k)}`
+      : wahl === 1 ? 'Höhen im selben Maßstab wie die Strecke' : `Höhen ${kText(wahl)} überhöht`) +
+      ' · antippen: umschalten';
+    ueber.setAttribute('aria-label', 'Überhöhung: ' + ueber.title);
+  }
+
+  profAbbild = { X, Y, li, pw, ob, ph, L };
+  updateBH();            // die Bildhöhe hängt am Maßstab
+  const svg = el.querySelector('svg');
+  const zeigen = ev => {
+    const r = svg.getBoundingClientRect();
+    const s = Math.min(L, Math.max(0, (ev.clientX - r.left - li) / pw * L));
+    profWahl = profIndex(profDgm.station, s);
+    profZeigerSetzen();
+  };
+  svg.addEventListener('pointerdown', ev => {
+    try { svg.setPointerCapture(ev.pointerId); } catch { /* ohne Fang geht es auch */ }
+    zeigen(ev);
+  });
+  svg.addEventListener('pointermove', ev => { if (ev.buttons || ev.pointerType === 'mouse') zeigen(ev); });
+  if (profWahl >= 0) profZeigerSetzen();
+}
+
+/** Zeiger im Diagramm und Ring auf der Karte an den gewählten Stützpunkt. */
+function profZeigerSetzen() {
+  const a = profAbbild, g = document.querySelector('#profBild .zeiger');
+  if (!a || !g || !profDgm || profWahl < 0) return;
+  const i = profWahl, s = profDgm.station[i], z = profDgm.hoehe[i];
+  const x = Math.round(a.X(s)) + 0.5;
+  g.hidden = false;
+  g.querySelector('path').setAttribute('d', `M${x} ${a.ob}V${a.ob + a.ph}`);
+  const kreis = g.querySelector('circle');
+  kreis.style.display = Number.isFinite(z) ? '' : 'none';
+  if (Number.isFinite(z)) {
+    kreis.setAttribute('cx', x);
+    kreis.setAttribute('cy', a.Y(z).toFixed(1));
+  }
+
+  let t = `${nfM.format(s)} m · ${Number.isFinite(z) ? nfH.format(z) + ' m' : 'ohne Wert'}`;
+  if (profDom) {
+    const j = profIndex(profDom.station, s), d = profDom.hoehe[j] - profDomDgm[j];
+    if (Number.isFinite(d)) t += ` · Objekt ${nfH.format(Math.max(0, d))} m`;
+  }
+  const text = g.querySelector('text');
+  text.textContent = t;
+  const rechts = x < a.li + a.pw / 2;
+  text.setAttribute('x', rechts ? x + 6 : x - 6);
+  text.setAttribute('y', a.ob + 12);
+  text.setAttribute('text-anchor', rechts ? 'start' : 'end');
+
+  const ll = utm32Zurueck(profDgm.ost[i], profDgm.nord[i]);
+  if (!profRing) {
+    profRing = L.circleMarker(ll, {
+      radius: 8, color: MESS_FARBE, weight: 2.5, fill: false, interactive: false
+    }).addTo(profLayer);
+  } else {
+    profRing.setLatLng(ll);
+  }
 }
 
 /* ============================ Klick auf die Karte ============================ */
@@ -4578,7 +5225,13 @@ function toleranceMeters(latlng) {
  * bewusst, und die Sprechblase fragt, was damit geschehen soll. Kilometersteine
  * und KML-Objekte bleiben antippbar — die trifft man nicht zufällig. */
 function onMapClick(ev) {
-  if (messModus) messTipp(ev.latlng);
+  const ziel = tippZiel();
+  if (ziel) ziel(ev.latlng);
+}
+
+/** Wohin ein Tipp auf die Karte geht, solange gemessen oder ein Profil gesetzt wird. */
+function tippZiel() {
+  return messModus ? messTipp : profModus ? profTipp : null;
 }
 
 /** Aus einem Sehnentreffer den anzuzeigenden Punkt bauen — nach Möglichkeit auf dem Gleis.
@@ -5703,7 +6356,7 @@ function ortNeu(pos) {
    * gegen die eigene Zielbewegung, und auch sonst rutschte die Karte immer
    * wieder weg. Zurückholen tut der Standortknopf. */
   if (erste) {
-    if (!messModus) map.setView([lat, lon], Math.max(map.getZoom(), 17));
+    if (!tippZiel()) map.setView([lat, lon], Math.max(map.getZoom(), 17));
     toast(`Standort auf ±${nfM.format(accuracy || 0)} m genau.`);
   }
 
@@ -5929,9 +6582,10 @@ function liveKmZeichnen() {
 
 /** Tipp auf den eigenen Punkt: Der erste wirft die laufende Rechnung an, jeder
  *  weitere hält den Kilometer fest wie ein Tipp auf die Zahl in der Zeile.
- *  Beim Messen bleibt der Tipp ein Messpunkt — der Marker schluckt ihn sonst. */
+ *  Beim Messen und im Profil bleibt der Tipp ein Punkt — der Marker schluckt ihn sonst. */
 function meTipp(ev) {
-  if (messModus) { messTipp(ev.latlng); return; }
+  const ziel = tippZiel();
+  if (ziel) { ziel(ev.latlng); return; }
   if (!liveKmAn) { liveKmStart(); return; }
   /* Ein Doppeltipp soll nicht gleich festhalten, bevor überhaupt ein Kilometer
    * da ist — liveKmFest ginge dann den Weg über kmAnStelle, der ins Netz darf. */
@@ -6001,10 +6655,13 @@ function liveLeiste() {
   }
   // Ohne Rechnung steht kein Kilometer da: Den wirft der Tipp auf den Punkt an.
 
-  if (messModus && messPunkte.length) {
-    const p = messPunkte[messPunkte.length - 1];
-    stuecke.push(`<span class="live-teil"><b>${esc(messText(haversine(ortLetzt.lat, ortLetzt.lon, p[0], p[1])))}</b>` +
-      `<small>vom letzten Messpunkt</small></span>`);
+  /* Beim Messen der Abstand vom eigenen Standort: im Live zum Start, im Polygon
+   * zum letzten Punkt — „genau 20 m" wird so eine Laufaufgabe. */
+  if (messModus && messPunkte.length && !messZu) {
+    const live = messArt === 'live';
+    const p = live ? messPunkte[0] : messPunkte[messPunkte.length - 1];
+    stuecke.push(`<span class="live-teil"><b>${esc(messTextFein(ellipsoidAbstand([ortLetzt.lat, ortLetzt.lon], p)))}</b>` +
+      `<small>${live ? 'vom Startpunkt' : 'vom letzten Punkt'}</small></span>`);
   }
 
   if (!stuecke.length) { leer(); return; }
@@ -6998,13 +7655,14 @@ function syncButtons() {
     }
   }
 
+  // Das Fadenkreuz gehört zu Polygon und Live (Mitte, laufende Zahl), nicht zum Profil
   const kreuz = $('#mitteKreuz');
   if (kreuz) kreuz.hidden = !messModus;
 
   const mb = $('#mapMessBtn');
   if (mb) {
-    mb.classList.toggle('is-on', messModus);
-    mb.setAttribute('aria-pressed', messModus ? 'true' : 'false');
+    mb.classList.toggle('is-on', !!tippZiel());
+    mb.setAttribute('aria-pressed', tippZiel() ? 'true' : 'false');
   }
   abKnopf();
 
@@ -7191,7 +7849,25 @@ function bind() {
 
   on('#mapLocBtn', 'click', locate);
 
-  on('#mapMessBtn', 'click', () => { if (messModus) messEnde(); else messStart(); });
+  /* Der Messknopf fragt zuerst, was gemessen werden soll; läuft schon etwas,
+   * beendet er es. */
+  on('#mapMessBtn', 'click', () => {
+    if (messModus) { messEnde(); return; }
+    if (profModus) { profEnde(); return; }
+    messMenueAuf($('#messMenue').hidden);
+  });
+  document.querySelectorAll('[data-messart]').forEach(b => b.addEventListener('click', () => {
+    messMenueAuf(false);
+    if (b.dataset.messart === 'profil') profStart();
+    else messStart(b.dataset.messart);
+  }));
+  // Das Diagramm richtet sich nach der Breite der Leiste
+  let profNeu = 0;
+  window.addEventListener('resize', () => {
+    if (!profModus || !profDgm) return;
+    cancelAnimationFrame(profNeu);
+    profNeu = requestAnimationFrame(() => { const el = $('#profBild'); if (el) profBildSetzen(el); });
+  });
   on('#mapZielBtn', 'click', () => { if (abAn) abEnde(); else abStart(); });
 
   on('#kmlNamenBtn', 'click', () => {

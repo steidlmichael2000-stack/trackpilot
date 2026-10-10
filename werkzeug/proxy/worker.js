@@ -1,0 +1,100 @@
+/* TrackPilot — Höhendaten-Proxy als Cloudflare Worker
+ *
+ * Die GeoTIFF-Kacheln der Bayerischen Vermessungsverwaltung (DGM1 und DOM20)
+ * liegen auf download1.bayernwolke.de ohne CORS-Freigabe: Der Browser lädt sie
+ * zwar, gibt die Bytes aber nicht an die App heraus. Dieser Worker holt sie
+ * serverseitig und hängt die Freigabe für TrackPilot an. Die Daten stehen unter
+ * CC BY 4.0; eine Anfrage oder Vereinbarung ist laut Nutzungsbedingungen nicht
+ * nötig.
+ *
+ * Bewusst eng gefasst, damit kein offener Proxy daraus wird: genau zwei Pfade,
+ * Kachelnamen nur als Ziffernmuster, nur GET und HEAD, höchstens ein
+ * Bytebereich. Den Höhendienst der BVV reicht er absichtlich nicht durch — der
+ * lässt im Browser nur die eigenen Portale zu, und das ist eine Entscheidung
+ * des Betreibers.
+ *
+ *   GET /dgm1/636_5528.tif    →  …/a/dgm/dgm1/636_5528.tif
+ *   GET /dom20/638_5526.tif   →  …/a/dom20/DOM/32638_5526_20_DOM.tif
+ *
+ * Einrichten über das Dashboard: Worker öffnen → „Edit code" → diese Datei
+ * hineinkopieren → „Deploy". Die Adresse (…workers.dev) gehört danach in
+ * HOEHEN.proxy in hoehen.js. Kostenloser Plan: 100.000 Abfragen am Tag,
+ * darüber antwortet Cloudflare mit Fehler 1027 statt einer Rechnung.
+ *
+ * Lokal läuft derselbe Code mit:  node werkzeug/proxy/lokal.mjs
+ */
+
+const QUELLE = 'https://download1.bayernwolke.de/a';
+const ZIELE = {
+  dgm1: (e, n) => `${QUELLE}/dgm/dgm1/${e}_${n}.tif`,
+  dom20: (e, n) => `${QUELLE}/dom20/DOM/32${e}_${n}_20_DOM.tif`
+};
+const PFAD = /^\/(dgm1|dom20)\/(\d{3})_(\d{4})\.tif$/;
+const BEREICH = /^bytes=(\d+-\d*|-\d+)$/;
+
+const HERKUNFT = ['https://steidlmichael2000-stack.github.io'];
+const LOKAL = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+const DURCHREICHEN = ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges', 'ETag', 'Last-Modified'];
+
+export default {
+  async fetch(request) {
+    /* Fremde Seiten bekommen nichts. Ohne Origin — im Adressfeld geöffnet oder
+     * von der Kommandozeile — kommt die Datei trotzdem: Sie ist ohnehin
+     * öffentlich, und so lässt sich der Worker von Hand prüfen. */
+    const herkunft = request.headers.get('Origin');
+    if (herkunft && !HERKUNFT.includes(herkunft) && !LOKAL.test(herkunft)) {
+      return new Response('Herkunft nicht freigegeben', { status: 403 });
+    }
+    const cors = herkunft ? {
+      'Access-Control-Allow-Origin': herkunft,
+      // Content-Range braucht die App, um Teilantworten zu erkennen
+      'Access-Control-Expose-Headers': 'Content-Length, Content-Range, ETag',
+      'Vary': 'Origin'
+    } : {};
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, HEAD',
+          'Access-Control-Allow-Headers': 'Range', 'Access-Control-Max-Age': '86400' }
+      });
+    }
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return new Response(null, { status: 405, headers: { ...cors, Allow: 'GET, HEAD, OPTIONS' } });
+    }
+
+    const treffer = PFAD.exec(new URL(request.url).pathname);
+    if (!treffer) return new Response('Unbekannter Pfad', { status: 404, headers: cors });
+
+    const kopf = new Headers();
+    const bereich = request.headers.get('Range');
+    if (bereich) {
+      if (!BEREICH.test(bereich)) return new Response(null, { status: 416, headers: cors });
+      kopf.set('Range', bereich);
+    }
+
+    /* Teilabfragen am Zwischenspeicher von Cloudflare vorbei: Bei einem
+     * Fehltreffer holt Cloudflare sonst erst die ganze Datei — beim DOM20 bis
+     * 64 MB — und liefert den Bereich danach. Am 10.10.2026 gemessen: erster
+     * Bereich aus einer neuen Kachel 4,8 s über den Worker, 0,19 s direkt vom
+     * Server. Ganze DGM-Kacheln dürfen in den Zwischenspeicher. */
+    const quelle = await fetch(ZIELE[treffer[1]](treffer[2], treffer[3]),
+      bereich ? { method: request.method, headers: kopf, cache: 'no-store' } : { method: request.method, headers: kopf });
+    const antwort = new Headers(cors);
+    for (const k of DURCHREICHEN) {
+      const wert = quelle.headers.get(k);
+      if (wert) antwort.set(k, wert);
+    }
+    /* Eine Kachel ändert sich nur mit einer neuen Befliegung oder Auswertung.
+     * Fehlt sie (außerhalb Bayerns), bleibt die Fehlerseite des Servers
+     * draußen — die App braucht nur den Status. */
+    if (!quelle.ok) {
+      antwort.delete('Content-Type');
+      antwort.delete('Content-Length');
+      return new Response(null, { status: quelle.status, headers: antwort });
+    }
+    antwort.set('Cache-Control', 'public, max-age=604800');
+    return new Response(request.method === 'HEAD' ? null : quelle.body, { status: quelle.status, headers: antwort });
+  }
+};

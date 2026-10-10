@@ -61,10 +61,17 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   der Ortungsgenauigkeit als Zahl) und der Abstand zum letzten Messpunkt. Nur zum Verfolgen
   bleibt die Zeile weg — auch bei geladenen KML-Dateien: Das Ansteuern eines Punkts läuft über
   das Abstecken, in dem man ihn auswählt.
-- **Messen** — Punkte auf der Karte antippen, die Luftlinie steht als Maßzahl an jedem Abschnitt
-  und als Summe in der Leiste. Liegen Anfang und Ende auf der geladenen Strecke, steht die
-  Differenz **nach Kilometrierung** daneben; die Abweichung zwischen beiden Zahlen zeigt gleich,
-  wie stark es dort krümmt oder wie widersprüchlich die Steine stehen.
+- **Querprofil** — zwei oder mehr Punkte antippen, unten steht der Geländeschnitt aus dem amtlichen
+  DGM1 (1 m Gitter); auf Knopfdruck kommt die Oberfläche mit Gebäuden und Bewuchs aus dem DOM20 als
+  gestrichelte Linie dazu. Ein Finger auf dem Diagramm zeigt die Stelle auf der Karte. Nur in Bayern
+  (siehe unten).
+- **Polygon aus Punkten** — Punkte auf der Karte antippen, die Luftlinie steht als Maßzahl an jedem
+  Abschnitt und als Summe in der Leiste; ein Tipp auf den ersten Punkt schließt die Fläche, dann
+  stehen Fläche und Umfang da. Liegen Anfang und Ende auf der geladenen Strecke, steht die Differenz
+  **nach Kilometrierung** daneben; die Abweichung zwischen beiden Zahlen zeigt gleich, wie stark es
+  dort krümmt oder wie widersprüchlich die Steine stehen.
+- **Live messen** — ein Startpunkt, und die Entfernung zum Fadenkreuz läuft beim Schieben der Karte
+  mit; bei laufender Ortung steht oben die zum eigenen Standort.
 - **Hintergrund verblassen** — Karte oder Luftbild stufenlos bis auf null, dann bleibt nur der
   Bahn- bzw. WMS-Layer stehen; darunter liegt Weiß, damit schwarze Strichzeichnungen auch im
   Dunkelmodus lesbar bleiben.
@@ -131,24 +138,41 @@ seit der lange Druck einen Punkt setzt: Der Griff ist dann bewusst, und die Spre
 was damit geschehen soll. Kilometersteine und KML-Objekte bleiben antippbar — die trifft man
 nicht zufällig. Die Anzeige unten lässt sich über ihr eigenes **×** wegdrücken.
 
-Der Knopf mit dem Lineal darüber schaltet das **Messen** ein. Solange es läuft, setzt jeder Tipp
-einen Messpunkt statt einen Kilometer abzulesen. **Kilometersteine und Objekte aus geladenen
-KML-Dateien werden dabei gefangen** — bei einem KML-Punkt auf seine genaue Koordinate, bei einer
-Linie oder Fläche auf den nächstgelegenen Stützpunkt; die Sprechblase mit den Merkmalen bleibt
-solange weg. Gerechnet wird ohne Netzabfrage im Browser; die Länge entlang des Gleises bleibt der
-Feinrechnung in der Richtung km → Position vorbehalten.
+Der Knopf mit dem Lineal darüber öffnet ein kleines Menü mit drei getrennten Abläufen: **Profil**
+(siehe *Querprofil* weiter unten), **Polygon aus Punkten** und **Live**. Läuft einer davon, beendet
+ein Tipp auf den Knopf ihn wieder. Bis Oktober 2026 war das ein einziger Modus, der alles zugleich
+anbot — fünf Knöpfe, eine Linie zur Bildmitte, die immer mitlief, und keine Fläche; die Aufteilung
+macht jeden Ablauf schlank und seine Leiste klein.
 
-**Live gemessen wird zur Bildmitte.** Sobald ein Punkt steht, läuft eine gestrichelte Linie vom
-letzten Punkt zum Fadenkreuz in der Bildmitte, und die Entfernung steht direkt daneben — beim
-Schieben der Karte läuft sie mit, in jedem Bild. So bekommt man eine Entfernung sofort, ohne erst
-einen zweiten Punkt zu setzen; **Mitte** friert sie als Abschnitt ein. Die Zahl steht am Fadenkreuz
-und damit immer an derselben Stelle des Bildschirms, ruhig zu lesen, während sich die Karte bewegt.
-Für „genau 20 m von diesem Punkt" schiebt man also, bis 20 m dasteht.
+In allen dreien setzt jeder Tipp einen Punkt, statt einen Kilometer abzulesen. **Kilometersteine
+und Objekte aus geladenen KML-Dateien werden dabei gefangen** — bei einem KML-Punkt auf seine genaue
+Koordinate, bei einer Linie oder Fläche auf den nächstgelegenen Stützpunkt; die Sprechblase mit den
+Merkmalen bleibt solange weg. Gerechnet wird ohne Netzabfrage im Browser, und zwar auf dem
+Ellipsoid: Die Kugel, mit der die App sonst rechnet, liegt in Ost-West-Richtung um 0,31 % zu kurz —
+31 cm auf 100 m, nachgerechnet bei Bamberg (Nord-Süd 0,03 %). Unter 100 m stehen die Längen auf den
+Dezimeter. Die Länge entlang des Gleises bleibt der Feinrechnung in der Richtung km → Position
+vorbehalten.
 
-Der Finger trifft keine 20 cm — deshalb diese beiden Wege statt des Antippens: **Mitte** setzt auf
-das Fadenkreuz, **Standort** übernimmt die eigene Position. Läuft die Standortverfolgung, steht der
-Abstand vom letzten Messpunkt zum eigenen Standort außerdem in der Zeile oben; im Gelände ist
-„genau 20 m" damit eine Laufaufgabe: hingehen, bis die Zahl stimmt.
+**Polygon aus Punkten.** Die Maßzahl steht an jedem Abschnitt, die Summe in der Leiste. Ab drei
+Punkten liegt ein gestrichelter Ring um den ersten — ein Tipp darauf (bis 24 Bildpunkte daneben)
+schließt die Fläche. Dann steht die Fläche groß in der Leiste und in der Mitte des Polygons, dazu der
+Umfang. Gerechnet wird mit der Gaußschen Trapezformel in UTM, geteilt durch das Quadrat des
+UTM-Maßstabs — die Abbildung vergrößert in Bayern um bis zu 0,12 %, Flächen also um bis zu 0,24 %.
+Eine unabhängige Gegenprobe über die Krümmungsradien ergab für ein Viereck von 5.492 m² dasselbe auf
+den Hundertstel-Quadratmeter. Kreuzt sich der Umring, steht statt einer Zahl die Warnung: Eine
+Fläche ergibt eine Acht nicht. **Zurück** öffnet eine geschlossene Fläche wieder, sonst nimmt es den
+letzten Punkt.
+
+**Live.** Ein Tipp setzt den Startpunkt, jeder weitere setzt ihn neu. Vom Start läuft eine
+gestrichelte Linie zum Fadenkreuz in der Bildmitte, die Entfernung steht direkt daneben — beim
+Schieben der Karte läuft sie mit, in jedem Bild, und steht immer an derselben Stelle des
+Bildschirms, ruhig zu lesen. Für „genau 20 m von diesem Punkt" schiebt man also, bis 20,0 m dasteht.
+
+Der Finger trifft keine 20 cm — deshalb in beiden Abläufen diese Wege statt des Antippens:
+**Mitte** setzt auf das Fadenkreuz, **Standort** übernimmt die eigene Position. Läuft die
+Standortverfolgung, steht der Abstand vom eigenen Standort zum Start (Live) bzw. zum letzten Punkt
+(Polygon) außerdem in der Zeile oben; im Gelände ist „genau 20 m" damit eine Laufaufgabe: hingehen,
+bis die Zahl stimmt.
 
 Gefangen wird nur, was auch in Metern nah liegt (bis 20 m). Der Umkreis von 26 Bildpunkten allein
 genügte nicht: Auf Zoomstufe 15 sind das rund 125 m, und bei einer dichten Punktdatei wäre so jeder
@@ -683,6 +707,82 @@ um: Grauwert 0 wird die gewählte Farbe, Weiß bleibt Weiß, der Alphakanal blei
 Farbwechsel färbt die geladenen Kacheln ohne neue Abfrage um. Das geht nur, weil der Dienst CORS
 freigibt — ohne wäre die Kachel für das Auslesen gesperrt.
 
+## Querprofil
+
+Im Außendienst schnell sehen, wie das Gelände zwischen zwei Punkten verläuft — keine
+Planungsgenauigkeit, eine Übersicht. Messknopf → *Profil*, dann Punkte antippen. Gefangen wird wie
+beim Messen (Kilometersteine, KML-Punkte bis 20 m); Fadenkreuz, *Mitte* und *Standort* gibt es im
+Profil nicht — für eine Geländeübersicht reicht der Finger, und die Leiste bleibt frei fürs Diagramm.
+Ab zwei Punkten lädt das Profil von selbst; weitere Punkte
+verlängern den Linienzug, die Ecken stehen dann als Marken im Diagramm. Oben stehen Länge und
+Höhendifferenz, an der Achse die Spanne.
+
+**Überhöhung.** Gezeichnet wird zunächst **unüberhöht** — so, wie das Gelände tatsächlich
+verläuft. Ein Tipp auf die Angabe rechts in der Legende schaltet weiter: 2×, 5×, 10×, wieder
+unüberhöht; die Wahl bleibt gespeichert. Die Bildhöhe richtet sich nach dem Gelände: Flaches Gelände
+unüberhöht gibt ein flaches Bild und eine kleinere Leiste. Wäre das Bild höher als 160 px — steiles
+Gelände oder starke Überhöhung —, wird gestaucht, und die Angabe steht dann in der Signalfarbe mit dem
+tatsächlichen Faktor. Anfangs passte sich die Höhenachse immer dem Schnitt an; zwei Meter auf 300 m
+sahen dann wie ein Berg aus.
+
+**Oberfläche DOM20** ist der Legendeneintrag und zugleich der Schalter. Er nennt vorher die
+Datenmenge; danach kommt die Oberfläche gestrichelt dazu und bei den Kennwerten die größte
+Objekthöhe (DOM − DGM) mit Station.
+
+### Woher die Höhen kommen
+
+DGM1 und DOM20 der Bayerischen Vermessungsverwaltung, OpenData unter CC BY 4.0, als GeoTIFF-Kacheln
+von 1 km × 1 km. Am 10.10.2026 nachgemessen:
+
+| | DGM1 | DOM20 |
+| --- | --- | --- |
+| Adresse | `download1.bayernwolke.de/a/dgm/dgm1/636_5528.tif` | `…/a/dom20/DOM/32638_5526_20_DOM.tif` |
+| Raster | 1000 × 1000, Float32, LZW | 5000 × 5000, Float32, LZW |
+| Aufbau | Streifen zu je 2 Zeilen, kein COG | intern 256 × 256 Pixel gekachelt |
+| Größe je Kachel | 1,5–3,9 MB (Median 2,1 flach, 3,5 Alpen) | 13–64 MB (Median 42 bzw. 55) |
+
+Vom DGM holt die App deshalb die ganze Kachel — eine schräge Linie braucht ohnehin fast alle
+Streifen —, vom DOM per Range-Abfrage nur die Blöcke entlang der Linie: rund 100 kB je 51 × 51 m,
+auf 300 m gemessen 0,6 MB statt 40 MB. Gelesen wird ohne Fremdbibliothek (`hoehen.js`: TIFF-Kopf,
+LZW, UTM-Umrechnung nach Krüger), bilinear zwischen den Rasterwerten.
+
+**Geländekacheln bleiben auf dem Gerät** (IndexedDB, höchstens 40, die am längsten unbenutzten
+gehen zuerst): Ein zweites Profil in derselben Gegend kommt nach einem Neustart in rund 60 ms und
+ohne Netz. Berührt eine Linie mehr als vier Kacheln, fragt die Leiste vorher — mit Kachelzahl und
+Datenmenge.
+
+### Warum über einen eigenen Worker
+
+Der Server der Vermessungsverwaltung gibt kein CORS frei: Der Browser lädt die Kacheln, reicht die
+Bytes aber nicht an die App weiter. Der WMS liefert nur gerenderte Bilder, und der Höhendienst der
+BVV (REST, bis 3000 Punkte je Anfrage) lässt im Browser nur die eigenen Portale und `localhost` zu.
+Die App holt die Kacheln deshalb über einen kleinen Cloudflare Worker
+(`werkzeug/proxy/worker.js`), der genau zwei Pfade durchreicht und nur dieser App die Freigabe
+gibt — kein offener Proxy. Den Höhendienst reicht er absichtlich nicht durch: Wem er sich im Browser
+öffnet, entscheidet der Betreiber.
+
+Gemessen über den Worker, 300 m bei Bamberg: Gelände 0,4–1 s beim ersten Mal, Oberfläche 0,3 s.
+Teilabfragen gehen dabei am Zwischenspeicher von Cloudflare vorbei — sonst holte Cloudflare beim
+ersten Bereich erst die ganze DOM-Kachel, und der erste Abruf dauerte 4,8 s statt 0,19 s.
+
+### Nachgeprüft
+
+`node werkzeug/hoehen-pruefen.mjs` vergleicht den Leser mit unabhängigen Quellen:
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| UTM gegen proj4 2.6.2, 8 Punkte über Bayern | höchstens 0,05 mm |
+| DGM1 gegen die XYZ-Fassung derselben Kachel, je 4000 Werte | Bamberg exakt, Berchtesgaden 0,5 cm (Rundung der XYZ-Datei) |
+| DGM1 gegen den Höhendienst, je 400 Stellen | 400 von 400 — mit ½ m Versatz, siehe unten |
+| DOM − DGM auf 300 m | 5-%-Wert +0,06 m, Lage und Höhenbezug passen |
+
+**Der Höhendienst liegt einen halben Meter versetzt.** GeoTIFF und XYZ setzen den ersten Wert der
+Kachel 636_5528 auf 636000,50 / 5528999,50, also in die Pixelmitte; der Dienst ordnet ihn der Ecke
+zu. Am Hang macht das bis 1,7 m aus. Die App hält sich an GeoTIFF und XYZ.
+
+**Die DGM1-Dateien sind nicht einheitlich gebaut:** Bei 636_5528 beginnt das TIFF-Verzeichnis bei
+Byte 8, bei 778_5292 erst kurz vor dem Dateiende. Der Leser sucht es dort, wo es steht.
+
 ## Regenradar
 
 Unter *Karte → Regenradar* liegt das Niederschlagsradar des Deutschen Wetterdienstes über der
@@ -1059,6 +1159,9 @@ Bahn-Layer von
 [OpenRailwayMap](https://www.openrailwaymap.org/) (CC-BY-SA 2.0), Luftbilder von Esri,
 dunkle Karte, Straßen und Ortsnamen von [OpenFreeMap](https://openfreemap.org/) (© OpenMapTiles,
 Daten © OpenStreetMap). Regenradar: Quelle [Deutscher Wetterdienst](https://www.dwd.de/).
+DOP20, Geländerelief, Parzellarkarte und die Höhen im Querprofil (DGM1, DOM20): Bayerische
+Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de/) (CC BY 4.0); das
+Profil ist daraus berechnet.
 Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause),
 [leaflet-rotate](https://github.com/Raruto/leaflet-rotate) (GPL-3.0) und
 [MapLibre GL JS](https://maplibre.org/) 6.10.0 (BSD-3-Clause, `vendor/maplibre/`) bei, damit die

@@ -1,0 +1,8 @@
+// Nur für „npx wrangler deploy" aus diesem Ordner. Wer den Worker über das
+// Dashboard einfügt, braucht diese Datei nicht.
+{
+  "name": "trackpilot-hoehen",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true
+}

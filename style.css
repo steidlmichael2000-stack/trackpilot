@@ -24,6 +24,11 @@
   --r: 2px;
   --bh: 6px;              /* Grundlinie der Knöpfe rechts, von JS gesetzt (updateBH) */
   --gap: 10px;
+  /* Rechte Kante der Bedienspalte (Leisten bis 640 px, mittig). Die runden Knöpfe
+     und das Messmenü stehen an ihr und nicht am Fensterrand: Auf großen
+     Bildschirmen hingen sie sonst weit draußen, abgelöst von Leiste und
+     ©-Kasten. Auf dem Handy fallen beide Kanten zusammen. */
+  --saeule: max(var(--gap), calc((100vw - 640px) / 2));
 }
 
 html[data-theme="light"] {
@@ -185,7 +190,7 @@ body {
    Links unten bleibt allein der Kasten mit © und Maßstab. */
 .north {
   position: fixed;
-  right: var(--gap);
+  right: var(--saeule);
   bottom: calc(var(--bh) + 96px + env(safe-area-inset-bottom));
   z-index: 450;
   width: 42px; height: 42px;
@@ -206,7 +211,7 @@ body {
   position: fixed;
   /* Unterkante auf der Grundlinie des Kastens unten links, bei offener Leiste
      8 px darüber (--bh aus updateBH) */
-  right: var(--gap);
+  right: var(--saeule);
   bottom: calc(var(--bh) + env(safe-area-inset-bottom));
   z-index: 450;
   width: 42px; height: 42px;
@@ -226,7 +231,7 @@ body {
 /* Messen — über dem Knopf für das Ablesen */
 .mapmess {
   position: fixed;
-  right: var(--gap);
+  right: var(--saeule);
   bottom: calc(var(--bh) + 48px + env(safe-area-inset-bottom));      /* 42 px Knopf + 6 Luft */
   z-index: 450;
   width: 42px; height: 42px;
@@ -238,14 +243,37 @@ body {
   cursor: pointer;
 }
 .mapmess svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
-.mapmess.is-on { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.mapmess.is-on, .mapmess[aria-expanded="true"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+
+/* Messmenü — links neben dem Messknopf, Unterkante auf dessen Unterkante */
+.mess-menue {
+  position: fixed;
+  right: calc(var(--saeule) + 48px);
+  bottom: calc(var(--bh) + 48px + env(safe-area-inset-bottom));
+  z-index: 460;
+  width: min(250px, calc(100vw - 2 * var(--gap) - 48px));
+  background: var(--glass); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+.mess-menue button {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 10px 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0;
+  background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.mess-menue button:first-child { border-top: 0; }
+.mess-menue button:active { background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.mess-menue svg { flex: none; width: 20px; height: 20px; fill: none; stroke: var(--warn); stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.mess-menue svg .voll { fill: var(--warn); stroke: none; }
+.mess-menue b { display: block; font-size: .9rem; font-weight: 650; }
+.mess-menue small { display: block; font-size: .74rem; color: var(--muted); }
 
 /* Abstecken — über dem Messen. Nur da, wenn eine sichtbare KML-Datei Punkte
    hat; dann rückt der Nordknopf eine Stufe höher. Der Knopf steht im Quelltext
    vor dem Nordknopf, sonst griffe der Geschwisterwähler nicht. */
 .mapziel {
   position: fixed;
-  right: var(--gap);
+  right: var(--saeule);
   bottom: calc(var(--bh) + 96px + env(safe-area-inset-bottom));
   z-index: 450;
   width: 42px; height: 42px;
@@ -868,6 +896,12 @@ body {
   font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums;
 }
 
+/* Fläche eines geschlossenen Polygons, in seiner Mitte */
+.mess-lbl.mess-flaeche { font-size: .86rem; transform: translate(-50%, -50%); }
+
+/* Große Zahl beim Messen; im Live sagt der Zusatz, wohin gemessen wird */
+.mess-zahl small { font-size: .74rem; font-weight: 500; color: var(--muted); }
+
 /* Die laufende Zahl zum Standort steht schwächer als die festen Abschnitte */
 .mess-lbl.mess-live { opacity: .85; font-weight: 600; }
 
@@ -1066,6 +1100,64 @@ body {
 .bb-chip.is-on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
 
 .bb-actions button:disabled { color: var(--muted-2); cursor: default; }
+
+/* ---------- Querprofil ---------- */
+
+.prof-zahlen {
+  display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 8px 0 0;
+  font-size: .9rem; font-variant-numeric: tabular-nums;
+}
+.prof-zahlen b { font-weight: 650; }
+.prof-zahlen span { color: var(--muted); }
+
+/* Wischen im Diagramm führt den Zeiger, statt die Seite zu verschieben */
+.prof-bild { margin-top: 6px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.prof-bild svg { display: block; overflow: visible; font-size: 11px; font-variant-numeric: tabular-nums; cursor: crosshair; }
+.prof-bild .gitter { fill: none; stroke: var(--line); }
+.prof-bild .ecken { fill: none; stroke: var(--muted); stroke-dasharray: 2 3; }
+.prof-bild .flaeche { fill: color-mix(in srgb, var(--warn) 14%, transparent); }
+.prof-bild .dgm { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; }
+.prof-bild .dom { fill: none; stroke: var(--text); stroke-width: 1.1; stroke-dasharray: 3 2.5; opacity: .75; }
+.prof-bild .beschr text { fill: var(--muted); }
+.prof-bild .beschr .ecke { fill: var(--warn); font-weight: 650; }
+.prof-bild .zeiger path { stroke: var(--text); stroke-width: 1; }
+.prof-bild .zeiger circle { fill: var(--warn); stroke: var(--bg); stroke-width: 1.5; }
+/* Freistellung wie bei den Beschriftungen auf der Karte, damit die Zahl über
+   den Gitterlinien lesbar bleibt */
+.prof-bild .zeiger text { fill: var(--text); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+
+.prof-legende {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 4px;
+  font-size: .74rem; color: var(--muted);
+}
+.prof-leg-dgm::before {
+  content: ""; display: inline-block; width: 14px; height: 2px; margin-right: 6px;
+  vertical-align: middle; background: var(--warn);
+}
+/* Der Legendeneintrag der Oberfläche ist zugleich ihr Schalter */
+.prof-dom {
+  padding: 3px 8px; border: 1px solid var(--line); border-radius: 2px;
+  background: var(--panel-2); color: var(--text); font: inherit; font-size: .74rem; cursor: pointer;
+}
+.prof-dom::before {
+  content: ""; display: inline-block; width: 14px; margin-right: 6px;
+  vertical-align: middle; border-top: 2px dashed var(--muted);
+}
+.prof-dom small { margin-left: 6px; font-size: .7rem; color: var(--muted); }
+.prof-dom.is-on { border-color: var(--accent); }
+/* Überhöhung: Angabe und Schalter in einem */
+.prof-ueber {
+  margin-left: auto; padding: 3px 7px;
+  border: 1px solid var(--line); border-radius: 2px; background: var(--panel-2);
+  color: var(--text); font: inherit; font-size: .74rem; font-variant-numeric: tabular-nums;
+  white-space: nowrap; cursor: pointer;
+}
+.prof-ueber.gestaucht { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.prof-quelle { margin: 7px 0 0; font-size: .68rem; line-height: 1.45; color: var(--muted-2); }
+.prof-quelle a { color: inherit; }
+/* Im Profil braucht das Diagramm den Platz: flachere Knöpfe als in der Ergebnisleiste */
+.bb-actions.knapp { margin-top: 9px; }
+.bb-actions.knapp button { padding: 9px 6px; }
 
 /* ---------- Abstecken ---------- */
 
