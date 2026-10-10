@@ -150,3 +150,10 @@ Messwerte stehen in der README, hier nur, was beim Weiterbauen nicht übersehen 
 
 `VERSION` in `sw.js` hochzählen. Der Worker arbeitet zwar „erst Netz, dann
 Cache", aber die Kachel- und Netzdaten-Caches hängen an der Version.
+
+Seit v38 installiert der Worker nur, wenn **jede** Datei aus `SHELL_FILES` geladen
+werden kann (sonst bleibt der alte im Dienst). Steht dort eine Datei, die es nicht
+gibt, kommt nie wieder ein Update an — beim Ändern der Liste jede Datei prüfen.
+
+Vorher `node --test tests/robustheit.test.mjs` (Service Worker, WMS, KMZ; von
+Codex übernommen) und nach Änderungen an `hoehen.js` `node werkzeug/hoehen-pruefen.mjs`.

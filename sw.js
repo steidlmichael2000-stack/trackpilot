@@ -5,7 +5,7 @@
  * neue Version sofort ankommt statt hinter einem alten Cache zu hängen.
  */
 
-const VERSION = 'v37';
+const VERSION = 'v38';
 const SHELL = `trackpilot-shell-${VERSION}`;
 const TILES = `trackpilot-tiles-${VERSION}`;
 const DATA = `trackpilot-data-${VERSION}`;
@@ -38,8 +38,12 @@ const MAX_NETZ = 500;
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL);
-    // Einzeln ablegen: eine fehlende Datei soll nicht die ganze Installation kippen
-    await Promise.allSettled(SHELL_FILES.map(f => cache.add(f)));
+    /* Nur eine vollständige App aktivieren: Fehlt ein Kernbestandteil, scheitert
+     * die Installation, und der bisherige Worker bleibt samt seiner Offline-
+     * Fassung im Dienst. Vorher wurde einzeln abgelegt — dann konnte eine neue
+     * Fassung mit Lücken übernehmen. Wer SHELL_FILES ändert, prüft, dass jede
+     * Datei existiert; sonst käme nie wieder ein Update an. */
+    await cache.addAll(SHELL_FILES.map(f => new Request(f, { cache: 'reload' })));
     self.skipWaiting();
   })());
 });
@@ -63,65 +67,94 @@ async function trim(cacheName, max) {
 
 const MAX_DATA = 300;
 
+/* Bis zur Antwort des Servers höchstens so lange warten, dann gilt der Abruf als
+ * gescheitert und der Offlinevorrat springt ein. Im Gelände mit einem Balken
+ * Empfang hinge die App sonst minutenlang auf einer Antwort, die nie kommt.
+ * Gemessen wird bis zu den Antwortköpfen, nicht der ganze Download. */
+const NETZ_GEDULD_MS = 6000;
+
+/* Cache Storage ist nur ein Vorrat: Volle Quote (alle Apps dieser Herkunft
+ * teilen sie sich), privates Fenster oder eine Teilantwort dürfen eine
+ * erfolgreiche Netzantwort nie in einen Ladefehler verwandeln. Vorher stand das
+ * Ablegen im selben try wie der Abruf — scheiterte es, war auch die frisch
+ * geladene Datei weg. */
+async function cacheLesen(cacheName, request) {
+  try { return await (await caches.open(cacheName)).match(request); }
+  catch { return undefined; }
+}
+
+async function cacheSchreiben(cacheName, request, response, max) {
+  /* Nur echte, vollständige Treffer ablegen. Undurchsichtige Antworten (opaque)
+   * haben ok = false und bleiben draußen: Sie können eine 429- oder 5xx-Seite
+   * sein, und Chrome rechnet jede mit mehreren MB auf den gemeinsamen Speicher an. */
+  if (!response || !response.ok || response.status === 206) return;
+  try {
+    const cache = await caches.open(cacheName);
+    await cache.put(request, response.clone());
+    if (max) await trim(cacheName, max);
+  } catch { /* Die Netzantwort bleibt auch bei vollem Speicher nutzbar. */ }
+}
+
 async function networkFirst(request, cacheName, frisch, max) {
-  const cache = await caches.open(cacheName);
+  let res, fehler;
+  const abbruch = new AbortController();
+  const wecker = setTimeout(() => abbruch.abort(), NETZ_GEDULD_MS);
   try {
     /* Eigene Dateien bewusst ohne HTTP-Cache holen. GitHub Pages setzt
      * Cache-Control max-age=600, dadurch kam eine neue Fassung auf dem Gerät bis
      * zu zehn Minuten später an — beim Entfernen der Zoomknöpfe fiel genau das
-     * auf. Der Cache hier bleibt davon unberührt und dient weiter als
-     * Offlinevorrat. */
-    const res = frisch && request.method === 'GET'
-      ? await fetch(request.url, { cache: 'reload', credentials: 'same-origin' })
-      : await fetch(request);
-    if (res && res.ok) {
-      await cache.put(request, res.clone());
-      if (max) trim(cacheName, max);
-    }
-    return res;
+     * auf. Über die nackte Adresse, nicht über das Request-Objekt: Das einer
+     * Seitennavigation lässt sich nicht mit neuen Optionen weiterreichen. */
+    res = frisch
+      ? await fetch(request.url, { cache: 'reload', credentials: 'same-origin', signal: abbruch.signal })
+      : await fetch(request, { signal: abbruch.signal });
   } catch (err) {
-    const hit = await cache.match(request);
+    fehler = err;
+  } finally {
+    clearTimeout(wecker);
+  }
+
+  if (res && res.ok) {
+    await cacheSchreiben(cacheName, request, res, max);
+    return res;
+  }
+  /* Ohne Antwort oder bei einem Serverfehler (5xx) hilft der Vorrat. Ein 404
+   * dagegen ist eine Auskunft und bleibt sichtbar. */
+  if (!res || res.status >= 500) {
+    const hit = await cacheLesen(cacheName, request);
     if (hit) return hit;
     if (request.mode === 'navigate') {
-      const shell = await caches.open(SHELL);
-      const page = await shell.match('index.html') || await shell.match('./');
+      const page = await cacheLesen(SHELL, 'index.html') || await cacheLesen(SHELL, './');
       if (page) return page;
     }
-    throw err;
   }
+  if (res) return res;
+  throw fehler;
 }
 
 async function cacheFirst(request, cacheName, max) {
-  try {
-    const cache = await caches.open(cacheName);
-    const hit = await cache.match(request);
-    if (hit) return hit;
-    const res = await fetch(request);
-    /* Nur echte Treffer ablegen. Die Kachel-Layer laden per CORS, der Status ist
-     * also lesbar. Undurchsichtige Antworten (opaque) bleiben draußen: Sie können
-     * eine 429- oder 5xx-Seite sein, und Chrome rechnet jede mit mehreren MB auf
-     * den Speicher an, den sich alle Apps dieser Herkunft teilen. */
-    if (res && res.ok) {
-      cache.put(request, res.clone());
-      trim(cacheName, max);
-    }
-    return res;
-  } catch (err) {
-    /* Scheitert irgendein Schritt des Zwischenspeichers, darf das die Kachel
-     * nicht kosten: dann eben unverändert durchreichen. */
-    return fetch(request);
-  }
+  const hit = await cacheLesen(cacheName, request);
+  if (hit) return hit;
+  // Scheitert das Ablegen, kostet das die Kachel nicht — und keinen zweiten Abruf
+  const res = await fetch(request);
+  await cacheSchreiben(cacheName, request, res, max);
+  return res;
 }
 
 self.addEventListener('fetch', event => {
   const request = event.request;
-  if (request.method !== 'GET') return;
+  /* Teilabfragen und angemeldete Abrufe gehen am Worker vorbei: Eine 206-Antwort
+   * gehört nicht in den Vorrat, und Zugangsdaten auch nicht. */
+  if (request.method !== 'GET' || request.headers.has('range') || request.headers.has('authorization')) return;
 
   let url;
   try { url = new URL(request.url); } catch { return; }
   if (!/^https?:$/.test(url.protocol)) return;
 
   if (url.origin === self.location.origin) {
+    /* Die Nachbar-Apps teilen die Herkunft, nicht diesen Vorrat: Was außerhalb
+     * von /trackpilot/ liegt, reicht der Worker unverändert durch. */
+    if (!url.pathname.startsWith(new URL(self.registration.scope).pathname)) return;
     event.respondWith(url.pathname.includes('/netz/')
       ? cacheFirst(request, NETZ, MAX_NETZ)
       : networkFirst(request, SHELL, true));

@@ -2581,9 +2581,23 @@ let wmsLayer = null;
 let wmsFehler = 0;
 
 /* Nur https: Ein http-Dienst scheitert auf der https-Seite ohnehin (Mixed Content),
- * und ein "javascript:"-Wert darf nie in window.open oder fetch landen. */
+ * und ein "javascript:"-Wert darf nie in window.open oder fetch landen. Zugangsdaten
+ * in der Adresse (https://name:kennwort@…) werden abgewiesen und gar nicht erst
+ * gespeichert (wmsSave): Alle Apps dieser Herkunft teilen sich den lokalen
+ * Speicher, und fürs Anmelden gibt es den Knopf — dort merkt sie sich der Browser. */
 function wmsUrlOk(u) {
-  try { return new URL(u).protocol === 'https:'; } catch { return false; }
+  return !wmsUrlFehler(u);
+}
+
+/** Was an der Adresse nicht stimmt, als Satz für die Meldung; leer, wenn alles passt. */
+function wmsUrlFehler(u) {
+  let url;
+  try { url = new URL(u); } catch { return 'Die Adresse ist ungültig.'; }
+  if (url.protocol !== 'https:') return 'Nur https-Adressen sind möglich.';
+  if (url.username || url.password) {
+    return 'Zugangsdaten gehören nicht in die Adresse — bitte über „Anmelden" eingeben, dann merkt sie sich der Browser.';
+  }
+  return '';
 }
 
 function wmsBuild() {
@@ -2617,7 +2631,11 @@ function wmsApply(sichtbar) {
   prefs.wms.on = !!sichtbar;
   if (sichtbar) {
     wmsLayer = wmsBuild();
-    if (!wmsLayer) { prefs.wms.on = false; toast('Bitte Adresse und Layer-Namen eintragen.'); }
+    if (!wmsLayer) {
+      prefs.wms.on = false;
+      const url = (prefs.wms.url || '').trim();
+      toast(url && wmsUrlFehler(url) ? wmsUrlFehler(url) : 'Bitte Adresse und Layer-Namen eintragen.');
+    }
     else wmsLayer.addTo(map);
   }
   // Dieselbe Reihenfolge wie überall: WMS unten, Parzellen bis Ortsnamen darüber.
@@ -2695,7 +2713,7 @@ function wmsShowLayers(caps) {
 async function wmsLoadLayers() {
   const url = ($('#wmsUrl').value || '').trim();
   if (!url) { toast('Bitte zuerst die Adresse des Dienstes eintragen.'); return; }
-  if (!wmsUrlOk(url)) { toast('Nur https-Adressen sind möglich.'); return; }
+  if (!wmsUrlOk(url)) { toast(wmsUrlFehler(url)); return; }
   $('#wmsList').innerHTML = '<p class="fine">Frage den Dienst …</p>';
   const sep = url.includes('?') ? '&' : '?';
   try {
@@ -2714,7 +2732,7 @@ async function wmsLoadLayers() {
 function wmsLogin() {
   const url = (prefs.wms.url || '').trim();
   if (!url) { toast('Bitte zuerst die Adresse des Dienstes eintragen.'); return; }
-  if (!wmsUrlOk(url)) { toast('Nur https-Adressen sind möglich.'); return; }
+  if (!wmsUrlOk(url)) { toast(wmsUrlFehler(url)); return; }
   // GetCapabilities aufrufen: Der Browser fragt die Zugangsdaten ab und merkt sie
   // sich für die Domain. Nebenbei sieht man dort die verfügbaren Layer.
   const sep = url.includes('?') ? '&' : '?';
@@ -3513,7 +3531,12 @@ const KML_MAX_ENTPACKT = 300e6;
 /* Ein KMZ ist ein ZIP mit einer KML darin. Gelesen wird über das zentrale
  * Verzeichnis am Dateiende: Nur dort stehen die Größen verlässlich — bei
  * gestreamt geschriebenen ZIPs sind sie im lokalen Kopf null. Das Aufblasen
- * macht DecompressionStream, dafür braucht es keine Fremdbibliothek. */
+ * macht DecompressionStream, dafür braucht es keine Fremdbibliothek.
+ *
+ * Jeder Verweis wird geprüft, bevor er gelesen wird: Ein beschädigtes oder
+ * abgeschnittenes Archiv gibt so eine verständliche Meldung statt eines
+ * RangeError aus der Tiefe, und verschlüsselte Einträge werden ausdrücklich
+ * abgewiesen statt als Datensalat entpackt. */
 function kmzEintraege(buf) {
   const dv = new DataView(buf), u8 = new Uint8Array(buf);
   let eocd = -1;
@@ -3523,22 +3546,30 @@ function kmzEintraege(buf) {
   if (eocd < 0) throw new Error('kein lesbares KMZ');
 
   const anzahl = dv.getUint16(eocd + 10, true);
-  let p = dv.getUint32(eocd + 16, true);
+  const verzeichnis = dv.getUint32(eocd + 16, true);
+  let p = verzeichnis;
   const raus = [];
   for (let n = 0; n < anzahl && p + 46 <= u8.length && dv.getUint32(p, true) === 0x02014b50; n++) {
+    const flags = dv.getUint16(p + 8, true);
     const verfahren = dv.getUint16(p + 10, true);
     const gepackt = dv.getUint32(p + 20, true);
     const nameLen = dv.getUint16(p + 28, true);
     const extraLen = dv.getUint16(p + 30, true);
     const kommLen = dv.getUint16(p + 32, true);
     const lokal = dv.getUint32(p + 42, true);
+    if (p + 46 + nameLen + extraLen + kommLen > eocd || lokal + 30 > u8.length ||
+        dv.getUint32(lokal, true) !== 0x04034b50) throw new Error('beschädigtes KMZ-Verzeichnis');
+    if (flags & 1) throw new Error('verschlüsselte KMZ-Dateien werden nicht unterstützt');
     const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nameLen));
     // Der Datenbeginn steht erst im lokalen Kopf, dessen Zusatzfeld abweichen darf
     const lNameLen = dv.getUint16(lokal + 26, true), lExtraLen = dv.getUint16(lokal + 28, true);
     const start = lokal + 30 + lNameLen + lExtraLen;
+    // Die Daten müssen vor dem zentralen Verzeichnis enden
+    if (start + gepackt > verzeichnis) throw new Error('unvollständige KMZ-Datei');
     raus.push({ name, verfahren, daten: u8.subarray(start, start + gepackt) });
     p += 46 + nameLen + extraLen + kommLen;
   }
+  if (raus.length !== anzahl) throw new Error('unvollständiges KMZ-Verzeichnis');
   return raus;
 }
 
@@ -7559,7 +7590,10 @@ function openSheet() {
 /* Beim Schließen klappen alle Abschnitte wieder zu: Das Menü öffnet jedes Mal
  * als kurze Übersicht der Überschriften. */
 function closeSheet() {
+  // Lag der Tastaturfokus im Menü, geht er an den Menüknopf zurück statt ins Leere
+  const fokusZurueck = $('#sheet').contains(document.activeElement);
   $('#sheet').hidden = true;
+  if (fokusZurueck) $('#menuBtn').focus();
   document.querySelectorAll('#sheet [data-sec]').forEach(b => { b.open = false; });
   parzWahlZeigen(false);
   $('#menuBtn').classList.remove('is-on');
@@ -7680,6 +7714,10 @@ function syncButtons() {
     wt.classList.toggle('is-on', !!(prefs.wms && prefs.wms.on));
     wt.textContent = prefs.wms && prefs.wms.on ? 'Ausblenden' : 'Anzeigen';
   }
+
+  // Eingeschaltet oder nicht — für Screenreader steht das sonst nur in der Farbe
+  document.querySelectorAll('#sheet .seg-btn, #sheet .pal-btn').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.classList.contains('is-on'))));
 }
 
 function updateHash() {
@@ -7717,7 +7755,8 @@ async function share() {
       : 'TrackPilot';
   if (navigator.share) {
     try { await navigator.share({ title, text: title, url }); return; }
-    catch { /* abgebrochen — dann kopieren */ }
+    // Wer den Teilen-Dialog abbricht, will auch keinen kopierten Link
+    catch (err) { if (err.name === 'AbortError') return; }
   }
   toast(await copyText(url) ? 'Link kopiert' : 'Kopieren nicht möglich');
 }
@@ -7730,6 +7769,15 @@ function bind() {
    * Leere. Deshalb erst mousedown abfangen, dann suchen. */
   on('#qGo', 'mousedown', ev => ev.preventDefault());
   on('#qGo', 'click', search);
+
+  // Am Rechner springt „/" in die Suchzeile, wie bei vielen Kartendiensten
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== '/' || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if (ev.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    ev.preventDefault();
+    closeSheet();
+    $('#q').focus();
+  });
   on('#menuBtn', 'click', () => $('#sheet').hidden ? openSheet() : closeSheet());
 
   /* Die eine Zeile oben. Antippen klappt die Felder auf, Tippen zerlegt den
@@ -7905,7 +7953,14 @@ function bind() {
 
   const wmsSave = () => {
     const u = $('#wmsUrl'), l = $('#wmsLayers');
-    if (u) prefs.wms.url = u.value.trim();
+    if (u) {
+      // Mit Zugangsdaten wird nichts gespeichert; das Feld zeigt wieder die alte Adresse
+      const neu = u.value.trim();
+      let zugang = false;
+      try { const x = new URL(neu); zugang = !!(x.username || x.password); } catch { /* ungültig: wie bisher */ }
+      if (zugang) { toast(wmsUrlFehler(neu)); u.value = prefs.wms.url || ''; return; }
+      prefs.wms.url = neu;
+    }
     if (l) prefs.wms.layers = l.value.trim();
     saveStore();
     if (prefs.wms.on) wmsApply(true);      // mit neuen Angaben neu aufbauen
