@@ -2735,9 +2735,24 @@ function wmsLogin() {
  * 38 KB klein statt 875 KB für den ganzen Dienst. Gemessen lag sie 6 Minuten
  * hinter der Uhr.
  *
- * Bilder ab Zoomstufe 12 nur noch vergrößert: Die Daten haben 1 km Raster, eine
- * Kachel der Stufe 12 ist rund 6 km breit. Tiefer zu fragen kostete Abfragen und
- * brächte nichts als größere einfarbige Flächen.
+ * Geglättet vom Dienst selbst (INTERPOLATIONS=bilinear, ein GeoServer-Parameter):
+ * Er rechnet die Werte zwischen den 1-km-Zellen aus und färbt erst danach ein —
+ * statt Treppen aus Kästchen entstehen weiche Bänder wie in der DWD-App WarnWetter.
+ * Bis 10.10.2026 kamen die Zellen roh, das wirkte auf Ortsebene grob. Nicht
+ * bicubic: Das schwingt über und erfindet kleine Inseln, die nicht gemessen sind;
+ * bilinear bleibt zwischen den Nachbarwerten.
+ *
+ * Bilder in voller Schärfe bis Zoomstufe 14 (rund 6 m je Pixel), danach nur noch
+ * vergrößert — die geglätteten Kanten bleiben damit bis in die Ortsansicht
+ * scharf. Bei Stufe 12 (vorher) verschwammen sie beim Vergrößern.
+ *
+ * Kacheln mit 512 statt 256 px, bei gleicher Auflösung je Pixel: Der Dienst
+ * spricht nur HTTP/1.1, der Browser stellt also höchstens 6 Abfragen zugleich,
+ * und ein Bild ist erst fertig, wenn die langsamste Kachel da ist. Gemessen am
+ * 10.10.2026 auf dem Handyausschnitt: 6 statt 15 Abfragen, beim Abspielen im
+ * Mittel 1,3 s je Bild statt 2,5 bis 4 s. Nähte an den Kachelkanten gibt es mit
+ * keiner der beiden Größen — über vier Bilder wechselte die Farbe an der Kante
+ * kaum öfter als mitten in der Kachel (Faktor 1,05 bei 512, 1,21 bei 256 px).
  *
  * Gewechselt wird das Bild über eine zweite Ebene: Die lädt unsichtbar, und erst
  * wenn alle Kacheln da sind, wird getauscht. Sonst stünde zwischen zwei Bildern
@@ -2777,7 +2792,9 @@ const radarIso = ms => new Date(ms).toISOString().replace('.000Z', 'Z');
 function radarEbene(zeit) {
   const l = L.tileLayer.wms(RADAR_WMS, {
     layers: 'Niederschlagsradar', format: 'image/png', transparent: true, version: '1.3.0',
-    opacity: RADAR_DECKUNG, maxZoom: 22, maxNativeZoom: 12, crossOrigin: 'anonymous',
+    interpolations: 'bilinear',      // unbekannte Optionen hängt Leaflet als WMS-Parameter an
+    tileSize: 512,                   // bei WMS ohne zoomOffset: der Ausschnitt folgt der Kachelgröße
+    opacity: RADAR_DECKUNG, maxZoom: 22, maxNativeZoom: 14, crossOrigin: 'anonymous',
     attribution: 'Regenradar: Quelle <a href="https://www.dwd.de/">Deutscher Wetterdienst</a>'
   });
   if (zeit) l.setParams({ time: zeit }, true);

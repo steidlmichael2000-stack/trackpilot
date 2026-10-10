@@ -712,8 +712,21 @@ Zwei Dinge, die nicht offensichtlich sind:
   wird getauscht. Sonst stünde zwischen zwei Bildern jedes Mal die leere Karte — beim Abspielen ein
   Flackern im Takt.
 
-Ab Zoomstufe 12 werden die Bilder nur noch vergrößert: Die Daten haben 1 km Raster, eine Kachel
-der Stufe 12 ist rund 6 km breit; tiefer zu fragen kostete Abfragen und brächte nichts. Solange die
+**Geglättet wird beim Dienst selbst.** Die Daten haben 1 km Raster, roh gezeigt sind das auf
+Ortsebene grobe Kästchen — so sah die erste Fassung aus, deutlich gröber als die DWD-App
+WarnWetter. Mit dem GeoServer-Parameter `INTERPOLATIONS=bilinear` rechnet der Dienst die Werte
+zwischen den Zellen aus und färbt erst danach ein; aus den Treppen werden weiche Bänder. *bicubic*
+wäre noch runder, schwingt aber über und erfindet kleine Inseln, die nicht gemessen sind. Nähte an
+den Kachelkanten gibt es nicht: Über vier Bilder gemessen wechselt die Farbe dort kaum öfter als
+mitten in einer Kachel (Faktor 1,05). Einzelne Bilder streuen — ein einzelner Vergleich hatte erst
+eine Naht vorgetäuscht.
+
+In voller Schärfe kommen die Bilder bis Zoomstufe 14 (rund 6 m je Pixel), darüber werden sie nur
+noch vergrößert; die geglätteten Kanten bleiben damit bis in die Ortsansicht scharf. Die Kacheln
+sind 512 statt 256 px groß, bei gleicher Auflösung: Der Dienst spricht nur HTTP/1.1, der Browser
+stellt also höchstens sechs Abfragen gleichzeitig, und ein Bild ist erst fertig, wenn die langsamste
+Kachel da ist. Auf dem Handy sind das 6 statt 15 Abfragen je Bild, beim Abspielen im Mittel 1,3 s
+statt 2,5 bis 4 s. Solange die
 App offen ist, sieht sie alle fünf Minuten nach einer neuen Messung; ein gewählter Zeitpunkt bleibt
 dabei stehen, nur „letzte Messung" geht mit. Der Service Worker lässt `maps.dwd.de` durch: Ein
 Radarbild ist nach fünf Minuten alt und gehört nicht in den Offlinevorrat.

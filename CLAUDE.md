@@ -111,7 +111,10 @@ ist, steht die dunkle Karte unverändert.
 - **Regenradar** (`radar…`): Ebene erst anlegen, wenn die Zeitachse da ist, und **nie ohne
   `TIME`** — die Vorgabe „current" des DWD ist der Uhr am nächsten, meist schon Vorhersage; das gab
   eine Naht an der Kachelkante. Bildwechsel über eine zweite, unsichtbar ladende Ebene.
-  `maps.dwd.de` bleibt aus dem Service Worker draußen.
+  `maps.dwd.de` bleibt aus dem Service Worker draußen. Geglättet mit `INTERPOLATIONS=bilinear`
+  (roh waren es grobe 1-km-Kästchen; bicubic erfindet Inseln), Bilder bis Zoomstufe 14, Kacheln
+  512 px (DWD spricht nur HTTP/1.1 — weniger Abfragen, weniger Nachzügler). Nähte an Kachelkanten
+  nur über mehrere Bilder messen, ein einzelnes streut.
 
 ## Beim Deployen
 
