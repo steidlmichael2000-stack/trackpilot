@@ -159,8 +159,21 @@ längs: rund 200 Lagen als Linienzug, `g.kms` gehört zu `profDgm.ecken`.
 - **`gleisLage` muss dieselbe Lage liefern wie das Suchergebnis** (Steinpaar A ≤ km < B, Gleisweg aus
   den Kacheln, sonst Sehne — wie `gleisGenau`), nur ohne das Einrasten an Steinen. Wer an
   `resolvePoint`, `gleisGenau` oder `kmEntlangGleis` dreht, prüft beide Richtungen mit dem Rundlauf
-  aus der README (Abschnitt *Profil am Gleis*). Bekannt: Auf 5100 bei km 12,0–12,227 rechnen Suche und
-  Kartentipp schon heute bis 55 m verschieden, weil zwei Steinreihen auf Nachbargleisen gemischt sind.
+  aus der README (Abschnitte *Profil am Gleis* und *Zwei Gleise, zwei Steinreihen*).
+
+## Steinliste und Gleisweg (Oktober 2026)
+
+- **`e.alle` für die Karte, `e.sorted` für jede Rechnung.** `e.sorted` = `inselnWeg(steineVereinen(e.alle))`:
+  Doppelsteine (zwei Schilder am selben Querschnitt) vereint, vertippte Inseln heraus. Beide
+  Richtungen müssen dieselbe Liste nehmen — wer irgendwo zum Rechnen `e.alle` nimmt, bricht den
+  Rundlauf. `netzSteine` (Kacheln, Live-Anzeige) läuft durch dieselben beiden Schritte.
+- **`kanteVerbinden` nicht wegnehmen.** Ohne die Verbindung zweier Punkte auf derselben Kante läuft der
+  Weg übers Kantenende; das betraf rund jedes fünfte Nachbarpaar (384 → 542 von 714 mit Gleisweg).
+- `wegSuchen` probiert erst die Gleise der eigenen Strecke, dann alle; `wegAusWegen` fällt bei einem
+  Umweg über 1,3 × Kilometerdifferenz auf `paarUmGleis` zurück (Steine an verschiedenen Gleisen).
+- Vergleichsmessungen mit festem Laden machen (`probe` alle 4 km), nicht mit `coverage`: Die API gibt
+  je Abfrage höchstens 200 Steine, und je nach Reihenfolge fehlen sonst einzelne — zwei Läufe sind dann
+  nicht vergleichbar. Alt gegen neu lässt sich auf der Live-Seite gegen localhost messen.
 - **Die Sprungreihe wird nicht neu gezeichnet** (`#profRahmen` mit `data-ansicht`, nur `#profOben`
   und `#profUnten` wechseln). Sonst verliert ein schneller zweiter Tipp seinen Klick.
 - Pfeiltasten: `profTaste` hängt in der Einfangphase, damit Leaflet die Karte nicht verschiebt.

@@ -257,9 +257,121 @@ function hasBracket(sorted, km) {
   return !!(b.exact || (b.lower && b.upper && segmentOk(b.lower, b.upper)));
 }
 
+/* Doppelsteine. An zweigleisigen Strecken trägt jedes Gleis sein eigenes
+ * Schild, und beide stehen am selben Querschnitt — mal mit demselben Kilometer,
+ * mal mit verschiedenem. An Strecke 5100 bei Breitengüßbach stehen auf Gleis 1
+ * 12,4 · 12,6 · 12,8, auf Gleis 2 an denselben Stellen 12,393 · 12,612 · 12,819
+ * (in OSM `railway:position:exact`, die API gibt diesen Wert als Kilometer
+ * aus), 4 m quer daneben. Als Nachbarn in der Liste ergaben sie Paare von 7 bis
+ * 24 m Kilometerdifferenz auf 1–2 m Gleis: Kein Gleisweg passte, die Lage
+ * sprang zwischen den Gleisen hin und her, und Suche und Kartentipp lagen dort
+ * bis 18 m auseinander.
+ *
+ * Fürs Rechnen werden solche Steine zu einem zusammengefasst, Lage und
+ * Kilometer gemittelt — welcher der beiden Werte stimmt, sagen die Daten nicht.
+ * Auf der Karte stehen weiter alle (e.alle). Als Doppelstein gilt, was
+ * höchstens DOPPEL_KM auseinander und DOPPEL_M voneinander entfernt steht.
+ * Gesehen auf sechs Strecken (5100, 5302, 5320, 5850, 5900, 5910): 0 bis 25 m
+ * Kilometerdifferenz — echte Nachbarsteine liegen 100 m auseinander, die
+ * Grenze von 30 m lässt auch ein 50-m-Raster in Ruhe. Und bis zu 78 m Abstand:
+ * Die Schilder sitzen an Oberleitungsmasten, und gleiche Werte stehen auf den
+ * beiden Gleisen auch mal ein Mastfeld versetzt (5100 zweimal km 6,2 74 m
+ * auseinander, 5320 zweimal 27,8 78 m). Ungeteilt lief die Steinkette dort im
+ * Zickzack, und Suche und Kartentipp wählten verschiedene Paare. Bei genau
+ * gleichem Kilometer reicht es bis DOPPEL_GLEICH_M: dieselbe Zahl heißt
+ * derselbe Querschnitt, auch wo die Gleise im Bahnhof auseinanderlaufen
+ * (5320 ein dritter km 27,8 94 m neben den beiden anderen). */
+const DOPPEL_KM = 0.03;
+const DOPPEL_M = 80;
+const DOPPEL_GLEICH_M = 150;
+
+function steineVereinen(sorted) {
+  const gruppen = [];
+  for (const p of sorted) {
+    /* Rückwärts durch die Gruppen, die im Kilometer nah genug liegen — nicht nur
+     * die letzte: Dazwischen kann ein Stein derselben Nummer von ganz woanders
+     * stehen, Streckennummern kommen mehrfach vor. */
+    let ziel = null;
+    for (let i = gruppen.length - 1; i >= 0 && p.km - gruppen[i][0].km <= DOPPEL_KM + 1e-9; i--) {
+      const grenze = Math.abs(p.km - gruppen[i][0].km) < 1e-6 ? DOPPEL_GLEICH_M : DOPPEL_M;
+      if (gruppen[i].some(q => haversine(q.lat, q.lon, p.lat, p.lon) <= grenze)) { ziel = gruppen[i]; break; }
+    }
+    if (ziel) ziel.push(p);
+    else gruppen.push([p]);
+  }
+  const liste = gruppen.map(g => {
+    if (g.length === 1) return g[0];
+    const mittel = f => g.reduce((s, p) => s + p[f], 0) / g.length;
+    return { ...g[0], km: Math.round(mittel('km') * 1e6) / 1e6, lat: mittel('lat'), lon: mittel('lon'), doppel: g };
+  }).sort((a, b) => a.km - b.km);
+
+  /* Die Lage aber nicht gemittelt, sondern die des Schildes am linken Gleis (in
+   * Richtung steigender Kilometer, aus den Nachbarsteinen). Die Mitte lag
+   * zwischen beiden Gleisen gleich weit von jedem; ein Steinpaar hängte sie an
+   * das eine, das nächste an das andere, und an jedem Doppelstein sprang die
+   * Lage um den Gleisabstand quer — auf 5100 bei km 12,4 um 7,7 m. Immer links
+   * heißt: alle Doppelsteine einer Strecke am selben Gleis. */
+  liste.forEach((p, i) => {
+    if (!p.doppel) return;
+    const vor = [liste[i - 1], liste[i - 2]].find(q => q && segmentOk(q, p));
+    const nach = [liste[i + 1], liste[i + 2]].find(q => q && segmentOk(p, q));
+    const a = vor || p, b = nach || p;
+    if (a === b) return;                   // ohne Nachbarn keine Richtung — dann bleibt die Mitte
+    const kx = Math.cos(p.lat * Math.PI / 180);
+    const dx = (b.lon - a.lon) * kx, dy = b.lat - a.lat;
+    let links = null, wert = -Infinity;
+    for (const q of p.doppel) {
+      const w = dx * (q.lat - p.lat) - dy * (q.lon - p.lon) * kx;
+      if (w > wert) { wert = w; links = q; }
+    }
+    p.lat = links.lat;
+    p.lon = links.lon;
+  });
+  return liste;
+}
+
+/* Vertippte Steine. An Strecke 5100 stehen zwei Doppelsteine „55,8" und
+ * „55,846" 200 m neben km 46; der echte km 56 liegt 10 km weiter. Gemeint ist
+ * 45,8. Als Paar passen die beiden zueinander, aber zu keinem Nachbarn. Solange
+ * sie im Zickzack zwischen beiden Gleisen standen, verloren sie beim Antippen
+ * knapp gegen das richtige Paar (44,8–46, 1–2 m daneben); vereint am selben
+ * Gleis lagen sie genau darauf, und ein Tipp dort ergab km 55,84 — umgekehrt
+ * landete die Suche nach km 55,84 bei km 45,8.
+ *
+ * Herausgenommen wird deshalb ein einzelnes Paar, dessen Nachbarn auf beiden
+ * Seiten geometrisch unmöglich sind (Luftlinie länger als der Kilometer erlaubt)
+ * und das keine INSEL_M neben dem Streckenzug der übrigen Steine liegt. Die
+ * letzte Bedingung schützt Steinreihen, die unter derselben Nummer an zwei
+ * Orten liegen und sich im Kilometer verzahnen — die liegen fern jedes fremden
+ * Streckenzugs. Auf sechs Strecken traf das genau dieses eine Paar. */
+const INSEL_M = 100;
+
+function inselnWeg(liste) {
+  const ok = liste.map((b, i) => i > 0 && segmentOk(liste[i - 1], b, MAX_GLEIS_GAP_KM));
+  const weg = new Set();
+  for (let i = 2; i < liste.length - 1; i++) {
+    if (!ok[i] || ok[i - 1] || ok[i + 1]) continue;          // ein Paar, das allein steht
+    const a = liste[i - 1], b = liste[i];
+    if (rejectReason(liste[i - 2], a) !== 'geometrie' || rejectReason(b, liste[i + 1]) !== 'geometrie') continue;
+    const nahe = p => liste.some((q, j) => {
+      if (j === 0 || j === i || !ok[j]) return false;
+      const r = liste[j - 1], ky = 110540, kx = Math.cos(p.lat * Math.PI / 180) * 111320;
+      const ax = r.lon * kx, ay = r.lat * ky, dx = q.lon * kx - ax, dy = q.lat * ky - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.lon * kx - ax) * dx + (p.lat * ky - ay) * dy) / len2)) : 0;
+      return Math.hypot(p.lon * kx - ax - t * dx, p.lat * ky - ay - t * dy) <= INSEL_M;
+    });
+    if (nahe(a) && nahe(b)) { weg.add(a); weg.add(b); }
+  }
+  return weg.size ? liste.filter(p => !weg.has(p)) : liste;
+}
+
+/* e.alle: jeder Stein, wie er erfasst ist — für die Karte. e.sorted: Doppelsteine
+ * zusammengefasst, vertippte Inseln heraus — für jede Rechnung, in beiden
+ * Richtungen dieselbe Liste. */
 function storeFor(ref) {
   let e = lineCache.get(ref);
-  if (!e) { e = { pts: new Map(), sorted: [], probes: [], lastCount: 0 }; lineCache.set(ref, e); }
+  if (!e) { e = { pts: new Map(), alle: [], sorted: [], probes: [], lastCount: 0 }; lineCache.set(ref, e); }
   return e;
 }
 
@@ -278,7 +390,8 @@ async function probe(ref, e, km) {
         operator: d.operator || '', ref: d.ref || ref
       });
     }
-    e.sorted = [...e.pts.values()].sort((a, b) => a.km - b.km);
+    e.alle = [...e.pts.values()].sort((a, b) => a.km - b.km);
+    e.sorted = inselnWeg(steineVereinen(e.alle));
   }
 }
 
@@ -868,7 +981,8 @@ async function netzSteine(ref, lat, lon, umkreis) {
     if (!gleise.some(w => distToWay(p.lat, p.lon, w.geometry) < 25)) continue;
     steine.push({ lat: p.lat, lon: p.lon, km: p.km, ref: String(ref) });
   }
-  return steine.sort((a, b) => a.km - b.km);
+  // In den Kacheln stehen Doppelsteine meist mit demselben Kilometer (der gerundete Wert)
+  return inselnWeg(steineVereinen(steine.sort((a, b) => a.km - b.km)));
 }
 
 /** Alles Mitgelieferte in einem Rechteck — oder null, wenn dort nichts erzeugt wurde. */
@@ -1022,7 +1136,85 @@ function paarEinhaengen(nodes, A, B, grenze = 80) {
   if (!wahl) return null;
   wahl.na = einfuegen(nodes, wahl.a);
   wahl.nb = einfuegen(nodes, wahl.b);
+  kanteVerbinden(nodes, wahl.a, wahl.na, wahl.b, wahl.nb);
   return wahl;
+}
+
+/* Hängen zwei Punkte auf derselben Kante, kennen sich die eingefügten Knoten
+ * nicht: Jeder ist nur mit den beiden Enden verbunden, und der Weg zwischen
+ * ihnen liefe bis zum Kantenende und zurück. Auf Geraden ist das der
+ * Normalfall — die Kacheln kommen dort mit Kanten über 500 m aus, Steine stehen
+ * alle 100–200 m. Bis Oktober 2026 fehlte diese Verbindung: An Strecke 5100
+ * zwischen km 12,0 und 13,2 hingen in 11 von 12 Steinpaaren beide Steine auf
+ * derselben Kante, der Weg wurde 266 bis 1256 m lang statt 12 bis 227 m, und
+ * die Plausibilitätsprüfung verwarf ihn. Auf sechs Strecken gezählt fanden
+ * damit 384 von 714 Nachbarpaaren ihren Gleisweg, mit der Verbindung 542. */
+function kanteVerbinden(nodes, ka, na, kb, nb) {
+  if (!na.key || !nb.key || na.key === nb.key) return;
+  if (!((ka.von === kb.von && ka.nach === kb.nach) || (ka.von === kb.nach && ka.nach === kb.von))) return;
+  const n1 = nodes.get(na.key), n2 = nodes.get(nb.key);
+  if (n1.adj.some(([k]) => k === nb.key)) return;
+  const d = haversine(n1.lat, n1.lon, n2.lat, n2.lon);
+  n1.adj.push([nb.key, d]);
+  n2.adj.push([na.key, d]);
+}
+
+/** Die nächsten Stellen auf dem Gleisnetz: die nächste Kante und alles, was
+ *  höchstens spielraum weiter weg liegt — an einer zweigleisigen Strecke also
+ *  auch das Nachbargleis. Je Stelle nur eine, höchstens vier. */
+function kantenNahe(nodes, lat, lon, spielraum, grenze) {
+  const ky = 110540, kx = Math.cos(lat * Math.PI / 180) * 111320;
+  const px = lon * kx, py = lat * ky;
+  const alle = [];
+  for (const [k1, n1] of nodes) {
+    const ax = n1.lon * kx, ay = n1.lat * ky;
+    for (const [k2] of n1.adj) {
+      if (k2 < k1) continue;               // jede Kante steht in beiden Richtungen da
+      const n2 = nodes.get(k2);
+      const dx = n2.lon * kx - ax, dy = n2.lat * ky - ay;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const cx = ax + t * dx, cy = ay + t * dy;
+      const dist = Math.hypot(px - cx, py - cy);
+      if (dist <= grenze) alle.push({ dist, t, von: k1, nach: k2, lat: cy / ky, lon: cx / kx });
+    }
+  }
+  alle.sort((a, b) => a.dist - b.dist);
+  const raus = [];
+  for (const k of alle) {
+    if (k.dist > alle[0].dist + spielraum || raus.length >= 4) break;
+    // Am Knick zweier Kanten fällt das Lot auf beide an dieselbe Stelle
+    if (raus.some(r => Math.hypot((r.lon - k.lon) * kx, (r.lat - k.lat) * ky) < 2)) continue;
+    raus.push(k);
+  }
+  return raus;
+}
+
+/* Die Steine stehen an verschiedenen Gleisen derselben Strecke: Jeder hängt
+ * sich an sein nächstes Gleis, und der kürzeste Weg zwischen beiden läuft über
+ * die nächste Weiche — an Strecke 5100 zwischen km 40,2 und 40,4 1738 m für
+ * 200 m. Dann jeden Stein auch an das Nachbargleis hängen (alles bis 10 m
+ * weiter als die nächste Kante) und unter allen Paarungen den kürzesten Weg
+ * nehmen; gesucht wird nur bis bisher (wegAusWegen gibt 1,3-mal die
+ * Kilometerdifferenz) und danach nur noch kürzer als der beste. Auf sechs
+ * Strecken gezählt: 21 von 714 Nachbarpaaren. */
+function paarUmGleis(nodes, A, B, bisher, grenze = 80) {
+  const ka = kantenNahe(nodes, A.lat, A.lon, 10, grenze);
+  const kb = kantenNahe(nodes, B.lat, B.lon, 10, grenze);
+  if (!ka.length || !kb.length) return null;
+  const na = ka.map(k => ({ k, n: einfuegen(nodes, k) }));
+  const nb = kb.map(k => ({ k, n: einfuegen(nodes, k) }));
+  for (const a of na) for (const b of nb) kanteVerbinden(nodes, a.k, a.n, b.k, b.n);
+
+  let best = null;
+  for (const a of na) {
+    for (const b of nb) {
+      const sp = shortestPath(nodes, a.n.key, b.n.key, best ? best.length : bisher);
+      if (sp && sp.length < (best ? best.length : bisher)) best = sp;
+    }
+  }
+  return best;
 }
 
 function naechsteKante(nodes, lat, lon) {
@@ -1109,8 +1301,8 @@ class MinHeap {
   }
 }
 
-/** Dijkstra über das Knotennetz. */
-function shortestPath(nodes, startKey, endKey) {
+/** Dijkstra über das Knotennetz. grenze: weiter wird nicht gesucht, dann null. */
+function shortestPath(nodes, startKey, endKey, grenze = Infinity) {
   const dist = new Map([[startKey, 0]]);
   const prev = new Map();
   const done = new Set();
@@ -1126,6 +1318,7 @@ function shortestPath(nodes, startKey, endKey) {
       if (!done.has(k)) { cur = k; curD = d; break; }
     }
     if (cur === null) return null;          // nicht verbunden
+    if (curD > grenze) return null;         // nur noch Wege, die länger wären
     if (cur === endKey) break;
     done.add(cur);
     for (const [nk, w] of nodes.get(cur).adj) {
@@ -1279,6 +1472,17 @@ async function wegSuchen(A, B, nurLokal) {
     Math.max(A.lat, B.lat) + pad, Math.max(A.lon, B.lon) + pad);
 
   if (lokal && lokal.wege.length) {
+    /* Erst nur die Gleise der eigenen Strecke, dann alle. Laufen mehrere
+     * Strecken nebeneinander, hängt sich ein Stein sonst womöglich an das Gleis
+     * der Nachbarstrecke: Bei Fürth stand ein Stein der 5900 direkt auf einem
+     * Gleis der S-Bahn, das eigene lag 18 m weiter, und der Weg lief 1,6 km über
+     * die nächste Verbindung. Alle Gleise bleiben der Rückfall — die Kacheln
+     * tragen die Streckennummer nicht überall. */
+    const ref = String(A.ref || B.ref || '');
+    const eigene = ref ? lokal.wege.filter(w => w.ref && String(w.ref).split(';').some(t => t.trim() === ref)) : [];
+    if (eigene.length && eigene.length < lokal.wege.length) {
+      try { return wegAusWegen(eigene, A, B); } catch { /* dann mit allen Gleisen */ }
+    }
     try { return wegAusWegen(lokal.wege, A, B); } catch { /* dann eben über Overpass */ }
   }
   // nurLokal: für Rechnungen, die sich nur lohnen, solange sie nichts kosten
@@ -1308,13 +1512,19 @@ function wegAusWegen(ways, A, B) {
     throw new Error(`die Steine liegen bis ${nfM.format(wahl.schlechter)} m vom nächsten durchgehenden Gleis entfernt`);
   }
 
-  const sp = shortestPath(nodes, wahl.na.key, wahl.nb.key);
+  let sp = shortestPath(nodes, wahl.na.key, wahl.nb.key);
+  const nominal = (B.km - A.km) * 1000;
+  // Ein Umweg über die Weiche: die Steine stehen an verschiedenen Gleisen (paarUmGleis)
+  if (!sp || sp.length > nominal * 1.3) {
+    // Länger als 1,3-mal die Kilometerdifferenz wird unten ohnehin verworfen — so weit muss niemand suchen
+    const um = paarUmGleis(nodes, A, B, nominal * 1.3);
+    if (um) sp = um;
+  }
   if (!sp) throw new Error('kein durchgehender Gleisweg zwischen den beiden Steinen');
 
   /* Der kürzeste Weg im Gleisnetz muss nicht die Strecke sein — an einem
    * Bahnhof führt er auch mal über ein Nachbargleis. Passt seine Länge nicht
    * zur Kilometerdifferenz, ist er der falsche Weg. */
-  const nominal = (B.km - A.km) * 1000;
   const ratio = sp.length / nominal;
   if (ratio < 0.8 || ratio > 1.3) {
     throw new Error(`der gefundene Gleisweg ist ${nfM.format(sp.length)} m lang, die Kilometerdifferenz aber ${nfM.format(nominal)} m`);
@@ -4085,7 +4295,8 @@ function drawMilestones() {
     L.polyline(path, { color: '#4b93e6', weight: 3, opacity: 0.45, interactive: false }).addTo(msLayer);
   }
 
-  for (const p of e.sorted) {
+  // Die Punkte wie erfasst, auch beide eines Doppelsteins — die Linie oben läuft durch die vereinten
+  for (const p of (e.alle && e.alle.length ? e.alle : e.sorted)) {
     const inView = bounds.contains([p.lat, p.lon]);
     const label = step === 0 || p.km - lastLabelKm >= step - 1e-9;
     if (label) lastLabelKm = p.km;
@@ -6643,7 +6854,7 @@ async function search() {
       drawPoint();
       drawMilestones();
       fitLine(e);
-      showStatus(`Strecke ${ref}: ${e.sorted.length} Kilometersteine geladen. Auf die Linie tippen setzt einen Punkt.`);
+      showStatus(`Strecke ${ref}: ${e.alle.length} Kilometersteine geladen. Auf die Linie tippen setzt einen Punkt.`);
       return;
     }
 

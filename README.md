@@ -789,13 +789,61 @@ dasteht.
 **Die Lage auf dem Gleis** ist dieselbe Rechnung wie beim Suchergebnis: das Steinpaar um den
 Kilometer und darauf der Gleisweg aus dem mitgelieferten Netz, sonst die Sehne. Nur rastet sie nicht
 an Steinen ein (das Ergebnis zeigt bis 0,5 m daneben den Stein selbst) — für Meterschritte muss
-jeder Kilometer gleich gerechnet werden. Am 10.10.2026 auf Strecke 5100 zwischen km 12,0 und 13,2
-alle 2 m nachgeprüft: Profil und Suchergebnis liegen auf 0,0 m beieinander. Zurück über den
-Kartentipp trafen 488 von 601 Stellen auf unter 1 m. Die übrigen liegen dort, wo zwei Steinreihen
-durcheinanderstehen (12,0/12,2/12,4 … auf dem einen Gleis, 12,227/12,393/12,612 … auf dem Nachbargleis,
-4–5 m daneben): Zwischen Steinen verschiedener Reihen findet sich kein Gleisweg oder einer über die
-nächste Weiche, und Suche und Kartentipp rechnen dort verschieden — bis 55 m bei km 12,2. Das ist
-keine Eigenheit des Profils, es macht sie nur sichtbar; dort schwankt auch die Schrittweite.
+jeder Kilometer gleich gerechnet werden. Auf Strecke 5100 zwischen km 12,0 und 13,2 alle 2 m
+nachgeprüft: Profil und Suchergebnis liegen auf 0,0 m beieinander, zurück über den Kartentipp alle
+601 Stellen auf unter 1 m (höchstens 0,07 m). Die Schrittweite liegt bei 1-m-Sprüngen zwischen 0,75
+und 1,3 m, mit zwei Ausnahmen von gut 5 m an Doppelsteinen: Die beiden Gleise sind in den Kacheln auf
+5 m vereinfacht und liegen 4 m auseinander, welches näher am Stein ist, entscheidet dort der Zufall
+der Vereinfachung. Vor der Überarbeitung, die der nächste Abschnitt beschreibt, waren es 488 von 601
+Stellen, bis 55 m daneben, und Schritte zwischen 0,19 und 4,6 m.
+
+### Zwei Gleise, zwei Steinreihen
+
+Bei Breitengüßbach stehen auf der 5100 die Schilder beider Gleise in OSM (Wege 19211940 und
+51155936): auf Gleis 1 12,4 · 12,6 · 12,8, auf Gleis 2 an denselben Stellen 12,393 · 12,612 · 12,819 —
+dort mit `railway:position:exact`, und genau diesen Wert gibt die API als Kilometer aus. Die API
+selbst unterscheidet die Reihen nicht (gleiche Strecke, gleicher Betreiber). In der Steinliste
+wechselten sie sich ab, und das legte drei Schwächen offen, die weit über diese Stelle hinausreichen.
+Gemessen an denselben 1919 Steinen auf sechs Strecken (5100, 5302, 5320, 5850, 5900, 5910), alle
+200 m: Lage aus der Suche, zurück über den Kartentipp.
+
+| | vorher | nachher |
+| --- | --- | --- |
+| Nachbarpaare mit Gleisweg | 791 von 1362 (58 %) | 1123 von 1312 (86 %) |
+| Rundlauf unter 1 m | 1893 von 2481 (76 %) | 1974 von 2491 (79 %) |
+| unter 5 m | 2249 (91 %) | 2329 (93 %) |
+| unter 25 m | 2417 (97,4 %) | 2462 (98,8 %) |
+| ab 25 m daneben | 65 | 29, alle schon vorher dabei |
+
+1. **Zwei Steine auf derselben Kante.** Die Kacheln kommen auf Geraden mit Kanten über 500 m aus, Steine
+   stehen alle 100–200 m — oft hängen beide Steine eines Paars auf derselben Kante. Die eingefügten
+   Knoten waren nur mit den Kantenenden verbunden, nicht miteinander; der Weg lief bis zum Ende und
+   zurück, 922 m statt 188 m, und die Plausibilitätsprüfung verwarf ihn. Dann rechnete die Suche auf
+   der Sehne und der Kartentipp anders. Allein diese Verbindung hob die Paare mit Gleisweg von 384 auf
+   542 von 714 (`kanteVerbinden`).
+2. **Doppelsteine** — zwei Schilder am selben Querschnitt, 0–25 m Kilometer und bis 78 m auseinander
+   (bei gleichem Kilometer bis 150 m): Als Nachbarn ergaben sie Paare von 7–24 m Kilometer auf 1–2 m
+   Gleis, die Lage sprang zwischen den Gleisen. Fürs Rechnen werden sie zu einem Stein mit gemitteltem
+   Kilometer vereint, an der Stelle des Schildes am linken Gleis (in Richtung steigender Kilometer, damit
+   alle am selben Gleis hängen). Auf der Karte stehen weiter alle. Die Suche nach einem solchen Kilometer
+   zeigt deshalb „auf dem Gleis" statt „exakt": Die beiden Schilder widersprechen sich um bis zu 25 m.
+3. **Stein am Nachbargleis.** Hängen die Steine eines Paars an verschiedenen Gleisen, läuft der kürzeste
+   Weg über die nächste Weiche (5100 km 40,2–40,4: 1738 m für 200 m). Ist der Weg ein solcher Umweg,
+   hängt die App jeden Stein auch an das Gleis bis 10 m weiter und nimmt den kürzesten Weg aller
+   Paarungen (`paarUmGleis`). Und sie sucht zuerst nur auf den Gleisen der eigenen Strecke — bei Fürth
+   stand ein Stein der 5900 direkt auf einem S-Bahn-Gleis, das eigene lag 18 m weiter.
+
+Dazu ein Fall, den erst das Vereinen sichtbar machte: zwei Doppelsteine „55,8" und „55,846" stehen
+200 m neben km 46 der 5100, der echte km 56 liegt 10 km weiter — vertippt, gemeint ist 45,8. Solche
+**Inseln** (ein einzelnes Paar, das zu beiden Nachbarn geometrisch unmöglich passt und dabei keine
+100 m neben dem Streckenzug der übrigen Steine liegt) nimmt die App aus der Rechnung; auf den sechs
+Strecken waren es dieses und eines an der 5320 bei km 36,2. Steinreihen, die unter derselben Nummer an
+zwei Orten liegen und sich im Kilometer verzahnen, bleiben unberührt — sie liegen fern jedes fremden
+Streckenzugs.
+
+Was bleibt, sind Steine, deren Abstand nicht zur Kilometrierung passt (Luftlinie länger als die
+Kilometerdifferenz, oder der Gleisweg deutlich kürzer): ein Fehler in den Daten, gegen den kein
+Gleisweg hilft.
 
 ## Höhe am Punkt
 
