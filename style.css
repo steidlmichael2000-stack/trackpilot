@@ -24,11 +24,13 @@
   --r: 2px;
   --bh: 6px;              /* Grundlinie der Knöpfe rechts, von JS gesetzt (updateBH) */
   --gap: 10px;
-  /* Rechte Kante der Bedienspalte (Leisten bis 640 px, mittig). Die runden Knöpfe
-     und das Messmenü stehen an ihr und nicht am Fensterrand: Auf großen
-     Bildschirmen hingen sie sonst weit draußen, abgelöst von Leiste und
-     ©-Kasten. Auf dem Handy fallen beide Kanten zusammen. */
+  /* Rechte Kante der Knopfsäule. Bis 960 px die Kante der Bedienspalte (Leisten
+     bis 640 px, mittig) — auf dem Handy fällt sie mit dem Fensterrand zusammen,
+     auf dem Tablet hinge die Säule sonst abgelöst draußen. Darüber stehen
+     Knöpfe und ©-Kasten in den Ecken, siehe „Große Bildschirme". */
   --saeule: max(var(--gap), calc((100vw - 640px) / 2));
+  /* Grundlinie der Knopfsäule: bis 960 px über der Leiste (--bh), darüber im Eck */
+  --grund: var(--bh);
 }
 
 html[data-theme="light"] {
@@ -135,7 +137,8 @@ body {
 }
 
 /* ---------- Quellenzeile: ein Kasten links ----------
-   Ohne Ergebnisleiste ganz unten, mit ihr 8 px darüber — auf derselben
+   (Ab 960 px Breite steht der Kasten stattdessen im Eck, siehe „Große
+   Bildschirme".) Ohne Ergebnisleiste ganz unten, mit ihr 8 px darüber — auf derselben
    Grundlinie wie Standort- und Messknopf rechts (updateBH). Im Quelltext
    steht die Zeile hinter #ziel und #bottom, damit „#ziel[hidden] +
    #bottom[hidden] + .quellen" greift; order zieht sie im Bild über beide.
@@ -191,7 +194,7 @@ body {
 .north {
   position: fixed;
   right: var(--saeule);
-  bottom: calc(var(--bh) + 96px + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + 96px + env(safe-area-inset-bottom));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center; gap: 0;
@@ -212,7 +215,7 @@ body {
   /* Unterkante auf der Grundlinie des Kastens unten links, bei offener Leiste
      8 px darüber (--bh aus updateBH) */
   right: var(--saeule);
-  bottom: calc(var(--bh) + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + env(safe-area-inset-bottom));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -232,7 +235,7 @@ body {
 .mapmess {
   position: fixed;
   right: var(--saeule);
-  bottom: calc(var(--bh) + 48px + env(safe-area-inset-bottom));      /* 42 px Knopf + 6 Luft */
+  bottom: calc(var(--grund) + 48px + env(safe-area-inset-bottom));      /* 42 px Knopf + 6 Luft */
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -249,7 +252,7 @@ body {
 .mess-menue {
   position: fixed;
   right: calc(var(--saeule) + 48px);
-  bottom: calc(var(--bh) + 48px + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + 48px + env(safe-area-inset-bottom));
   z-index: 460;
   width: min(250px, calc(100vw - 2 * var(--gap) - 48px));
   background: var(--glass); border: 1px solid var(--line); border-radius: var(--r);
@@ -274,7 +277,7 @@ body {
 .mapziel {
   position: fixed;
   right: var(--saeule);
-  bottom: calc(var(--bh) + 96px + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + 96px + env(safe-area-inset-bottom));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -286,7 +289,31 @@ body {
 }
 .mapziel svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
 .mapziel.is-on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.mapziel:not([hidden]) ~ .north { bottom: calc(var(--bh) + 144px + env(safe-area-inset-bottom)); }
+.mapziel:not([hidden]) ~ .north { bottom: calc(var(--grund) + 144px + env(safe-area-inset-bottom)); }
+
+/* ---------- Große Bildschirme: ©-Kasten und Knöpfe in die Ecken ----------
+   Neben der 640 px breiten Bedienspalte ist dann Platz. Der ©-Kasten steht
+   unten links, die Knopfsäule unten rechts, beide mit der Unterkante auf der
+   der Leiste, 6 px über dem Rand. So springen sie auch nicht mehr mit, wenn
+   eine Leiste auf- oder zugeht. Die Grenze: Mit voll langem Maßstab wird der
+   Kasten 138 px breit (über alle Zoomstufen nachgemessen); ab 960 px bleiben
+   neben der Spalte dann mindestens 12 px Luft. */
+@media (min-width: 960px) {
+  :root { --saeule: var(--gap); --grund: 6px; }
+  /* Die Zeile bleibt als Abstandhalter im Fluss — ihr margin-top: auto hält die
+     Leisten unten —, ihr Inhalt wandert ins Eck */
+  .quellen, #ziel[hidden] + #bottom[hidden] + .quellen { height: 0; margin-bottom: 0; }
+  .quellen-kasten { position: fixed; left: var(--gap); bottom: calc(6px + env(safe-area-inset-bottom)); }
+  /* Der aufgeklappte Quellentext bleibt in seiner Ecke, höchstens so breit wie
+     der Platz neben der Spalte */
+  .quellen-text {
+    position: fixed; left: var(--gap); right: auto;
+    bottom: calc(6px + 22px + 4px + env(safe-area-inset-bottom));
+    max-width: calc((100vw - 640px) / 2 - var(--gap) - 8px);
+  }
+  /* Das Messmenü reicht dann über die Spalte — es gehört über eine offene Leiste */
+  .mess-menue { z-index: 510; }
+}
 
 /* ---------- schwebende Bedienung ---------- */
 
