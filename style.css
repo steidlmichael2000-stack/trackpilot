@@ -939,6 +939,16 @@ body {
 /* Die laufende Zahl zum Standort steht schwächer als die festen Abschnitte */
 .mess-lbl.mess-live { opacity: .85; font-weight: 600; }
 
+/* A und B im freien Profil: 26 px Griff zum Ziehen, sichtbar nur der Punkt wie
+   sonst beim Messen; das Schild steht wie dort 7 px rechts oberhalb */
+.prof-griff { cursor: grab; }
+.prof-griff.leaflet-drag-target, .prof-griff:active { cursor: grabbing; }
+.prof-griff i {
+  position: absolute; left: 7px; top: 7px; width: 12px; height: 12px; box-sizing: border-box;
+  border: 2px solid #fff; border-radius: 50%; background: #f59e0b;
+}
+.prof-griff .mess-lbl { position: absolute; left: 20px; top: 6px; }
+
 /* Maßzahl an der gemessenen Strecke */
 .mess-lbl {
   display: block;
@@ -1018,6 +1028,29 @@ body {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, .35);
 }
 
+/* Wetter: drei Werte nebeneinander, groß und mit gleich breiten Ziffern */
+.wetter { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.wetter-wert {
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--r-knopf); background: var(--panel-2);
+}
+.wetter-wert small { display: block; font-size: .66rem; color: var(--muted); }
+.wetter-wert b { display: block; margin-top: 2px; font-size: 1rem; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wetter-ort { margin: 6px 0 0; font-size: .72rem; color: var(--muted); }
+.wetter-ort:empty { display: none; }
+
+/* „Erklärung": klappt die Texte eines Abschnitts auf, zu ist die Vorgabe */
+.erkl-knopf {
+  display: inline-flex; align-items: center; gap: 6px; margin: 12px 0 0; padding: 4px 0;
+  border: 0; background: none; color: var(--muted); cursor: pointer;
+  font: inherit; font-size: .74rem; font-weight: 600;
+}
+.erkl-knopf::before {
+  content: ""; width: 0; height: 0; border-style: solid; border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent currentColor;
+}
+.erkl-knopf[aria-expanded="true"]::before { transform: rotate(90deg); }
+.erkl-knopf:hover, .erkl-knopf[aria-expanded="true"] { color: var(--text); }
+.erkl { margin-top: 6px; }
 .fine { font-size: .74rem; color: var(--muted); line-height: 1.6; margin: 0 0 8px; }
 .fine:last-child { margin-bottom: 0; }
 .fine strong { color: var(--text); }
@@ -1256,6 +1289,34 @@ body {
   color: var(--accent); font: inherit; font-weight: 600; cursor: pointer;
 }
 .prof-pdf .prof-pdf-zu { margin-left: auto; border-color: var(--line); background: var(--panel-2); color: var(--muted); }
+/* Die Mappe in einer eigenen Zeile darunter */
+.prof-pdf-umbruch { flex-basis: 100%; height: 0; }
+
+/* ---------- Profilmappe ---------- */
+
+.mappe-text {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 9px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: var(--r-knopf); background: var(--panel-2); color: var(--text);
+  font: inherit; font-size: .9rem; line-height: 1.45; font-variant-numeric: tabular-nums; resize: vertical;
+}
+.mappe-text:focus { outline: none; border-color: var(--accent); }
+.mappe-hilfe { margin: 5px 0 0; font-size: .72rem; color: var(--muted); }
+.mappe-fehler { margin: 3px 0 0; font-size: .72rem; color: var(--warn); }
+.mappe-fehler:empty { display: none; }
+.mappe-stand { margin: 8px 0 0; font-size: .78rem; color: var(--muted); }
+/* Überhöhung als Block wie Quer | Längs: im PDF ist jede Stufe möglich, zu steil wird gestaucht und vermerkt */
+.mappe-ueber {
+  grid-column: 2 / 4; display: grid; grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--line); border-radius: var(--r-knopf); overflow: hidden;
+}
+.mappe-ueber button {
+  padding: 5px 0; border: 0; background: var(--panel-2); color: var(--text); cursor: pointer;
+  font: inherit; font-size: .78rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.mappe-ueber button + button { border-left: 1px solid var(--line); }
+.mappe-ueber button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.bb-actions .primary { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+.bb-actions .primary:disabled { background: var(--panel-2); border-color: var(--line); color: var(--muted-2); }
 /* Der Versatz im freien Profil: Angabe und Rücksetzer in einem */
 .tag.prof-versatz {
   font-family: inherit; cursor: pointer; font-variant-numeric: tabular-nums;
@@ -1305,13 +1366,17 @@ body {
 .prof-rname {
   grid-column: 1; font-size: .66rem; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
 }
-.prof-ebenen { grid-column: 2 / 4; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+/* Die Ebenen über die ganze Breite, ohne Namen davor: neben „EBENEN" lief
+   „+1,0 MB" auf dem Handy über den Rand */
+.prof-ebenen { grid-column: 1 / 4; display: flex; gap: 6px; min-width: 0; }
+.prof-ebenen .prof-dom { flex: 1 1 0; }
 /* Der Legendeneintrag ist zugleich der Schalter der Ebene */
 .prof-dom {
   display: flex; align-items: center; min-width: 0; padding: 5px 8px;
   border: 1px solid var(--line); border-radius: var(--r-knopf);
   background: var(--panel-2); background-clip: padding-box; color: var(--muted);
   font: inherit; font-size: .76rem; text-align: left; white-space: nowrap; cursor: pointer;
+  overflow: hidden;
 }
 .prof-dom::before {
   content: ""; flex: none; width: 14px; margin-right: 7px; border-top: 2px dashed var(--muted);

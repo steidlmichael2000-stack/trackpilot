@@ -1864,9 +1864,11 @@ let prefs = {
   abSort: 'nah',                         // Abstecken: Punktliste nach Entfernung, Name oder Datei
   abKompass: false,                      // Abstecken: Pfeil nach dem Handy statt nach der Karte
   parzFarbe: 'auto',                     // 'auto' (nach Grundkarte) oder '#rrggbb'
+  parzPunkte: true,                      // Punktraster der Nutzung (Grünland …) in den Parzellen zeigen
   profUeber: 1,                          // Querprofil: Überhöhung, 1 bis 20
   gpArt: 'quer', gpBreite: 50, gpLaenge: 250,   // Profil am Gleis: Quer/Längs, je Seite bzw. Richtung in m
   gpUeberLaengs: 10,                     // Profil am Gleis, längs: eigene Überhöhung
+  mappeText: '', mappeBreite: 50, mappeUeber: 1, mappeGeb: false, mappeDom: false,   // Profilmappe
   tourAngeboten: false,                  // die Tour wurde beim ersten Start schon einmal angeboten
   wms: { url: '', layers: '', opacity: 75, on: false }   // nur Adresse und Layer, nie Zugangsdaten
 };
@@ -1997,11 +1999,20 @@ const BVV_QUELLE = 'DOP20/Relief/Parzellen: <a href="https://www.geodaten.bayern
  * 256er-Rasterkachel holt MapLibre auf derselben Zoomstufe wie Leaflet. */
 const BVV_WMS = (dienst, ebene) => `https://geoservices.bayern.de/od/wms/${dienst}?SERVICE=WMS&REQUEST=GetMap` +
   `&VERSION=1.3.0&LAYERS=${ebene}&STYLES=&FORMAT=image/jpeg&CRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}`;
+/* Bis zu welcher Zoomstufe die Bilder der BVV geholt werden; darüber wird das
+ * Bild der letzten Stufe weich vergrößert (Leaflet per CSS, MapLibre linear).
+ * Das DOP20 hat 20 cm Bodenpixel, in Bayern ist das Zoomstufe 19 (0,20 m/px);
+ * das Relief kommt aus dem DGM1, 1 m, also Stufe 18 (0,40 m/px) mit etwas
+ * Reserve. Bis Oktober 2026 ging es bis 22: Der MapServer der BVV rechnet so
+ * feine Kacheln pixelweise hoch (Glättungsparameter ignoriert er, gemessen
+ * bitgleich), ganz nah sah man Blöcke von 8 × 8 Bildpunkten. */
+const BVV_NATIV = { dop: 19, relief: 18 };
+
 const GL_BILDER = {
   sat: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     maxzoom: 18, quelle: 'Luftbild: Esri, Maxar' },
-  dop: { url: BVV_WMS('dop/v1/dop20', 'by_dop20c'), maxzoom: 22, quelle: BVV_QUELLE },
-  relief: { url: BVV_WMS('dgm/v1/relief', 'by_relief_schraeglicht'), maxzoom: 22, quelle: BVV_QUELLE }
+  dop: { url: BVV_WMS('dop/v1/dop20', 'by_dop20c'), maxzoom: BVV_NATIV.dop, quelle: BVV_QUELLE },
+  relief: { url: BVV_WMS('dgm/v1/relief', 'by_relief_schraeglicht'), maxzoom: BVV_NATIV.relief, quelle: BVV_QUELLE }
 };
 
 let gl = null;            // die MapLibre-Karte, sobald geladen
@@ -2342,14 +2353,16 @@ function initMap() {
   const BVV = BVV_QUELLE;
 
   baseDop = L.tileLayer.wms('https://geoservices.bayern.de/od/wms/dop/v1/dop20', {
-    layers: 'by_dop20c', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
+    layers: 'by_dop20c', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, maxNativeZoom: BVV_NATIV.dop,
+    crossOrigin: 'anonymous', attribution: BVV
   });
 
   /* Schräglicht und nicht die kombinierte Darstellung: Das Schräglicht zeigt
    * Dämme, Einschnitte und alte Trassen plastisch, die kombinierte Fassung wäscht
    * genau diese kleinen Formen weg. */
   baseRelief = L.tileLayer.wms('https://geoservices.bayern.de/od/wms/dgm/v1/relief', {
-    layers: 'by_relief_schraeglicht', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV
+    layers: 'by_relief_schraeglicht', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, maxNativeZoom: BVV_NATIV.relief,
+    crossOrigin: 'anonymous', attribution: BVV
   });
 
   /* Parzellarkarte nur als Umring: Die Farbfassung bringt einen deckend weißen
@@ -2359,7 +2372,7 @@ function initMap() {
   parzLayer = new ParzWms('https://geoservices.bayern.de/od/wms/alkis/v1/parzellarkarte', {
     layers: 'by_alkis_parzellarkarte_umr_schwarz', format: 'image/png', transparent: true,
     version: '1.3.0', maxZoom: 22, crossOrigin: 'anonymous', attribution: BVV,
-    farbe: hexRgb(parzFarbe())
+    farbe: hexRgb(parzFarbe()), punkte: !!prefs.parzPunkte
   });
 
   // Die Leaflet-Grundkarten. „dark" hat keine: die zeichnet immer MapLibre.
@@ -2526,9 +2539,47 @@ function ausserhalbBayerns() {
  * Kacheln der alten Stufe weg, die nicht `complete` sind (_abortLoading). Ein
  * Canvas hat das Feld nicht, ohne diese Zeile verschwänden auch die fertigen
  * Kacheln mitten in der Zoombewegung. */
+/* Punktraster der tatsächlichen Nutzung (Grünland, Gärten …): Der Dienst kennt
+ * keine Unterebenen, Grenzen, Gebäude, Schrift und Nutzungssignaturen kommen
+ * in einem Bild. Die Punkte lassen sich aber trennen: Gemessen am 11.10.2026
+ * bei 49,567 / 10,189 sind sie in jeder Zoomstufe genau 2 × 2 Pixel samt
+ * geglättetem Rand (3742 Stück auf einer 512er-Kachel), das kleinste andere
+ * Element hatte 13 Pixel. Zusammenhängende Teile bis PARZ_PUNKT_MAX sichtbaren
+ * Pixeln fallen deshalb weg, wenn das Punktraster ausgeschaltet ist (Vorgabe:
+ * an, ausdrücklich so gewünscht; aus über die Farbwahl). An der Kachelkante
+ * geschnittene Linienenden dieser Größe sind unsichtbar klein. */
+const PARZ_PUNKT_MAX = 4;
+
+function parzPunkteWeg(d, w, h) {
+  const n = w * h, gesehen = new Uint8Array(n), stapel = new Int32Array(n), teil = new Int32Array(PARZ_PUNKT_MAX + 1);
+  for (let s = 0; s < n; s++) {
+    if (gesehen[s] || !d[s * 4 + 3]) continue;
+    let oben = 0, anzahl = 0;
+    stapel[oben++] = s;
+    gesehen[s] = 1;
+    while (oben) {
+      const q = stapel[--oben];
+      if (anzahl <= PARZ_PUNKT_MAX) teil[anzahl] = q;
+      anzahl++;
+      const x = q % w, y = (q - x) / w;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const r = yy * w + xx;
+          if (!gesehen[r] && d[r * 4 + 3]) { gesehen[r] = 1; stapel[oben++] = r; }
+        }
+      }
+    }
+    if (anzahl <= PARZ_PUNKT_MAX) for (let i = 0; i < anzahl; i++) d[teil[i] * 4 + 3] = 0;
+  }
+}
+
 const ParzWms = L.TileLayer.WMS.extend({
-  // Hier deklariert, sonst hängte Leaflet „farbe" als WMS-Parameter an jede Abfrage
-  options: { farbe: [0, 0, 0] },
+  // Hier deklariert, sonst hängte Leaflet „farbe" und „punkte" als WMS-Parameter an jede Abfrage
+  options: { farbe: [0, 0, 0], punkte: true },
 
   createTile(coords, done) {
     const tile = document.createElement('canvas');
@@ -2554,6 +2605,7 @@ const ParzWms = L.TileLayer.WMS.extend({
     g.drawImage(tile._quelle, 0, 0);
     const bild = g.getImageData(0, 0, tile.width, tile.height);
     const d = bild.data;
+    if (!this.options.punkte) parzPunkteWeg(d, tile.width, tile.height);
     const [r, gr, b] = this.options.farbe;
     for (let i = 0; i < d.length; i += 4) {
       if (!d[i + 3]) continue;
@@ -2565,10 +2617,20 @@ const ParzWms = L.TileLayer.WMS.extend({
     g.putImageData(bild, 0, 0);
   },
 
+  punkteSetzen(an) {
+    if (this.options.punkte === an) return;
+    this.options.punkte = an;
+    this._neuFaerben();
+  },
+
   farbeSetzen(rgb) {
     const alt = this.options.farbe;
     if (alt && alt.every((v, i) => v === rgb[i])) return;
     this.options.farbe = rgb;
+    this._neuFaerben();
+  },
+
+  _neuFaerben() {
     for (const k in this._tiles) {
       const tile = this._tiles[k].el;
       if (tile._quelle) this._faerben(tile);
@@ -2678,6 +2740,15 @@ function buildParzRow() {
     syncButtons();
   });
   eigen.addEventListener('change', () => parzFarbeWaehlen(eigen.value));
+  // Das Punktraster der Nutzung: an als Vorgabe, hier abzuschalten (parzPunkteWeg)
+  const punkte = $('#parzPunkteBtn');
+  if (punkte) punkte.addEventListener('click', () => {
+    prefs.parzPunkte = !prefs.parzPunkte;
+    if (parzLayer) parzLayer.punkteSetzen(prefs.parzPunkte);
+    saveStore();
+    syncButtons();
+    if (!auflageGewaehlt('parz')) toggleOverlay('parz');
+  });
 }
 
 /** Reihenfolge der Leaflet-Auflagen, von unten: eigener WMS, Regenradar,
@@ -3033,6 +3104,9 @@ function radarEbene(zeit) {
     layers: 'Niederschlagsradar', format: 'image/png', transparent: true, version: '1.3.0',
     interpolations: 'bilinear',      // unbekannte Optionen hängt Leaflet als WMS-Parameter an
     tileSize: 512,                   // bei WMS ohne zoomOffset: der Ausschnitt folgt der Kachelgröße
+    // Erst nach der Geste nachladen: Der Dienst braucht 1–7 s je Kachel, Abfragen
+    // mitten im Schieben kommen ohnehin zu spät und halten nur die Leitung auf
+    updateWhenIdle: true, updateWhenZooming: false,
     opacity: RADAR_DECKUNG, maxZoom: 22, maxNativeZoom: 14, crossOrigin: 'anonymous',
     attribution: 'Regenradar: Quelle <a href="https://www.dwd.de/">Deutscher Wetterdienst</a>'
   });
@@ -3151,12 +3225,28 @@ function radarSpielen(an) {
  * Vorhersage, dort kurz stehen und von vorn. Weiter geht es erst, wenn das
  * Bild da ist — auf dem Handy dauert das mal eine halbe, mal drei Sekunden,
  * und ein fester Takt zeigte dann halbe Bilder. */
+/* Abspielen gibt der Karte den Vortritt: Das nächste Bild wird erst geholt, wenn
+ * die Grundkarte und die Auflagen fertig sind und die Karte stillsteht. Auf dem
+ * Handy teilen sich beide die Leitung; am 11.10.2026 brauchte der DWD beim
+ * Abspielen im Mittel 3 s je Kachel, und solange das lief, kam ein frisch
+ * geschobener Ausschnitt der Karte nur stückweise. */
+let radarKarteBewegt = false;
+
+function karteLaedtNoch() {
+  if (radarKarteBewegt) return true;
+  const grund = baseLayers[prefs.base];
+  if (grund && map.hasLayer(grund) && grund.isLoading && grund.isLoading()) return true;
+  if (ormLayer && map.hasLayer(ormLayer) && ormLayer.isLoading()) return true;
+  return !!(glAn && gl && !gl.areTilesLoaded());
+}
+
 function radarSpielWeiter(start = false) {
   clearTimeout(radarSpielTimer);
   if (!radarSpielt) return;
   const amEnde = radarVersatz >= RADAR_VOR;
   radarSpielTimer = setTimeout(() => {
     if (!radarSpielt) return;
+    if (karteLaedtNoch()) { radarSpielTimer = setTimeout(() => radarSpielWeiter(true), 400); return; }
     const naechst = amEnde ? -RADAR_ZURUECK : (Math.floor(radarVersatz / RADAR_SPIEL) + 1) * RADAR_SPIEL;
     if (!radarZeigen(naechst)) radarSpielWeiter();
   }, start ? 0 : amEnde ? 1600 : 650);
@@ -3209,6 +3299,9 @@ function radarBinden() {
   on('#radarZu', 'click', () => { if (auflageGewaehlt('radar')) toggleOverlay('radar'); });
   // Zurück aus dem Hintergrund: gleich nachsehen statt bis zur nächsten vollen Minute
   document.addEventListener('visibilitychange', () => { if (!document.hidden) radarFrisch(); });
+  // Solange geschoben oder gezoomt wird, holt das Abspielen kein neues Bild (karteLaedtNoch)
+  map.on('movestart zoomstart', () => { radarKarteBewegt = true; });
+  map.on('moveend zoomend', () => { radarKarteBewegt = false; });
 }
 
 /* -------- Eigene KML-Dateien -------- */
@@ -5081,6 +5174,7 @@ const profVz = d => (d > 0.05 ? '+' : d < -0.05 ? '−' : '±') + nfH.format(Mat
 
 function profStart() {
   if (messModus) messEnde();
+  mappeOffen = false;
   profModus = true;
   profPunkte = [];
   profGleis = null;
@@ -5119,8 +5213,24 @@ function profEnde(zeigen = true) {
   if (zeigen) renderBottom();      // zeigt wieder den vorherigen Punkt, falls es einen gibt
 }
 
+/* Das freie Profil hat genau zwei Punkte, A und B. Mehr brauchte es praktisch
+ * nie, und ein versehentlicher Tipp in die Karte hängte einen Punkt C an und
+ * verdarb den Schnitt. Stehen beide, setzt ein Tipp nichts mehr — A und B
+ * werden gezogen (profZeichnen). */
+const PROF_PUNKTE_MAX = 2;
+
+/** Gefangen wird wie beim Messen: Kilometersteine und KML-Punkte bis MESS_FANG_MAX_M. */
+function profFangen(latlng) {
+  const nah = messKandidatenFinden(latlng);
+  return nah.length && nah[0].dist <= MESS_FANG_MAX_M ? nah[0] : null;
+}
+
 function profTipp(latlng) {
   if (profGleis) return;           // am Gleis legt die Strecke den Schnitt fest
+  if (profPunkte.length >= PROF_PUNKTE_MAX) {
+    toast('A und B stehen — zum Verschieben den Punkt ziehen');
+    return;
+  }
   latlng = L.latLng(latlng);
   // Doppelt gemeldeter Tipp (siehe messTipp)
   const jetzt = Date.now();
@@ -5132,13 +5242,21 @@ function profTipp(latlng) {
 
   /* Gefangen wird wie beim Messen, nur ohne Auswahlzeile — den Platz in der
    * Leiste braucht das Diagramm. */
-  const nah = messKandidatenFinden(latlng);
-  if (nah.length && nah[0].dist <= MESS_FANG_MAX_M) {
-    profPunkte.push(nah[0].koord);
-    toast(`${profName(profPunkte.length - 1)} gefangen auf ${nah[0].name}`);
+  const f = profFangen(latlng);
+  if (f) {
+    profPunkte.push(f.koord);
+    toast(`${profName(profPunkte.length - 1)} gefangen auf ${f.name}`);
   } else {
     profPunkte.push([latlng.lat, latlng.lng]);
   }
+  profGeaendert();
+}
+
+/** A oder B wurde gezogen: dort ablegen, gefangen wie beim Tippen, und neu rechnen. */
+function profPunktGezogen(i, latlng) {
+  const f = profFangen(latlng);
+  profPunkte[i] = f ? f.koord : [latlng.lat, latlng.lng];
+  if (f) toast(`${profName(i)} gefangen auf ${f.name}`);
   profGeaendert();
 }
 
@@ -5200,9 +5318,24 @@ function profZeichnen() {
 
   const pts = profLinie();
   // Verschoben: die getippte Linie bleibt blass stehen, zur Orientierung
-  if (pts !== profPunkte) linie(profPunkte, { weight: 2, opacity: 0.45, dashArray: '2 5' });
-  if (pts.length > 1) linie(pts);
-  pts.forEach((p, i) => { punkt(p); schild(p, profName(i)); });
+  const getippt = pts !== profPunkte ? linie(profPunkte, { weight: 2, opacity: 0.45, dashArray: '2 5' }) : null;
+  const schnitt = pts.length > 1 ? linie(pts) : null;
+  if (pts !== profPunkte) pts.forEach((p, i) => schild(p, profName(i)));
+
+  /* A und B zum Ziehen: ein Marker mit großer Griffläche (26 px) um den
+   * sichtbaren Punkt. Er sitzt auf dem getippten Punkt — beim Versatz also auf
+   * der blassen Linie. Beim Ziehen läuft die Linie mit, gerechnet wird beim
+   * Loslassen. */
+  profPunkte.forEach((p, i) => {
+    const m = L.marker(p, {
+      draggable: true, keyboard: false, autoPan: true, zIndexOffset: 500,
+      icon: L.divIcon({ className: 'prof-griff', iconSize: [26, 26], iconAnchor: [13, 13],
+        html: `<i></i>${pts === profPunkte ? `<span class="mess-lbl">${esc(profName(i))}</span>` : ''}` })
+    }).addTo(profLayer);
+    const ziel = getippt || schnitt;
+    m.on('drag', () => { if (ziel) ziel.setLatLngs(profPunkte.map((q, j) => j === i ? m.getLatLng() : q)); });
+    m.on('dragend', () => profPunktGezogen(i, m.getLatLng()));
+  });
 }
 
 /** Wie viele Rasterzellen der Linienzug berührt: DGM-Kacheln (1000 m) oder
@@ -5321,9 +5454,9 @@ function profGebKnopf() {
     `title="${titel}" aria-label="${titel}">Gebäude<small>${zusatz}</small></button>`;
 }
 
-function profKennwerte() {
+function profKennwerte(dgm = profDgm, dom = profDom, domDgm = profDomDgm) {
   let min = Infinity, max = -Infinity, erst = NaN, letzt = NaN;
-  for (const z of profDgm.hoehe) {
+  for (const z of dgm.hoehe) {
     if (!Number.isFinite(z)) continue;
     if (Number.isNaN(erst)) erst = z;
     letzt = z;
@@ -5331,10 +5464,10 @@ function profKennwerte() {
     if (z > max) max = z;
   }
   let obj = null;
-  if (profDom) {
+  if (dom) {
     let best = -Infinity, wo = -1;
-    profDom.hoehe.forEach((z, i) => { const d = z - profDomDgm[i]; if (d > best) { best = d; wo = i; } });
-    if (wo >= 0) obj = { hoehe: best, station: profDom.station[wo] };
+    dom.hoehe.forEach((z, i) => { const d = z - domDgm[i]; if (d > best) { best = d; wo = i; } });
+    if (wo >= 0) obj = { hoehe: best, station: dom.station[wo] };
   }
   return { min, max, dh: letzt - erst, obj };
 }
@@ -5410,7 +5543,8 @@ function profLeiste() {
      * Bild — der Zeiger nennt sie an jeder Stelle, das PDF mit Erklärung. */
     teile.push('<div class="prof-bild" id="profBild"></div>',
       '<div class="prof-regler">' +
-      `<span class="prof-rname">Ebenen</span><span class="prof-ebenen">${profGebKnopf()}${profDomKnopf()}</span>` +
+      // Ohne Namen davor: Die beiden Knöpfe sagen selbst, was sie sind, und brauchen die Breite
+      `<span class="prof-ebenen">${profGebKnopf()}${profDomKnopf()}</span>` +
       (g ? gpWeiteRegler() : '') +
       '<label class="prof-rname" for="profUeber">Überhöht</label>' +
       '<span class="prof-weite"><span class="prof-striche" id="profUeberStriche" aria-hidden="true"></span>' +
@@ -5503,11 +5637,11 @@ function profLeiste() {
     });
     ueber.addEventListener('change', () => saveStore());
   }
-  // Quer am Gleis erst fragen: dieser Schnitt oder die Serie; sonst gleich los
+  // Erst fragen: dieser Schnitt, die Serie (quer am Gleis) oder die Mappe
   an('#profPdfBtn', () => {
     if (profPdf && profPdf.laeuft) return;
-    if (profGleis && profGleis.art === 'quer') { profPdf = profPdf && profPdf.wahl ? null : { wahl: true }; profLeiste(); }
-    else profPdfErstellen('eins');
+    profPdf = profPdf && profPdf.wahl ? null : { wahl: true };
+    profLeiste();
   });
   b.querySelectorAll('[data-pdf]').forEach(k => k.addEventListener('click', () => profPdfTipp(k.dataset.pdf)));
   b.querySelectorAll('[data-gpart]').forEach(k => k.addEventListener('click', () => gpArtWechseln(k.dataset.gpart)));
@@ -5866,46 +6000,216 @@ function pdfQuerWerte(dgm) {
   return { h, li: profWertBei(dgm, 0) - h, re: profWertBei(dgm, L) - h };
 }
 
+/* DB_REF, das Bezugssystem der DB (Bessel, Gauß-Krüger in 3°-Streifen).
+ * ETRS89 → DB_REF mit der Umkehrung von EPSG:5826 „DB_REF to ETRS89 (1)",
+ * Coordinate Frame: Verschiebung in m, Drehung in Bogensekunden, Maßstab in ppm.
+ * Geprüft gegen proj4 2.6.2 mit EPSG:5683/5684 und demselben towgs84. */
+const DBREF = { tx: 584.9636, ty: 107.7175, tz: 413.8067,
+  rx: -1.1155214628, ry: -0.2824339890, rz: 3.1384490633, s: 7.992235 };
+const ELL_GRS80 = { a: 6378137, f: 1 / 298.257222101 };
+const ELL_BESSEL = { a: 6377397.155, f: 1 / 299.1528128 };
+
+function ellXyz(lat, lon, h, { a, f }) {
+  const p = lat * Math.PI / 180, l = lon * Math.PI / 180, e2 = f * (2 - f);
+  const N = a / Math.sqrt(1 - e2 * Math.sin(p) ** 2);
+  return [(N + h) * Math.cos(p) * Math.cos(l), (N + h) * Math.cos(p) * Math.sin(l), (N * (1 - e2) + h) * Math.sin(p)];
+}
+
+function ellAusXyz([x, y, z], { a, f }) {
+  const e2 = f * (2 - f), r = Math.hypot(x, y);
+  let p = Math.atan2(z, r * (1 - e2)), h = 0;
+  for (let i = 0; i < 8; i++) {
+    const N = a / Math.sqrt(1 - e2 * Math.sin(p) ** 2);
+    h = r / Math.cos(p) - N;
+    p = Math.atan2(z, r * (1 - e2 * N / (N + h)));
+  }
+  return [p * 180 / Math.PI, Math.atan2(y, x) * 180 / Math.PI];
+}
+
+/** Transversale Mercator nach Krüger (vierte Ordnung) auf beliebigem Ellipsoid. */
+function tmHin(lat, lon, { a, f }, l0, k0, e0) {
+  const n = f / (2 - f), n2 = n * n, n3 = n2 * n, n4 = n3 * n;
+  const A = a / (1 + n) * (1 + n2 / 4 + n4 / 64);
+  const alpha = [n / 2 - 2 * n2 / 3 + 5 * n3 / 16 + 41 * n4 / 180, 13 * n2 / 48 - 3 * n3 / 5 + 557 * n4 / 1440,
+    61 * n3 / 240 - 103 * n4 / 140, 49561 * n4 / 161280];
+  const p = lat * Math.PI / 180, l = (lon - l0) * Math.PI / 180, ex = 2 * Math.sqrt(n) / (1 + n);
+  const t = Math.sinh(Math.atanh(Math.sin(p)) - ex * Math.atanh(ex * Math.sin(p)));
+  const xi1 = Math.atan2(t, Math.cos(l)), eta1 = Math.atanh(Math.sin(l) / Math.sqrt(1 + t * t));
+  let xi = xi1, eta = eta1;
+  for (let j = 1; j <= 4; j++) {
+    xi += alpha[j - 1] * Math.sin(2 * j * xi1) * Math.cosh(2 * j * eta1);
+    eta += alpha[j - 1] * Math.cos(2 * j * xi1) * Math.sinh(2 * j * eta1);
+  }
+  return [e0 + k0 * A * eta, k0 * A * xi];
+}
+
+/** ETRS89 (Grad) → DB_REF Gauß-Krüger im Streifen 3 oder 4: [Rechts, Hoch]. */
+function dbrefGk(lat, lon, streifen) {
+  const [x, y, z] = ellXyz(lat, lon, 0, ELL_GRS80);
+  const sek = Math.PI / 180 / 3600, rx = DBREF.rx * sek, ry = DBREF.ry * sek, rz = DBREF.rz * sek;
+  const m = 1 + DBREF.s * 1e-6;
+  // Umkehrung von X_etrs = T + m·R·X_dbref: X_dbref = Rᵀ·(X_etrs − T) / m
+  const u = (x - DBREF.tx) / m, v = (y - DBREF.ty) / m, w = (z - DBREF.tz) / m;
+  const xd = u - rz * v + ry * w, yd = rz * u + v - rx * w, zd = -ry * u + rx * v + w;
+  const [pb, lb] = ellAusXyz([xd, yd, zd], ELL_BESSEL);
+  return tmHin(pb, lb, ELL_BESSEL, 3 * streifen, 1, streifen * 1e6 + 500000);
+}
+
+/* Die Streifengrenze liegt bei 10,5° O, mitten durch Bayern. Nahe daran
+ * (±0,5°) stehen beide Streifen da — welcher im Plan gilt, ist dort nicht klar. */
+function dbrefStreifen(lon) {
+  if (Math.abs(lon - 10.5) < 0.5) return [3, 4];
+  return [lon < 10.5 ? 3 : 4];
+}
+
+/* Auf ganze Meter: Die Lage selbst ist nur auf ±10–30 m bekannt (siehe
+ * pdfGenauigkeit) — Dezimeter täuschten eine Vermessung vor. */
 const pdfKoord = (lat, lon) => {
-  const [e, n] = utm32Hin(lat, lon), nf = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  return [`${lat.toFixed(5).replace('.', ',')}° N  ${lon.toFixed(5).replace('.', ',')}° O`, `UTM 32: ${nf.format(e)} / ${nf.format(n)}`];
+  const nf = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
+  const [e, n] = utm32Hin(lat, lon);
+  return [`${lat.toFixed(5).replace('.', ',')}° N  ${lon.toFixed(5).replace('.', ',')}° O`, `UTM 32: ${nf.format(e)} / ${nf.format(n)}`,
+    ...dbrefStreifen(lon).map(s => { const [r, h] = dbrefGk(lat, lon, s); return `DB_REF GK${s}: ${nf.format(r)} / ${nf.format(h)}`; })];
 };
 
 /** Die Angaben rechts unter dem Luftbild, als [Bezeichnung, Wert, Erklärung].
  *  Die Erklärung steht klein darunter — in der Leiste stehen diese Zahlen nicht
  *  mehr, hier sollen sie ohne Rätseln lesbar sein. */
-function pdfAngaben() {
-  const g = profGleis, kw = profKennwerte(), raus = [];
-  const hm = z => Number.isFinite(z) ? `${nfH.format(z)} m` : '–';
+function pdfAngaben(z) {
+  const { g, dgm } = z, kw = profKennwerte(dgm, z.dom, z.domDgm), raus = [];
+  const hm = v => Number.isFinite(v) ? `${nfH.format(v)} m` : '–';
   if (g && g.art === 'quer') {
-    const q = pdfQuerWerte(profDgm);
+    const q = pdfQuerWerte(dgm);
     raus.push(['Höhe am Gleis', `${hm(q.h)} ü. NHN`, 'Gelände in der Gleisachse (DGM1)'],
-      ['Gelände am Rand', `links ${profVz(q.li)} · rechts ${profVz(q.re)} m`, 'Außenrand des Schnitts gegen die Höhe am Gleis'],
-      ...(profGeb ? [['Gebäude ab Gleis', gebWand(profGeb, profDgm.laenge) || 'keine im Schnitt',
+      ...(z.geb ? [['Gebäude ab Gleis', gebWand(z.geb, dgm.laenge, z.breite) || 'keine im Schnitt',
         'waagrecht von der Gleisachse bis zur nächsten Wand']] : []),
-      ['Breite', `je ${nfM.format(gpBreite())} m`, 'links und rechts mit Blick in Richtung steigender km']);
+      ['Breite', `je ${nfM.format(z.breite)} m`, 'links und rechts mit Blick in Richtung steigender km']);
   } else if (g) {
-    raus.push(['Höhe am Gleis', `${hm(profWertBei(profDgm, profDgm.ecken[g.mitteIndex]))} ü. NHN`, 'Gelände in der Gleisachse am gesuchten km']);
-    const ng = profNeigung(profDgm);
+    raus.push(['Höhe am Gleis', `${hm(profWertBei(dgm, dgm.ecken[g.mitteIndex]))} ü. NHN`, 'Gelände in der Gleisachse am gesuchten km']);
+    const ng = profNeigung(dgm);
     if (Number.isFinite(ng)) raus.push(['Neigung', `${profVz(ng)} ‰`, 'Ausgleichsgerade über den Schnitt; plus: steigt mit km']);
-    raus.push(['Höhenunterschied', `${profVz(kw.dh)} m`, 'Gelände am Ende minus am Anfang'], ['Gleislänge', messText(profDgm.laenge)]);
+    raus.push(['Höhenunterschied', `${profVz(kw.dh)} m`, 'Gelände am Ende minus am Anfang'], ['Gleislänge', messText(dgm.laenge)]);
   } else {
-    raus.push(['Länge', messText(profDgm.laenge)], ['Höhenunterschied', `${profVz(kw.dh)} m`, 'Gelände bei B minus bei A'],
+    raus.push(['Länge', messText(dgm.laenge)], ['Höhenunterschied', `${profVz(kw.dh)} m`, 'Gelände bei B minus bei A'],
       ['Tiefster / höchster', `${hm(kw.min)} / ${hm(kw.max)}`, 'Gelände im ganzen Schnitt, ü. NHN']);
-    if (profVersatz) raus.push(['Versetzt', `${profVersatz > 0 ? '+' : '−'}${nfM.format(Math.abs(profVersatz))} m`, 'parallel, plus: links von A→B']);
+    if (z.versatz) raus.push(['Versetzt', `${z.versatz > 0 ? '+' : '−'}${nfM.format(Math.abs(z.versatz))} m`, 'parallel, plus: links von A→B']);
   }
   if (kw.obj) raus.push(['Objekte (DOM20)', `bis ${nfH.format(kw.obj.hoehe)} m`, 'höchster Punkt der Oberfläche über dem Gelände']);
-  const ort = g ? g.mitte : profLinie()[0];
-  if (ort) { const [a, b] = pdfKoord(ort[0], ort[1]); raus.push([g ? 'Lage am Gleis' : 'Lage A', a], ['', b]); }
+  const ort = g ? g.mitte : z.linie[0];
+  if (ort) pdfKoord(ort[0], ort[1]).forEach((t, i) => raus.push([i ? '' : g ? 'Lage am Gleis' : 'Lage A', t]));
   return raus;
 }
 
+/* Genauigkeit: was die Quellen selbst angeben. Das PDF ist eine Übersicht, und
+ * wer es in der Hand hat, soll das sehen, ohne die App zu kennen. Angaben der
+ * Bayerischen Vermessungsverwaltung (Produktseiten und Metadaten, Oktober 2026);
+ * Gleislage und km aus den Messungen in der README („Wie genau ist das?"). */
+function pdfGenauigkeit(s, x, y, quellen) {
+  const F = PDF_FARBEN;
+  const zeilen = [
+    ['Gleislage, km', 'OSM, typisch ±10–30 m, vereinzelt mehr'],
+    ['Koordinaten', 'so genau wie die Lage, aus der sie stammen'],
+    ['Gelände DGM1', 'Höhe ±0,2 m, Lage ±0,5 m (freies Gelände)'],
+    quellen.dom && ['Oberfläche DOM20', 'regional verschieden, ohne feste Angabe'],
+    quellen.geb && ['Gebäude LoD2', 'Dachhöhe typ. ±0,2–0,3 m, bis über 1 m'],
+    quellen.dop && ['Luftbild DOP20', 'Lage ±0,4–0,6 m'],
+  ].filter(Boolean);
+  s.text(x, y, 'Genauigkeit', { groesse: 7.5, fett: true, farbe: F.text });
+  y += 10;
+  s.text(x, y, 'Zur Übersicht, keine Vermessung. Angaben der Datenquellen:', { groesse: 6.5, farbe: F.fein });
+  for (const [k, v] of zeilen) {
+    y += 9;
+    s.text(x, y, k, { groesse: 6.5, farbe: F.fein });
+    s.text(x + 62, y, v, { groesse: 6.5, farbe: F.text });
+  }
+}
+
 /** Ein Satz unter dem Titel: was der Schnitt zeigt und wie er liegt. */
-function pdfSchnittText() {
-  const g = profGleis;
+function pdfSchnittText(z) {
+  const g = z.g;
   if (g && g.art === 'quer') return 'Querschnitt rechtwinklig zum Gleis, Blick in Richtung steigender km: links im Bild ist links vom Gleis.';
   if (g) return 'Längsschnitt in der Gleisachse; die km-Angaben stehen an der Achse.';
-  return `Geländeschnitt entlang der getippten Punkte ${profName(0)}–${profName(profPunkte.length - 1)}.`;
+  return `Geländeschnitt entlang der getippten Punkte ${profName(0)}–${profName(z.linie.length - 1)}.`;
+}
+
+/* Ein Schnitt mit allem, was eine PDF-Seite braucht — vom offenen Profil
+ * abgezogen. Kopien, wo das offene Profil später weiterverändert wird
+ * (Springen ändert profGleis, ein Tipp hängt an profPunkte an); die
+ * Höhenprofile selbst werden nur ersetzt, nie verändert. */
+function profSchnitt() {
+  return {
+    g: profGleis && { ref: profGleis.ref, km: profGleis.km, art: profGleis.art, mitte: profGleis.mitte,
+      kms: profGleis.kms && [...profGleis.kms], mitteIndex: profGleis.mitteIndex },
+    dgm: profDgm, dom: profDom, domDgm: profDomDgm, geb: profGeb,
+    linie: profLinie().map(p => [p[0], p[1]]), versatz: profVersatz,
+    breite: gpBreite(), laenge: gpLaenge(),
+    // Dieselbe Überhöhung wie im Bild der Leiste, nicht die womöglich steilere gemerkte Wahl
+    wahl: profUeberRunden(profUeberWirksam())
+  };
+}
+
+/** Titel auf der Seite und Dateiname. */
+function pdfTitel(z, serie = false) {
+  const g = z.g;
+  if (g && g.art === 'quer') {
+    const wort = serie ? 'Querprofile' : 'Querprofil';
+    return { titel: `${wort} Strecke ${g.ref} · km ${fmtKm(g.km)}`, name: `${wort} ${g.ref} km ${fmtKm(g.km)}.pdf` };
+  }
+  if (g) {
+    const a = fmtKm(g.kms[0]), b = fmtKm(g.kms[g.kms.length - 1]);
+    return { titel: `Längsprofil Strecke ${g.ref} · km ${a} – ${b}`, name: `Längsprofil ${g.ref} km ${a}-${b}.pdf` };
+  }
+  return { titel: `Geländeprofil ${profName(0)}–${profName(z.linie.length - 1)}`,
+    name: `Geländeprofil ${new Date().toISOString().slice(0, 10)}.pdf` };
+}
+
+/* Die Seite eines Schnitts: Diagramm links, Luftbild und Angaben rechts.
+ * serie: die Querschnitte der Serie, nur fürs Luftbild. Gibt die Quellen
+ * zurück, die auf der Seite vorkommen. */
+async function pdfSchnittSeite(dok, z, { titel, nr = 1, gesamt = 1, serie = null }) {
+  const F = PDF_FARBEN, g = z.g, s = dok.seite();
+  const L = z.dgm.laenge, achse = profAchse(L, z);
+  const box = { x: PDF_RAND, y: 92, w: 530 };
+  const [zmin, zmax] = profZSpanne(z);
+  const f = profHoehenfenster(zmin, zmax, L, box.w - 38, z.wahl, 170, 400);
+  const weite = g ? `±${nfM.format(g.art === 'quer' ? z.breite : z.laenge)} m` : messText(L);
+  pdfKopf(s, titel, `${new Date().toLocaleDateString('de-DE')} · ${weite} · ${pdfUeberText(z.wahl, f.k)}`);
+
+  // Die Kennwerte stehen mit Erklärung rechts unter dem Luftbild; hier nur, was der Schnitt zeigt
+  s.text(PDF_RAND, 74, pdfSchnittText(z), { groesse: 9, farbe: F.fein });
+  pdfProfil(s, box, z, achse, f);
+  const leg = [['Gelände DGM1', F.gelLinie, null]];
+  if (z.dom) leg.push(['Oberfläche DOM20', F.dom, [2.5, 2]]);
+  if (z.geb) leg.push(['Gebäude LoD2', F.gebLinie, 'block']);
+  let lx = box.x + 34;
+  const ly = box.y + f.ph + 40;
+  for (const [text, farbe, art2] of leg) {
+    if (art2 === 'block') s.rechteck(lx, ly - 6, 14, 7, { farbe, fuellung: F.geb, breite: 0.6 });
+    else s.linie([[lx, ly - 2.5], [lx + 14, ly - 2.5]], { farbe, breite: art2 ? 0.6 : 1.2, strichel: art2 });
+    lx += 18 + s.text(lx + 18, ly, text, { groesse: 7.5, farbe: F.fein }) + 14;
+  }
+
+  const kbox = { x: 586, y: 92, w: 220, h: 165 };
+  const linien = serie ? serie.map(q => q.punkte) : [z.linie];
+  const hervor = serie ? serie.findIndex(q => Math.abs(q.km - g.km) < 1e-6) : -1;
+  const n = linien[0].length;
+  const schilder = serie ? [] : g && g.art === 'quer' ? [['links', linien[0][0]], ['rechts', linien[0][1]]]
+    : g ? [] : linien[0].map((p, i) => [profName(i), p]);
+  if (g && g.art === 'laengs') schilder.push(['km ' + fmtKm(g.kms[0]), linien[0][0]], ['km ' + fmtKm(g.kms[g.kms.length - 1]), linien[0][n - 1]]);
+  const mitBild = await pdfKarte(dok, s, kbox, linien, { hervor, schilder });
+  s.text(kbox.x, kbox.y + kbox.h + 10, mitBild ? `Luftbild DOP20${serie ? ` · ${serie.length} Schnitte, alle ${PDF_SERIE.schritt} m` : ''}` : '',
+    { groesse: 7, farbe: F.fein });
+  let ay = kbox.y + kbox.h + 30;
+  for (const [k, v, erkl] of pdfAngaben(z)) {
+    if (k) s.text(kbox.x, ay, k, { groesse: 7.5, farbe: F.fein });
+    s.text(kbox.x + 82, ay, v, { groesse: 8, farbe: F.text });
+    // Über die ganze Spaltenbreite, rechts neben der Bezeichnung wäre sie zu schmal
+    if (erkl) { ay += 9; s.text(kbox.x, ay, erkl, { groesse: 6.5, farbe: F.fein }); }
+    ay += 12.5;
+  }
+  const quellen = { dom: !!z.dom, geb: !!z.geb, dop: mitBild, osm: !!g };
+  pdfGenauigkeit(s, kbox.x, ay + 6, quellen);
+  pdfFuss(s, nr, gesamt, quellen);
+  return quellen;
 }
 
 /** quellen: was im PDF vorkommt — { dom, geb, dop, osm } */
@@ -5937,41 +6241,25 @@ const pdfUeberText = (wahl, k) => {
 /** art: 'eins' oder 'serie' (nur quer am Gleis). */
 async function profPdfErstellen(art) {
   if (!profDgm || (profPdf && profPdf.laeuft)) return;
-  const stand = t => {
-    profPdf = { laeuft: t };
-    const el = $('#profPdfStand');
-    if (el) el.textContent = t; else profLeiste();
-  };
+  const stand = profPdfStand;
   stand('PDF wird erstellt …');
   try {
-    // Dieselbe Überhöhung wie im Bild der Leiste, nicht die womöglich steilere gemerkte Wahl
-    const g = profGleis, F = PDF_FARBEN, wahl = profUeberRunden(profUeberWirksam());
-    const heute = new Date().toLocaleDateString('de-DE');
-    let titel, name;
-    if (g && g.art === 'quer') {
-      titel = `${art === 'serie' ? 'Querprofile' : 'Querprofil'} Strecke ${g.ref} · km ${fmtKm(g.km)}`;
-      name = `${art === 'serie' ? 'Querprofile' : 'Querprofil'} ${g.ref} km ${fmtKm(g.km)}.pdf`;
-    } else if (g) {
-      titel = `Längsprofil Strecke ${g.ref} · km ${fmtKm(g.kms[0])} – ${fmtKm(g.kms[g.kms.length - 1])}`;
-      name = `Längsprofil ${g.ref} km ${fmtKm(g.kms[0])}-${fmtKm(g.kms[g.kms.length - 1])}.pdf`;
-    } else {
-      titel = `Geländeprofil ${profName(0)}–${profName(profPunkte.length - 1)}`;
-      name = `Geländeprofil ${new Date().toISOString().slice(0, 10)}.pdf`;
-    }
+    const z = profSchnitt(), g = z.g, F = PDF_FARBEN, wahl = z.wahl;
+    const { titel, name } = pdfTitel(z, art === 'serie');
 
     // Serie: jeder Schnitt mit denselben Ebenen wie gerade in der Leiste
     let serie = null;
     if (art === 'serie' && g && g.art === 'quer') {
       serie = [];
-      const W = gpBreite(), anzahl = Math.round(2 * PDF_SERIE.halb / PDF_SERIE.schritt) + 1;
+      const W = z.breite, anzahl = Math.round(2 * PDF_SERIE.halb / PDF_SERIE.schritt) + 1;
       for (let i = 0; i < anzahl; i++) {
         const km = Math.round((g.km + (i * PDF_SERIE.schritt - PDF_SERIE.halb) / 1000) * 1e6) / 1e6;
         stand(`Querschnitt ${i + 1} von ${anzahl} …`);
         const q = await gpQuerPunkte(g.ref, km, W);
         if (!q) continue;
         const dgm = await hoehenProfil(q.punkte, 'dgm1');
-        const dom = profDom ? await hoehenProfil(q.punkte, 'dom20', { maxPunkte: 6000 }) : null;
-        const geb = profGeb ? await gebaeudeImSchnitt(q.punkte, dgm) : null;
+        const dom = z.dom ? await hoehenProfil(q.punkte, 'dom20', { maxPunkte: 6000 }) : null;
+        const geb = z.geb ? await gebaeudeImSchnitt(q.punkte, dgm) : null;
         serie.push({ km, ...q, dgm, dom, geb });
       }
       if (!serie.length) throw new Error('kein Querschnitt bestimmbar');
@@ -5979,8 +6267,7 @@ async function profPdfErstellen(art) {
 
     stand('Luftbild wird geladen …');
     const dok = new PdfDokument({ titel });
-    const s = dok.seite();
-    const L = profDgm.laenge, achse = profAchse(L);
+    const L = z.dgm.laenge;
     // Serie: zwei Spalten, so viele Reihen, wie das gemeinsame Höhenfenster zulässt — flache Schnitte liegen dicht
     let sl = null;
     if (serie) {
@@ -5992,46 +6279,7 @@ async function profPdfErstellen(art) {
       sl = { zw, fs, zh, jeSeite: 2 * reihen };
     }
     const gesamt = serie ? 1 + Math.ceil(serie.length / sl.jeSeite) : 1;
-    const box = { x: PDF_RAND, y: 92, w: 530 };
-    const [zmin, zmax] = profZSpanne({ dgm: profDgm, dom: profDom, geb: profGeb });
-    const f = profHoehenfenster(zmin, zmax, L, box.w - 38, wahl, 170, 400);
-    const weite = g ? (g.art === 'quer' ? `±${nfM.format(gpBreite())} m` : `±${nfM.format(gpLaenge())} m`) : messText(L);
-    pdfKopf(s, titel, `${heute} · ${weite} · ${pdfUeberText(wahl, f.k)}`);
-
-    // Die Kennwerte stehen mit Erklärung rechts unter dem Luftbild; hier nur, was der Schnitt zeigt
-    s.text(PDF_RAND, 74, pdfSchnittText(), { groesse: 9, farbe: F.fein });
-    pdfProfil(s, box, { dgm: profDgm, dom: profDom, geb: profGeb }, achse, f);
-    const leg = [['Gelände DGM1', F.gelLinie, null]];
-    if (profDom) leg.push(['Oberfläche DOM20', F.dom, [2.5, 2]]);
-    if (profGeb) leg.push(['Gebäude LoD2', F.gebLinie, 'block']);
-    let lx = box.x + 34;
-    const ly = box.y + f.ph + 40;
-    for (const [text, farbe, art2] of leg) {
-      if (art2 === 'block') s.rechteck(lx, ly - 6, 14, 7, { farbe, fuellung: F.geb, breite: 0.6 });
-      else s.linie([[lx, ly - 2.5], [lx + 14, ly - 2.5]], { farbe, breite: art2 ? 0.6 : 1.2, strichel: art2 });
-      lx += 18 + s.text(lx + 18, ly, text, { groesse: 7.5, farbe: F.fein }) + 14;
-    }
-
-    const kbox = { x: 586, y: 92, w: 220, h: 165 };
-    const linien = serie ? serie.map(q => q.punkte) : [profLinie()];
-    const hervor = serie ? serie.findIndex(q => Math.abs(q.km - g.km) < 1e-6) : -1;
-    const n = linien[0].length;
-    const schilder = serie ? [] : g && g.art === 'quer' ? [['links', linien[0][0]], ['rechts', linien[0][1]]]
-      : g ? [] : linien[0].map((p, i) => [profName(i), p]);
-    if (g && g.art === 'laengs') schilder.push(['km ' + fmtKm(g.kms[0]), linien[0][0]], ['km ' + fmtKm(g.kms[g.kms.length - 1]), linien[0][n - 1]]);
-    const mitBild = await pdfKarte(dok, s, kbox, linien, { hervor, schilder });
-    s.text(kbox.x, kbox.y + kbox.h + 10, mitBild ? `Luftbild DOP20${serie ? ` · ${serie.length} Schnitte, alle ${PDF_SERIE.schritt} m` : ''}` : '',
-      { groesse: 7, farbe: F.fein });
-    let ay = kbox.y + kbox.h + 30;
-    for (const [k, v, erkl] of pdfAngaben()) {
-      if (k) s.text(kbox.x, ay, k, { groesse: 7.5, farbe: F.fein });
-      s.text(kbox.x + 82, ay, v, { groesse: 8, farbe: F.text });
-      // Über die ganze Spaltenbreite, rechts neben der Bezeichnung wäre sie zu schmal
-      if (erkl) { ay += 9; s.text(kbox.x, ay, erkl, { groesse: 6.5, farbe: F.fein }); }
-      ay += 12.5;
-    }
-    const quellen = { dom: !!profDom, geb: !!profGeb, dop: mitBild, osm: !!g };
-    pdfFuss(s, 1, gesamt, quellen);
+    const quellen = await pdfSchnittSeite(dok, z, { titel, gesamt, serie });
 
     if (serie) {
       // Alle Schnitte im selben Fenster: gemeinsame Höhenspanne, derselbe Maßstab
@@ -6039,15 +6287,16 @@ async function profPdfErstellen(art) {
       const kopf = `Querprofile Strecke ${g.ref} · km ${fmtKm(serie[0].km)} – ${fmtKm(serie[serie.length - 1].km)}`;
       for (let p = 0; p * jeSeite < serie.length; p++) {
         const sp = dok.seite();
-        pdfKopf(sp, kopf, `alle ${PDF_SERIE.schritt} m · ±${nfM.format(gpBreite())} m · ${pdfUeberText(wahl, fs.k)} · gleiches Höhenfenster`);
+        pdfKopf(sp, kopf, `alle ${PDF_SERIE.schritt} m · ±${nfM.format(z.breite)} m · ${pdfUeberText(wahl, fs.k)} · gleiches Höhenfenster`);
         serie.slice(p * jeSeite, (p + 1) * jeSeite).forEach((q, j) => {
           const x = PDF_RAND + (j % 2) * (zw + 24), y = 70 + Math.floor(j / 2) * (zh + 10);
           const qw = pdfQuerWerte(q.dgm), aktuell = Math.abs(q.km - g.km) < 1e-6;
           sp.text(x, y + 10, `km ${fmtKm(q.km)}${aktuell ? '  (aktuell)' : ''}`, { groesse: 10, fett: true, farbe: aktuell ? F.lapis : F.text });
-          const gw = q.geb && gebWand(q.geb, q.dgm.laenge);
-          sp.text(x + zw, y + 10, `Gleis ${Number.isFinite(qw.h) ? nfH.format(qw.h) : '–'} m · links ${profVz(qw.li)} · rechts ${profVz(qw.re)} m` +
-            (gw ? ` · Gebäude ${gw}` : ''), { groesse: 7.5, farbe: F.fein, anker: 'end' });
-          pdfProfil(sp, { x, y: y + 16, w: zw }, q, profAchse(q.dgm.laenge), fs);
+          // Ohne den Höhenversatz am Rand — der sagte im Plan nichts
+          const gw = q.geb && gebWand(q.geb, q.dgm.laenge, z.breite);
+          sp.text(x + zw, y + 10, `Gleis ${Number.isFinite(qw.h) ? nfH.format(qw.h) : '–'} m ü. NHN` +
+            (gw ? ` · Gebäude ab Gleis ${gw}` : ''), { groesse: 7.5, farbe: F.fein, anker: 'end' });
+          pdfProfil(sp, { x, y: y + 16, w: zw }, q, profAchse(q.dgm.laenge, { g, dgm: q.dgm, breite: z.breite }), fs);
         });
         pdfFuss(sp, p + 2, gesamt, quellen);
       }
@@ -6063,24 +6312,33 @@ async function profPdfErstellen(art) {
   }
 }
 
+function profPdfStand(t) {
+  profPdf = { laeuft: t };
+  const el = $('#profPdfStand');
+  if (el) el.textContent = t; else profLeiste();
+}
+
 /** Auf dem Handy das Teilen-Menü, sonst speichern. Ist die Geste zu lange her
- *  (eine Serie dauert Sekunden), braucht das Teilen einen zweiten Tipp. */
-async function pdfAusgeben(datei, titel) {
+ *  (eine Serie dauert Sekunden), braucht das Teilen einen zweiten Tipp: Dann
+ *  kommt { fertig, titel } zurück, sonst null. */
+async function pdfRaus(datei, titel) {
   const mobil = window.matchMedia && matchMedia('(pointer: coarse)').matches;
   if (mobil && navigator.canShare && navigator.canShare({ files: [datei] })) {
     try {
       await navigator.share({ files: [datei], title: titel });
-      profPdf = null;
+      return null;
     } catch (err) {
-      profPdf = err.name === 'AbortError' ? null : { fertig: datei, titel };
+      return err.name === 'AbortError' ? null : { fertig: datei, titel };
     }
-    profLeiste();
-    return;
   }
   pdfSpeichern(datei);
-  profPdf = null;
-  profLeiste();
   toast(`PDF gespeichert: ${datei.name}`);
+  return null;
+}
+
+async function pdfAusgeben(datei, titel) {
+  profPdf = await pdfRaus(datei, titel);
+  profLeiste();
 }
 
 function pdfSpeichern(datei) {
@@ -6103,22 +6361,220 @@ function profPdfZeile() {
       `<button type="button" data-pdf="speichern">Speichern</button>${zu}</div>`;
   }
   const anzahl = Math.round(2 * PDF_SERIE.halb / PDF_SERIE.schritt) + 1;
-  return '<div class="prof-pdf"><span>PDF</span><button type="button" data-pdf="eins">Dieser Schnitt</button>' +
-    `<button type="button" data-pdf="serie">Serie ±${PDF_SERIE.halb} m · ${anzahl} Schnitte</button>${zu}</div>`;
+  const quer = profGleis && profGleis.art === 'quer';
+  const serie = quer ? `<button type="button" data-pdf="serie">Serie ±${PDF_SERIE.halb} m · ${anzahl} Schnitte</button>` : '';
+  // Quer am Gleis: Strecke und km in die Profilmappe (Messmenü) schreiben
+  const n = mappeEintraege().length;
+  const mappe = quer ? '<span class="prof-pdf-umbruch"></span>' +
+    `<button type="button" data-pdf="mappe">+ In die Profilmappe${n ? ` (${n})` : ''}</button>` : '';
+  return `<div class="prof-pdf"><span>PDF</span><button type="button" data-pdf="eins">Dieser Schnitt</button>${serie}${zu}${mappe}</div>`;
 }
 
 function profPdfTipp(was) {
   if (was === 'zu') { profPdf = null; profLeiste(); return; }
   if (was === 'eins' || was === 'serie') { profPdfErstellen(was); return; }
+  if (was === 'mappe') { mappeDazu(profGleis.ref, profGleis.km); profLeiste(); return; }
   const f = profPdf && profPdf.fertig;
   if (!f) return;
   if (was === 'speichern') { pdfSpeichern(f); profPdf = null; profLeiste(); return; }
   navigator.share({ files: [f], title: profPdf.titel }).then(() => { profPdf = null; profLeiste(); }).catch(() => {});
 }
 
+/* ---- Profilmappe (Messmenü) ----
+ *
+ * Querschnitte an mehreren Stellen, auch auf verschiedenen Strecken, als ein
+ * PDF mit einer Seite je Schnitt. Eingegeben wird eine Liste: je Zeile eine
+ * Strecke und ein oder mehrere Kilometer, wie im Suchfeld („5321 106,0 &
+ * 106,2"). Die Liste bleibt gespeichert; aus dem Querprofil legt „+ In die
+ * Profilmappe" Strecke und km dazu. Breite, Ebenen und Überhöhung gelten für
+ * alle Schnitte, damit die Seiten vergleichbar sind.
+ *
+ * Bis Oktober 2026 sammelte eine „Mappe" in der PDF-Zeile die gerade offenen
+ * Schnitte als Schnappschuss — zu wenig greifbar: Man sah nicht, was drin war,
+ * und nach einem Neustart war sie weg. */
+const MAPPE_UEBER = [1, 2, 5, 10];
+let mappeOffen = false;
+let mappeStand = '';                   // Fortschritt beim Erstellen
+let mappeFertig = null;                // { fertig: File, titel }: Teilen braucht einen zweiten Tipp
+let mappeFehlt = [];                   // Schnitte, die beim letzten Erstellen nicht zustande kamen
+
+const mappeBreite = () => GP_BREITEN.includes(prefs.mappeBreite) ? prefs.mappeBreite : 50;
+const mappeUeber = () => MAPPE_UEBER.includes(prefs.mappeUeber) ? prefs.mappeUeber : 1;
+
+/** Die Zeilen der Liste als [{ ref, km }]; unlesbare Zeilen unter fehler (Zeilennummern ab 1). */
+function mappeLesen(text = prefs.mappeText || '') {
+  const eintraege = [], fehler = [];
+  text.split(/\r?\n/).forEach((zeile, i) => {
+    const t = kmTokens(zeile);
+    if (!t.length) return;
+    const kms = t.slice(1).map(toKm);
+    if (!/^\d{3,4}$/.test(t[0]) || !kms.length || !kms.every(Number.isFinite)) { fehler.push(i + 1); return; }
+    for (const km of kms) eintraege.push({ ref: t[0], km });
+  });
+  return { eintraege, fehler };
+}
+const mappeEintraege = () => mappeLesen().eintraege;
+
+/** Strecke und km hinten anhängen — an die letzte Zeile, wenn sie dieselbe Strecke hat. */
+function mappeDazu(ref, km) {
+  const zeilen = (prefs.mappeText || '').split(/\r?\n/).filter(z => z.trim());
+  const letzte = zeilen.length ? kmTokens(zeilen[zeilen.length - 1]) : [];
+  if (letzte[0] === ref) zeilen[zeilen.length - 1] += ` & ${fmtKm(km)}`;
+  else zeilen.push(`${ref} ${fmtKm(km)}`);
+  prefs.mappeText = zeilen.join('\n');
+  saveStore();
+  const n = mappeEintraege().length;
+  toast(`In der Profilmappe: ${n} ${n === 1 ? 'Querschnitt' : 'Querschnitte'}`);
+}
+
+function mappeStart() {
+  if (profModus) profEnde(false);
+  if (messModus) messEnde();
+  mappeOffen = true;
+  mappeFertig = null;
+  mappeFehlt = [];
+  closeSheet();
+  mappeLeiste();
+  syncButtons();
+}
+
+function mappeEnde() {
+  mappeOffen = false;
+  mappeStand = '';
+  mappeFertig = null;
+  syncButtons();
+  renderBottom();
+}
+
+/** Anzahl und unlesbare Zeilen — ohne die Leiste neu zu bauen, damit das Textfeld den Fokus behält. */
+function mappeZaehlen() {
+  const { eintraege, fehler } = mappeLesen();
+  const n = eintraege.length;
+  $('#mappeAnzahl').textContent = `${n} ${n === 1 ? 'Querschnitt' : 'Querschnitte'}`;
+  $('#mappeFehler').textContent = fehler.length
+    ? `Nicht lesbar: Zeile ${fehler.join(', ')} — erst die Strecke, dann die Kilometer` : '';
+  $('#mappeLos').disabled = !n || !!mappeStand;
+}
+
+function mappeLeiste() {
+  const b = $('#bottom');
+  b.hidden = false;
+  const W = mappeBreite(), u = mappeUeber();
+  const ebene = (id, an, text, geb) => `<button type="button" class="prof-dom${geb ? ' prof-geb' : ''}${an ? ' is-on' : ''}" ` +
+    `id="${id}" aria-pressed="${an}">${text}</button>`;
+  const striche = GP_BREITEN.map((_, i) => `<i style="--p:${(i / (GP_BREITEN.length - 1)).toFixed(4)}"></i>`).join('');
+  const stand = mappeStand ? `<p class="mappe-stand">${esc(mappeStand)}</p>`
+    : mappeFertig ? '<div class="prof-pdf"><span>PDF fertig</span><button type="button" data-mappe="teilen">Teilen</button>' +
+      '<button type="button" data-mappe="speichern">Speichern</button></div>' : '';
+  const fehlt = mappeFehlt.length
+    ? `<p class="bb-note">Ohne Seite: ${mappeFehlt.map(esc).join(' · ')}</p>` : '';
+  b.innerHTML = `
+    <button type="button" id="bbClose" class="bb-close" aria-label="Profilmappe schließen">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div class="bb-head"><p class="bb-title">Profilmappe</p><span class="tag" id="mappeAnzahl"></span></div>
+    <textarea id="mappeText" class="mappe-text" rows="4" spellcheck="false" autocomplete="off"
+      aria-label="Strecken und Kilometer, je Zeile eine Strecke"
+      placeholder="5321 106,0 &amp; 106,2&#10;5100 12,5">${esc(prefs.mappeText || '')}</textarea>
+    <p class="mappe-hilfe">Je Zeile eine Strecke, dahinter ein oder mehrere km. Jeder Querschnitt wird eine Seite.</p>
+    <p class="mappe-fehler" id="mappeFehler"></p>
+    <div class="prof-regler">
+      <span class="prof-ebenen">${ebene('mappeGeb', !!prefs.mappeGeb, 'Gebäude', true)}${ebene('mappeDom', !!prefs.mappeDom, 'Oberfläche')}</span>
+      <label class="prof-rname" for="mappeBreite">Breite</label>
+      <span class="prof-weite"><span class="prof-striche" aria-hidden="true">${striche}</span>
+        <input type="range" id="mappeBreite" min="0" max="${GP_BREITEN.length - 1}" step="1" value="${GP_BREITEN.indexOf(W)}"></span>
+      <output class="prof-wert" id="mappeBreiteWert" for="mappeBreite">${gpWeiteText(W)}</output>
+      <span class="prof-rname">Überhöht</span>
+      <span class="mappe-ueber" role="group" aria-label="Überhöhung">${MAPPE_UEBER.map(v =>
+        `<button type="button" data-ueber="${v}" aria-pressed="${v === u}">${v}×</button>`).join('')}</span>
+    </div>
+    <div class="bb-actions knapp">
+      <button type="button" id="mappeAktuell"${view.ref && view.km != null ? '' : ' disabled'}
+        title="Strecke und km des aktuellen Suchergebnisses anhängen">+ Aktuelles Ergebnis</button>
+      <button type="button" id="mappeLos" class="primary">PDF erstellen</button>
+    </div>
+    ${stand}${fehlt}`;
+
+  const an = (sel, f, ev = 'click') => { const el = b.querySelector(sel); if (el) el.addEventListener(ev, f); };
+  an('#bbClose', mappeEnde);
+  an('#mappeText', ev => { prefs.mappeText = ev.target.value; saveStore(); mappeZaehlen(); }, 'input');
+  an('#mappeGeb', () => { prefs.mappeGeb = !prefs.mappeGeb; saveStore(); mappeLeiste(); });
+  an('#mappeDom', () => { prefs.mappeDom = !prefs.mappeDom; saveStore(); mappeLeiste(); });
+  an('#mappeBreite', ev => { $('#mappeBreiteWert').textContent = gpWeiteText(GP_BREITEN[ev.target.value]); }, 'input');
+  an('#mappeBreite', ev => { prefs.mappeBreite = GP_BREITEN[ev.target.value]; saveStore(); }, 'change');
+  b.querySelectorAll('[data-ueber]').forEach(k => k.addEventListener('click', () => {
+    prefs.mappeUeber = Number(k.dataset.ueber); saveStore(); mappeLeiste();
+  }));
+  an('#mappeAktuell', () => { mappeDazu(view.ref, view.km); mappeLeiste(); });
+  an('#mappeLos', mappePdf);
+  b.querySelectorAll('[data-mappe]').forEach(k => k.addEventListener('click', () => {
+    const f = mappeFertig;
+    if (!f) return;
+    if (k.dataset.mappe === 'speichern') { pdfSpeichern(f.fertig); mappeFertig = null; mappeLeiste(); return; }
+    navigator.share({ files: [f.fertig], title: f.titel }).then(() => { mappeFertig = null; mappeLeiste(); }).catch(() => {});
+  }));
+  mappeZaehlen();
+  updateBH();
+}
+
+function mappeStandSetzen(t) {
+  mappeStand = t;
+  const el = $('#bottom .mappe-stand');
+  if (el && t) el.textContent = t; else mappeLeiste();
+}
+
+async function mappePdf() {
+  const liste = mappeEintraege();
+  if (!liste.length || mappeStand) return;
+  const W = mappeBreite(), wahl = mappeUeber(), mitDom = !!prefs.mappeDom, mitGeb = !!prefs.mappeGeb;
+  const schnitte = [], fehlt = [];
+  mappeFertig = null;
+  mappeFehlt = [];
+  try {
+    // Erst alle Schnitte rechnen, dann zeichnen: Die Seitenzahlen stehen erst fest, wenn klar ist, welche gelingen
+    for (let i = 0; i < liste.length; i++) {
+      const { ref, km } = liste[i], name = `${ref} km ${fmtKm(km)}`;
+      mappeStandSetzen(`Querschnitt ${i + 1} von ${liste.length}: ${name} …`);
+      try {
+        const q = await gpQuerPunkte(ref, km, W);
+        if (!q) { fehlt.push(`${name} (kein Gleisverlauf)`); continue; }
+        const dgm = await hoehenProfil(q.punkte, 'dgm1');
+        if (!dgm.hoehe.some(Number.isFinite)) { fehlt.push(`${name} (keine Höhen, außerhalb Bayerns?)`); continue; }
+        let dom = null, domDgm = null;
+        if (mitDom) {
+          dom = await hoehenProfil(q.punkte, 'dom20', { maxPunkte: 6000 });
+          domDgm = await hoehenWerte('dgm1', dom.ost, dom.nord);
+        }
+        const geb = mitGeb ? await gebaeudeImSchnitt(q.punkte, dgm) : null;
+        schnitte.push({ g: { ref, km, art: 'quer', mitte: q.mitte }, dgm, dom, domDgm, geb,
+          linie: q.punkte, versatz: 0, breite: W, laenge: gpLaenge(), wahl });
+      } catch (err) {
+        fehlt.push(`${name} (${err.message})`);
+      }
+    }
+    if (!schnitte.length) throw new Error('kein Querschnitt kam zustande');
+    const titel = `Querprofile · ${schnitte.length} ${schnitte.length === 1 ? 'Schnitt' : 'Schnitte'}`;
+    const dok = new PdfDokument({ titel });
+    for (let i = 0; i < schnitte.length; i++) {
+      mappeStandSetzen(`Seite ${i + 1} von ${schnitte.length} …`);
+      await pdfSchnittSeite(dok, schnitte[i], { titel: pdfTitel(schnitte[i]).titel, nr: i + 1, gesamt: schnitte.length });
+    }
+    mappeStandSetzen('PDF wird geschrieben …');
+    const datei = new File([await dok.bytes()], `Querprofile ${new Date().toISOString().slice(0, 10)}.pdf`, { type: 'application/pdf' });
+    mappeFehlt = fehlt;
+    mappeStand = '';
+    mappeFertig = await pdfRaus(datei, titel);
+  } catch (err) {
+    mappeFehlt = fehlt;
+    mappeStand = '';
+    toast(`PDF nicht erstellt (${err.message}).`);
+  }
+  if (mappeOffen) mappeLeiste();
+}
+
 /** Abstand Gleis → nächste Gebäudewand links und rechts, als Text; null ohne Gebäude. */
-function gebWand(geb, L) {
-  const mitte = L / 2, proM = L / (2 * gpBreite());
+function gebWand(geb, L, breite = gpBreite()) {
+  const mitte = L / 2, proM = L / (2 * breite);
   let li = null, re = null, drauf = false;
   for (const b of geb) {
     if (b.s0 <= mitte && b.s1 >= mitte) drauf = true;
@@ -6207,12 +6663,11 @@ function profUmrechnen(xs, ys, x) {
  * Gleis und rechts — links in Richtung steigender Kilometer. Längs: der
  * Kilometer; die Station sind dort Meter Gleis, umgerechnet über die
  * Stützpunkte, und oben steht der Kilometer des Schnitts. */
-function profAchse(L) {
-  const g = profGleis;
+function profAchse(L, { g = profGleis, dgm = profDgm, breite = gpBreite() } = {}) {
   const a = { gitter: [], unten: [], oben: [], marken: [], zeiger: null, name: 'Geländeprofil' };
 
   if (g && g.art === 'quer') {
-    const W = gpBreite(), mitte = L / 2, proM = L / (2 * W);
+    const W = breite, mitte = L / 2, proM = L / (2 * W);
     const schritt = profSchritt(W / 2);
     for (let v = -Math.floor(W / schritt + 1e-9) * schritt; v <= W + 1e-9; v += schritt) {
       a.gitter.push(mitte + v * proM);
@@ -6231,7 +6686,7 @@ function profAchse(L) {
   }
 
   if (g) {
-    const kms = g.kms, ecken = profDgm.ecken;
+    const kms = g.kms, ecken = dgm.ecken;
     const k0 = kms[0], k1 = kms[kms.length - 1];
     const schritt = profSchritt((k1 - k0) / 4);
     for (let k = Math.ceil(k0 / schritt - 1e-9) * schritt; k <= k1 + 1e-9; k += schritt) {
@@ -6253,8 +6708,8 @@ function profAchse(L) {
     a.unten.push({ s, text: inKm ? fmtKm(s / 1000) : nfM.format(s), anker: s ? 'middle' : 'start' });
   }
   a.unten.push({ s: L, text: messText(L), anker: 'end' });
-  const letzte = profDgm.ecken.length - 1;
-  profDgm.ecken.forEach((s, i) => {
+  const letzte = dgm.ecken.length - 1;
+  dgm.ecken.forEach((s, i) => {
     if (i > 0 && i < letzte) a.marken.push(s);
     a.oben.push({ s, text: profName(i), anker: i === 0 ? 'start' : i === letzte ? 'end' : 'middle' });
   });
@@ -6978,6 +7433,7 @@ function renderBottom() {
   /* Ein neues Ergebnis löst ein offenes Profil ab — sonst stünde der Schnitt
    * weiter auf der Karte, während die Leiste von etwas anderem redet. */
   if (profModus) profEnde(false);
+  if (mappeOffen) { mappeOffen = false; mappeStand = ''; mappeFertig = null; syncButtons(); }
   const b = $('#bottom');
   const p = view.point;
   if (!p) { b.hidden = true; updateBH(); return; }
@@ -8911,6 +9367,8 @@ function syncButtons() {
    * Pluszeichen markiert und trägt die Farbe */
   const parz = /^#[0-9a-f]{6}$/i.test(prefs.parzFarbe || '') ? prefs.parzFarbe.toLowerCase() : 'auto';
   let parzFest = false;
+  const pp = $('#parzPunkteBtn');
+  if (pp) { pp.classList.toggle('is-on', !!prefs.parzPunkte); pp.setAttribute('aria-pressed', String(!!prefs.parzPunkte)); }
   document.querySelectorAll('[data-parz]').forEach(b => {
     const an = b.dataset.parz === parz;
     if (an) parzFest = true;
@@ -8941,8 +9399,10 @@ function syncButtons() {
 
   const mb = $('#mapMessBtn');
   if (mb) {
-    mb.classList.toggle('is-on', !!tippZiel());
-    mb.setAttribute('aria-pressed', tippZiel() ? 'true' : 'false');
+    // Auch bei offener Profilmappe: Der Knopf schließt sie dann wie ein laufendes Messen
+    const aktiv = !!tippZiel() || mappeOffen;
+    mb.classList.toggle('is-on', aktiv);
+    mb.setAttribute('aria-pressed', String(aktiv));
   }
   abKnopf();
 
@@ -9009,7 +9469,64 @@ async function share() {
 
 /* ============================ Start ============================ */
 
+/* ============================ Wetter ============================
+ *
+ * Luftdruck und Temperatur für die atmosphärische Korrektur am Tachymeter.
+ * Von Open-Meteo (frei, ohne Schlüssel, CORS offen; in Deutschland das ICON-
+ * Modell des DWD). Mit elevation= rechnet der Dienst den Druck auf die
+ * angegebene Höhe um — in Bayern die Geländehöhe aus dem DGM1, gemessen am
+ * 11.10.2026: 278 m → 982,5 hPa, 500 m → 956,4 hPa. Ohne Höhe nimmt er sein
+ * eigenes 90-m-Höhenmodell. Die Lage geht auf drei Nachkommastellen gerundet
+ * hinaus (rund 100 m); für Druck und Temperatur macht das nichts aus. Der
+ * Service Worker lässt die Abfrage durch, abgelegt wird nichts. */
+const WETTER_URL = 'https://api.open-meteo.com/v1/forecast';
+let wetterZuletzt = 0;
+let wetterLaeuft = false;
+
+async function wetterHolen() {
+  if (wetterLaeuft) return;
+  wetterLaeuft = true;
+  const ort = $('#wetterOrt');
+  // Der eigene Standort, wenn er läuft; sonst die Kartenmitte
+  const standort = ortAn() && !!ortLetzt;
+  const lat = standort ? ortLetzt.lat : map.getCenter().lat, lon = standort ? ortLetzt.lon : map.getCenter().lng;
+  ort.textContent = 'wird geholt …';
+  try {
+    let hoehe = NaN;
+    try { hoehe = await hoehenPunkt(lat, lon); } catch { /* ohne DGM nimmt der Dienst seine eigene Höhe */ }
+    const q = new URLSearchParams({ latitude: lat.toFixed(3), longitude: lon.toFixed(3), timezone: 'Europe/Berlin',
+      current: 'temperature_2m,relative_humidity_2m,surface_pressure' });
+    if (Number.isFinite(hoehe)) q.set('elevation', hoehe.toFixed(1));
+    const r = await fetch(`${WETTER_URL}?${q}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json(), c = j.current;
+    const eins = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    $('#wetterDruck').textContent = `${eins.format(c.surface_pressure)} hPa`;
+    $('#wetterTemp').textContent = `${eins.format(c.temperature_2m)} °C`;
+    $('#wetterFeuchte').textContent = `${nfM.format(c.relative_humidity_2m)} %`;
+    const zeit = (c.time || '').slice(11, 16);
+    ort.textContent = `${standort ? 'Eigener Standort' : 'Kartenmitte'} · ${nfM.format(Number.isFinite(hoehe) ? hoehe : j.elevation)} m ` +
+      `${Number.isFinite(hoehe) ? 'ü. NHN (DGM1)' : '(Höhenmodell des Dienstes)'} · Stand ${zeit} Uhr · Open-Meteo`;
+    wetterZuletzt = Date.now();
+  } catch (err) {
+    ort.textContent = navigator.onLine === false ? 'Ohne Netz gibt es keine Wetterwerte.' : `Nicht erreichbar (${err.message}).`;
+  }
+  wetterLaeuft = false;
+}
+
 function bind() {
+  // Wetter: beim Aufklappen holen, wenn die letzten Werte älter als 5 Minuten sind
+  const wetter = document.querySelector('details[data-sec="wetter"]');
+  if (wetter) wetter.addEventListener('toggle', () => { if (wetter.open && Date.now() - wetterZuletzt > 300000) wetterHolen(); });
+  on('#wetterHolen', 'click', wetterHolen);
+  // Erklärungen in den Einstellungen: zu, bis man danach fragt
+  document.querySelectorAll('.erkl-knopf').forEach(k => k.addEventListener('click', () => {
+    const box = document.getElementById(k.getAttribute('aria-controls'));
+    const auf = box.hidden;
+    box.hidden = !auf;
+    k.setAttribute('aria-expanded', String(auf));
+  }));
+
   /* Die Lupe darf dem Feld nicht den Fokus nehmen -- sonst klappt die Leiste
    * schon zu, waehrend der Finger noch auf ihr liegt, und der Klick geht ins
    * Leere. Deshalb erst mousedown abfangen, dann suchen. */
@@ -9148,11 +9665,13 @@ function bind() {
   on('#mapMessBtn', 'click', () => {
     if (messModus) { messEnde(); return; }
     if (profModus) { profEnde(); return; }
+    if (mappeOffen) { mappeEnde(); return; }
     messMenueAuf($('#messMenue').hidden);
   });
   document.querySelectorAll('[data-messart]').forEach(b => b.addEventListener('click', () => {
     messMenueAuf(false);
     if (b.dataset.messart === 'profil') profStart();
+    else if (b.dataset.messart === 'mappe') mappeStart();
     else messStart(b.dataset.messart);
   }));
   // In der Einfangphase, damit Leaflet die Pfeiltasten nicht zum Verschieben bekommt

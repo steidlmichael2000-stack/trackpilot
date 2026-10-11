@@ -65,12 +65,16 @@
   </svg>
 </button>
 
-<!-- Messmenü links neben dem Knopf: drei getrennte Abläufe statt eines Modus,
+<!-- Messmenü links neben dem Knopf: getrennte Abläufe statt eines Modus,
      der alles zugleich anbietet -->
 <div id="messMenue" class="mess-menue" role="menu" aria-label="Messen" hidden>
   <button type="button" role="menuitem" data-messart="profil">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 20h19"/><path d="M2.5 16.5 7 10l3.5 3.8 3.6-6.3 3.9 5.4 3.5-3.2"/></svg>
     <span><b>Profil</b><small>Geländeschnitt zwischen Punkten</small></span>
+  </button>
+  <button type="button" role="menuitem" data-messart="mappe">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h10.5L19 7v13.5H5z"/><path d="M8 16.5l2.5-3.2 2 1.8 3.5-4.6"/><path d="M8 8h5"/></svg>
+    <span><b>Profilmappe</b><small>Querprofile aus einer km-Liste als PDF</small></span>
   </button>
   <button type="button" role="menuitem" data-messart="polygon">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 3 9.5 11.5 4 20.5 9 18 18.5z"/><circle class="voll" cx="5" cy="19" r="1.7"/><circle class="voll" cx="3" cy="9.5" r="1.7"/><circle class="voll" cx="11.5" cy="4" r="1.7"/><circle class="voll" cx="20.5" cy="9" r="1.7"/><circle class="voll" cx="18" cy="18.5" r="1.7"/></svg>
@@ -213,13 +217,14 @@
       <div class="parz-wahl" id="parzWahl" hidden>
         <p class="pal-label">Farbe der Parzellen</p>
         <div class="pal parz-pal" id="parzRow" role="group" aria-label="Farbe der Parzellen"></div>
+        <!-- Die Punkte der Nutzung (Grünland, Gärten …): an als Vorgabe, hier filtert die App sie heraus -->
+        <div class="seg" role="group" aria-label="Inhalt der Parzellen" style="margin-top:7px">
+          <button class="seg-btn" type="button" id="parzPunkteBtn">Punktraster der Nutzung</button>
+        </div>
       </div>
       <div class="seg" role="group" aria-label="Straßen und Ortsnamen" style="margin-top:7px">
         <button class="seg-btn" type="button" id="strBtn">Straßen</button>
         <button class="seg-btn" type="button" id="ortBtn">Ortsnamen</button>
-      </div>
-      <div class="seg" role="group" aria-label="Wetter" style="margin-top:7px">
-        <button class="seg-btn" type="button" id="radarBtn">Regenradar</button>
       </div>
       <p class="pal-label">Rechenhilfen</p>
       <div class="seg" role="group" aria-label="Rechenhilfen">
@@ -230,6 +235,10 @@
         <input id="baseOpacity" type="range" min="0" max="100" step="5" value="100">
         <span id="baseOpacityVal" class="slider-val">100&thinsp;%</span>
       </label>
+      <!-- Die Erklärungen stehen erst nach einem Tipp auf „Erklärung" da; offen
+           waren sie länger als die Bedienung selbst. -->
+      <button type="button" class="erkl-knopf" aria-expanded="false" aria-controls="erklKarte">Erklärung</button>
+      <div class="erkl" id="erklKarte" hidden>
       <p class="fine">Ganz nach links heruntergezogen bleibt nur der Bahn- bzw. WMS-Layer stehen.</p>
       <p class="fine"><strong>Gleisweg</strong> ist die grüne Linie: der Verlauf zwischen den beiden
       Steinen, an dem gerechnet wurde. <strong>Steinlinie</strong> ist die dünne blaue Verbindung durch
@@ -255,11 +264,43 @@
       1:5000, also etwa ab Zoomstufe 17. Die Farbfassung mit Nutzungsarten bringt einen deckenden
       weißen Grund mit und taugt nicht als Auflage — wer sie braucht, kann sie unter
       <em>Eigener WMS-Layer</em> mit dem Layer <code>by_alkis_parzellarkarte_farbe</code> laden.</p>
+      </div>
+    </details>
+
+    <!-- Wetter: Luft für die Streckenmessung und das Regenradar. Die Werte holt
+         die App beim Aufklappen (wetterHolen in app.js). -->
+    <details class="sheet-sec" data-sec="wetter">
+      <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18.5h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.3A4.7 4.7 0 0 0 7 18.5z"/></svg><h2>Wetter</h2></summary>
+      <p class="pal-label">Luft für den Tachymeter</p>
+      <div class="wetter" aria-live="polite">
+        <div class="wetter-wert"><small>Luftdruck absolut</small><b id="wetterDruck">–</b></div>
+        <div class="wetter-wert"><small>Temperatur</small><b id="wetterTemp">–</b></div>
+        <div class="wetter-wert"><small>Feuchte</small><b id="wetterFeuchte">–</b></div>
+      </div>
+      <p class="wetter-ort" id="wetterOrt"></p>
+      <div class="row">
+        <button id="wetterHolen" class="btn" type="button">Aktualisieren</button>
+      </div>
+      <p class="pal-label">Auf der Karte</p>
+      <div class="seg" role="group" aria-label="Wetter auf der Karte">
+        <button class="seg-btn" type="button" id="radarBtn">Regenradar</button>
+      </div>
+      <button type="button" class="erkl-knopf" aria-expanded="false" aria-controls="erklWetter">Erklärung</button>
+      <div class="erkl" id="erklWetter" hidden>
+      <p class="fine"><strong>Luftdruck und Temperatur</strong> sind die Eingaben für die
+      atmosphärische Korrektur (ppm) am Tachymeter. Gilt für den eigenen Standort, sonst für die
+      Kartenmitte. Der Druck ist der <em>absolute</em> Druck auf Geländehöhe — die Höhe kommt in
+      Bayern aus dem DGM1, sonst aus dem Höhenmodell des Wetterdienstes —, nicht der auf Meereshöhe
+      reduzierte aus dem Wetterbericht. Die Werte sind ein Wettermodell (Open-Meteo, in Deutschland
+      ICON des DWD), viertelstündlich, keine Messung vor Ort: rund ±1 hPa und ±1–2 °C. Das macht
+      etwa ±2 ppm, also 2 mm auf 1 km. Für mehr ein eigenes Barometer und Thermometer am Instrument.
+      An Open-Meteo geht dafür die Lage auf rund 100 m gerundet.</p>
       <p class="fine"><strong>Regenradar</strong> ist das Niederschlagsradar des Deutschen
       Wetterdienstes, alle 5 Minuten neu, in 1 km Auflösung. Die Leiste oben geht eine Stunde zurück
       und zwei Stunden voraus — rechts der Marke ist es Vorhersage, keine Messung. ▶ spielt den
       Verlauf in Viertelstunden ab. Das Bild wird von selbst aktuell, solange die App offen ist,
       und braucht Netz; abgelegt wird davon nichts.</p>
+      </div>
     </details>
 
     <details class="sheet-sec" data-sec="kml">
@@ -275,6 +316,8 @@
         <button class="seg-btn" type="button" id="kmlNamenBtn">Namen auf der Karte</button>
       </div>
 
+      <button type="button" class="erkl-knopf" aria-expanded="false" aria-controls="erklKml">Erklärung</button>
+      <div class="erkl" id="erklKml" hidden>
       <p class="fine">Jede Datei bleibt in der Liste stehen und lässt sich einzeln ein- und
       ausschalten. Das Symbol links öffnet Farbe und Form, die beiden Knöpfe rechts zoomen auf die
       Datei bzw. nehmen sie aus der Liste. Ein Tipp auf ein Objekt zeigt Name, Beschreibung und
@@ -295,6 +338,7 @@
       <p class="fine">Die Dateien werden nur auf diesem Gerät ausgewertet und dort gespeichert —
       nichts davon geht ins Netz. Linienfarben und -stärken der Datei werden übernommen, solange
       keine eigene Farbe gewählt ist; eigene Symbolbilder und Bildüberlagerungen nicht.</p>
+      </div>
     </details>
 
     <details class="sheet-sec" data-sec="wms">
@@ -321,6 +365,8 @@
         <input id="wmsOpacity" type="range" min="20" max="100" step="5" value="75">
       </label>
 
+      <button type="button" class="erkl-knopf" aria-expanded="false" aria-controls="erklWms">Erklärung</button>
+      <div class="erkl" id="erklWms" hidden>
       <p class="fine"><strong>Layer-Name unbekannt?</strong> <em>Layer laden</em> holt die Liste
       direkt vom Dienst. Klappt das nicht — geschützte Dienste erlauben das meist nicht —, dann
       <em>Anmelden</em> antippen, im geöffneten Tab alles markieren und kopieren und hier einfügen.</p>
@@ -329,6 +375,7 @@
       Browserdialog Benutzer und Kennwort eingeben und speichern lassen. Der Browser hängt die
       Daten danach selbst an die Kartenanfragen — die App kennt und speichert sie nicht.
       Adresse und Layer-Name bleiben lokal auf diesem Gerät.</p>
+      </div>
     </details>
 
     <details class="sheet-sec" data-sec="ansicht">
@@ -342,9 +389,12 @@
       <!-- Die Felder baut die App aus PALETTEN in app.js. -->
       <p class="pal-label">Signalfarbe</p>
       <div class="pal" id="palRow" role="group" aria-label="Signalfarbe"></div>
+      <button type="button" class="erkl-knopf" aria-expanded="false" aria-controls="erklAnsicht">Erklärung</button>
+      <div class="erkl" id="erklAnsicht" hidden>
       <p class="fine">Die Signalfarbe markiert den gefundenen Punkt, gefüllte Knöpfe und
       alles Angetippte. Jede Farbe hat einen eigenen Ton für Hell und Dunkel, damit
       Beschriftungen auf beiden Gründen lesbar bleiben.</p>
+      </div>
     </details>
 
     <details class="sheet-sec" data-sec="hinweise">

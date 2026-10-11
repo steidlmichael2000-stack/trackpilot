@@ -149,8 +149,8 @@ const TOUR_SCHRITTE = [
   {
     titel: 'Karten und Auflagen',
     text: 'Hinter dem Regler-Symbol: Karte, dunkle Karte, Luftbild, das amtliche Orthophoto DOP20 und ' +
-      'das Geländerelief. Darüber lassen sich Bahn-Layer, Flurstücke, Straßen, Ortsnamen und das ' +
-      'Regenradar legen.',
+      'das Geländerelief. Darüber lassen sich Bahn-Layer, Flurstücke, Straßen und Ortsnamen legen. ' +
+      'Regenradar, Luftdruck und Temperatur stehen unter Wetter.',
     ziel: () => tourSichtbar('#sheet'),
     vorher: () => tourAbschnitt('karte'),
     nachher: () => closeSheet()

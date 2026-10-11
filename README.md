@@ -693,6 +693,12 @@ wäscht genau diese kleinen Formen weg und ist deshalb nicht eingebaut. Beides d
 außerhalb antworten die Dienste mit einem leeren Bild und Status 200, also nicht mit einem Fehler,
 den man abfangen könnte — die App warnt daher selbst, wenn die Kartenmitte außerhalb liegt.
 
+**Ganz nah weich statt blockig.** Geholt wird das DOP20 bis Zoomstufe 19 (in Bayern 0,20 m je
+Bildpunkt, so fein wie das Bild selbst), das Relief bis 18; darüber vergrößert Leaflet bzw. MapLibre
+die letzte Stufe weich. Bis Oktober 2026 ging es bis 22 — der MapServer der BVV rechnet so feine
+Kacheln pixelweise hoch, ganz nah standen Blöcke von 8 × 8 Bildpunkten. Glättungsparameter
+(`INTERPOLATIONS`, `RESAMPLING`) ignoriert er, die Antwort war bitgleich.
+
 Bei den Rasterbildern wird **JPEG statt PNG** angefragt: gemessen 13 kB gegenüber 172 kB je Kachel
 beim Orthophoto, ohne sichtbaren Unterschied.
 
@@ -715,6 +721,16 @@ um: Grauwert 0 wird die gewählte Farbe, Weiß bleibt Weiß, der Alphakanal blei
 **bitgleich** zu dem heraus, was der Dienst liefert (0 von 262 144 Werten abweichend). Ein
 Farbwechsel färbt die geladenen Kacheln ohne neue Abfrage um. Das geht nur, weil der Dienst CORS
 freigibt — ohne wäre die Kachel für das Auslesen gesperrt.
+
+**Punktraster abschaltbar.** Der Dienst hat keine Unterebenen: Grenzen, Gebäude, Beschriftung und
+die Signaturen der tatsächlichen Nutzung kommen in einem Bild. Grünland, Gärten und ähnliche Flächen
+sind dabei mit einem feinen Punktraster gefüllt, das auf dem Luftbild alles überzieht. In der
+Farbwahl schaltet *Punktraster der Nutzung* es ab (Vorgabe: an); die Punkte fallen dann beim
+Umfärben weg: Gemessen am 11.10.2026 bei 49,567 / 10,189 ist jeder Punkt in jeder
+Zoomstufe genau 2 × 2 Pixel samt geglättetem Rand (3742 auf einer 512er-Kachel), das kleinste andere
+Element hatte 13 Pixel. Zusammenhängende Teile bis 4 sichtbare Pixel werden durchsichtig; dort
+verschwanden auf einem Handyausschnitt 46 158 Punktpixel, Grenzen, Gebäude und Straßennamen blieben
+unverändert.
 
 ## Tour
 
@@ -746,9 +762,14 @@ Im Außendienst schnell sehen, wie das Gelände zwischen zwei Punkten verläuft 
 Planungsgenauigkeit, eine Übersicht. Messknopf → *Profil*, dann Punkte antippen. Gefangen wird wie
 beim Messen (Kilometersteine, KML-Punkte bis 20 m); Fadenkreuz, *Mitte* und *Standort* gibt es im
 Profil nicht — für eine Geländeübersicht reicht der Finger, und die Leiste bleibt frei fürs Diagramm.
-Ab zwei Punkten lädt das Profil von selbst; weitere Punkte
-verlängern den Linienzug, die Ecken stehen dann als Marken im Diagramm. Oben stehen Länge und
-Höhendifferenz, an der Achse die Spanne.
+Ab zwei Punkten lädt das Profil von selbst. **Es sind genau zwei, A und B:** Stehen beide, setzt ein
+Tipp in die Karte nichts mehr — er sagt nur, dass man A und B ziehen kann. Gezogen wird mit dem Finger
+oder der Maus (Griff 26 px), die Linie läuft mit, gerechnet und gefangen wird beim Loslassen. Bis
+Oktober 2026 hängte jeder Tipp einen weiteren Punkt an; gebraucht wurde das praktisch nie, ein
+versehentlicher Tipp verdarb dafür den Schnitt. Kennwerte stehen nicht über
+dem Bild (bis Oktober 2026 eine unbeschriftete Zahlenzeile, die keiner deuten konnte): Wischen übers
+Diagramm zeigt an jeder Stelle Station und Höhe mit Fadenkreuz und einem Ring auf der Karte, das PDF
+führt die Kennwerte mit Erklärung.
 
 **Überhöhung.** Gezeichnet wird zunächst **unüberhöht** — so, wie das Gelände tatsächlich
 verläuft. Der Regler *Überhöht* unter dem Bild reicht von 1× bis so steil, wie das Bild in die
@@ -760,14 +781,14 @@ Stufen 1/2/5/10×; davon gingen mit DOM oder Gebäuden oft nur eine oder zwei. A
 Höhenachse immer dem Schnitt an; zwei Meter auf 300 m sahen dann wie ein Berg aus.
 
 **Oberfläche DOM20** ist der Legendeneintrag und zugleich der Schalter. Er nennt vorher die
-Datenmenge; danach kommt die Oberfläche gestrichelt dazu und bei den Kennwerten die größte
-Objekthöhe (DOM − DGM) mit Station.
+Datenmenge; danach kommt die Oberfläche gestrichelt dazu, der Zeiger nennt die Objekthöhe
+(DOM − DGM) an der Stelle, das PDF die größte.
 
 **Parallel verschieben.** Ab zwei Punkten steht unter dem Diagramm die Reihe −10 −5 −1 +1 +5 +10
 (am Rechner ← und →, mit Umschalt 10 m). Sie schiebt den ganzen Schnitt senkrecht zur Linie vom
 ersten zum letzten Punkt, plus nach links von A → B — wer den Schnitt ansieht wie im Diagramm, A links
 und B rechts, schiebt ihn damit nach vorn. Die getippte Linie bleibt blass auf der Karte, oben steht
-der Versatz; ein Tipp darauf holt sie zurück, ein neuer Punkt, *Zurück* oder *Leeren* ebenso.
+der Versatz; ein Tipp darauf holt sie zurück, Ziehen von A oder B, *Zurück* oder *Leeren* ebenso.
 
 ### Profil am Gleis
 
@@ -776,12 +797,11 @@ Kilometer, nicht bei Orten, Betriebsstellen und wenn statt des Kilometers nur de
 dasteht.
 
 - **Quer**: senkrecht zum Gleis, 0 = Gleisachse, links und rechts in Richtung steigender Kilometer.
-  Die Richtung kommt aus der Lage 5 m davor und danach. Oben stehen die Höhe am Gleis und wie hoch
-  das Gelände außen links und rechts dagegen liegt — im Einschnitt beides im Plus. Der Chip
-  *±50 m* schaltet die Breite um: 10, 25, 50, 100, 200 m je Seite.
+  Die Richtung kommt aus der Lage 5 m davor und danach. Der Regler *Breite* stellt 10, 25, 50,
+  100 oder 200 m je Seite ein; geladen wird beim Loslassen.
 - **Längs**: das Gelände am Gleis entlang von km − L bis km + L, alle 2–10 m eine Lage auf dem
   Gleis. Die Achse zeigt Kilometer, die Neigung ist eine Ausgleichsgerade über den ganzen Schnitt
-  (zwei Endpunkte allein hingen an einem Graben). Länge 100, 250, 500 oder 1000 m je Richtung.
+  (zwei Endpunkte allein hingen an einem Graben). Regler *Länge*: 100, 250, 500 oder 1000 m je Richtung.
   Überhöht 10×, getrennt gemerkt — unüberhöht sind ein paar Promille auf 500 m ein flacher Strich.
 - **Springen**: quer 1, 5, 10 m, längs 10, 50, 100 m entlang der Kilometrierung; am Rechner ← und
   →, mit Umschalt der große Schritt. Das Diagramm bleibt stehen, bis das nächste da ist, und die
@@ -872,18 +892,46 @@ angegebene Gebäudehöhe bei 90 % auf 0,22 m.
 
 Das Teilen-Zeichen im Kopf der Profilleiste erzeugt eine Seite A4 quer: Titel mit Strecke und
 Kilometer (frei: A–B), das Profil als Vektorgrafik im selben Maßstab wie in der Leiste, daneben ein
-Luftbild DOP20 mit der Schnittlinie, Maßstab und Nordpfeil, die Kennwerte mit Lage in Grad und UTM,
-unten die Quellen nach CC BY 4.0 — nur die, die auf der Seite vorkommen. Quer am Gleis fragt die
-Leiste vorher: dieser Schnitt oder eine **Serie** (±50 m alle 10 m, 11 Schnitte). Die Serie steht
+Luftbild DOP20 mit der Schnittlinie, Maßstab und Nordpfeil, die Kennwerte mit je einer Erklärzeile,
+die Lage in Grad, UTM 32 und **DB_REF Gauß-Krüger**, ein Block **Genauigkeit** und unten die Quellen
+nach CC BY 4.0 — nur die, die auf der Seite vorkommen. Vorher fragt die Leiste: dieser Schnitt, quer
+am Gleis auch eine **Serie** (±50 m alle 10 m, 11 Schnitte) oder *+ In die Profilmappe*. Die Serie steht
 auf Seite 1 als Linien im Luftbild und auf den folgenden Seiten in zwei Spalten, alle im selben
 Höhenfenster und Maßstab, damit man sie vergleichen kann — so viele Reihen je Seite, wie die Höhe
 zulässt.
+
+**Profilmappe.** Eigener Eintrag im Messmenü: Querprofile an vielen Stellen, auch auf
+verschiedenen Strecken, als ein PDF mit einer Seite je Schnitt. Eingegeben wird eine Liste — je Zeile
+eine Strecke, dahinter ein oder mehrere Kilometer wie im Suchfeld (`5321 106,0 & 106,2`). Unlesbare
+Zeilen nennt die Leiste beim Tippen. *+ Aktuelles Ergebnis* hängt Strecke und km des Suchergebnisses
+an, aus dem Querprofil tut es *+ In die Profilmappe* in der PDF-Zeile. Breite, Gebäude, Oberfläche und
+Überhöhung (1/2/5/10×; zu steil für die Seite wird gestaucht und im Kopf vermerkt) gelten für alle
+Schnitte, damit die Seiten vergleichbar sind. Erst werden alle Schnitte gerechnet, dann gezeichnet;
+was nicht zustande kommt (kein Gleisverlauf, außerhalb Bayerns), steht danach unter der Leiste, die
+übrigen Seiten zählen ohne Lücke. Die Liste bleibt gespeichert. Eine erste Fassung sammelte im Oktober
+2026 Schnappschüsse offener Profile in der PDF-Zeile — man sah nicht, was drin war, und nach einem
+Neustart war sie leer.
+
+**DB_REF.** ETRS89 → DB_REF mit der Umkehrung von EPSG:5826 („DB_REF to ETRS89 (1)", Coordinate
+Frame, 7 Parameter), dann Gauß-Krüger auf dem Bessel-Ellipsoid im 3°-Streifen 3 (9° O) bzw. 4
+(12° O). Die Streifengrenze bei 10,5° O läuft mitten durch Bayern; bis 0,5° daneben stehen beide
+Streifen da. Gegen proj4 2.6.2 mit denselben Parametern auf 0,6 mm geprüft
+(`node werkzeug/dbref-pruefen.mjs`). Die Koordinaten stehen auf ganze Meter — die Lage selbst ist
+nur so genau wie die Gleislage aus OpenStreetMap.
+
+**Genauigkeit.** Was die Quellen selbst angeben: DGM1 Höhe ±0,2 m und Lage ±0,5 m (freies,
+ebenes Gelände), LoD2 Dachhöhe typisch ±0,2–0,3 m bis über 1 m, DOP20 Lage ±0,4–0,6 m (Produktseiten
+und Metadaten der BVV); für das DOM20 nennt die BVV keine feste Zahl („regional und lokal
+unterschiedlich"). Gleislage und Kilometer typisch ±10–30 m nach den Messungen oben unter
+*Wie genau ist das?*. Die Zeile „Gelände am Rand" (Höhenversatz außen gegen das Gleis) ist seit
+Oktober 2026 draußen — sie sagte im Plan nichts.
 
 Geschrieben wird das PDF von `pdf.js` in der App, ohne Fremdbibliothek: Helvetica als Grundschrift
 (nichts eingebettet), Text über WinAnsi, das Luftbild als JPEG unverändert. Eine Seite mit Luftbild
 hat rund 100 kB, die Serie 130 kB. Auf dem Handy öffnet sich danach das Teilen-Menü; dauert es zu
 lang (das Teilen braucht eine frische Geste), steht in der Leiste „PDF fertig · Teilen · Speichern".
-Am Rechner wird gespeichert. Geprüft mit `node werkzeug/pdf-pruefen.mjs` (Aufbau, Zeichensatz, Bild).
+Am Rechner wird gespeichert. Geprüft mit `node werkzeug/pdf-pruefen.mjs` (Aufbau, Zeichensatz, Bild)
+und `node werkzeug/dbref-pruefen.mjs` (DB_REF).
 
 ## Höhe am Punkt
 
@@ -951,9 +999,21 @@ zu. Am Hang macht das bis 1,7 m aus. Die App hält sich an GeoTIFF und XYZ.
 **Die DGM1-Dateien sind nicht einheitlich gebaut:** Bei 636_5528 beginnt das TIFF-Verzeichnis bei
 Byte 8, bei 778_5292 erst kurz vor dem Dateiende. Der Leser sucht es dort, wo es steht.
 
+## Wetter: Luftdruck und Temperatur
+
+Unter *Wetter* in den Einstellungen stehen absoluter Luftdruck, Temperatur und relative Feuchte —
+die Eingaben für die atmosphärische Korrektur (ppm) am Tachymeter. Für den eigenen Standort, wenn
+er läuft, sonst für die Kartenmitte; geholt beim Aufklappen (höchstens alle 5 Minuten neu) und mit
+*Aktualisieren*. Quelle ist [Open-Meteo](https://open-meteo.com/) (frei, ohne Schlüssel, in
+Deutschland das ICON-Modell des DWD, viertelstündlich). Mit `elevation=` rechnet der Dienst den Druck
+auf die Geländehöhe um; in Bayern kommt sie aus dem DGM1 (`hoehenPunkt`), gemessen am 11.10.2026:
+278 m → 982,5 hPa, 500 m → 956,4 hPa. Ohne Höhe nimmt er sein eigenes 90-m-Modell. Ein Modell ist
+keine Messung vor Ort: rund ±1 hPa und ±1–2 °C, zusammen etwa ±2 ppm (2 mm auf 1 km). Die Lage geht
+auf drei Nachkommastellen gerundet hinaus; der Service Worker legt nichts davon ab.
+
 ## Regenradar
 
-Unter *Karte → Regenradar* liegt das Niederschlagsradar des Deutschen Wetterdienstes über der
+Unter *Wetter → Regenradar* liegt das Niederschlagsradar des Deutschen Wetterdienstes über der
 Karte: Layer `Niederschlagsradar` aus `maps.dwd.de/geoserver/dwd/wms`, das RV-Produkt mit 1 km
 Raster, alle 5 Minuten neu, in mm/h. Der Dienst gibt CORS frei und rechnet in `EPSG:3857`, läuft also
 direkt als Leaflet-WMS. Es liegt über der Grundkarte und unter Parzellen und Bahn-Layer — eine

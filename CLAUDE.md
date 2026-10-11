@@ -108,6 +108,10 @@ ist, steht die dunkle Karte unverändert.
   bitgleich zum Dienst. `farbe` muss in `options` deklariert bleiben, sonst hängt Leaflet es als
   WMS-Parameter an. `tile.complete` wird von Hand gesetzt, sonst räumt `_abortLoading` beim Zoomen
   auch fertige Canvas-Kacheln weg. Farbwahl: lange drücken oder Rechtsklick auf *Parzellen*.
+  Das Punktraster der Nutzung (2 × 2 px) filtert `parzPunkteWeg` heraus; `punkte` steht deshalb wie
+  `farbe` in `options`.
+- **Regenradar beim Abspielen** wartet auf die Karte (`karteLaedtNoch`): Der DWD braucht 1–7 s je
+  Kachel, und auf dem Handy teilen sich Radar und Karte die Leitung.
 - **Regenradar** (`radar…`): Ebene erst anlegen, wenn die Zeitachse da ist, und **nie ohne
   `TIME`** — die Vorgabe „current" des DWD ist der Uhr am nächsten, meist schon Vorhersage; das gab
   eine Naht an der Kachelkante. Bildwechsel über eine zweite, unsichtbar ladende Ebene.
@@ -173,6 +177,17 @@ längs: rund 200 Lagen als Linienzug, `g.kms` gehört zu `profDgm.ecken`.
 - Diagramm und PDF teilen sich `profHoehenfenster`, `profZSpanne`, `profAchse` und `profPfad` (der liefert
   `d` fürs SVG und `punkte` fürs PDF). Wer den Maßstab ändert, ändert ihn an einer Stelle.
 - Das PDF-Luftbild ist ein GetMap am DOP20-WMS der BVV (der gibt CORS frei) — nicht über den Worker.
+- **Eine PDF-Seite zeichnet `pdfSchnittSeite` aus einem Schnappschuss (`profSchnitt()`), nicht aus den
+  `prof…`-Variablen.** Die Profilmappe (`mappe…`) baut solche Schnitte selbst aus ihrer km-Liste;
+  wer der Seite etwas hinzufügt, nimmt es aus `z` — auch `profAchse(L, z)` —, sonst zeigt eine
+  Mappenseite die Werte des gerade offenen Profils.
+- Das freie Profil hat genau zwei Punkte (`PROF_PUNKTE_MAX`), A und B werden gezogen. Ausdrücklich so
+  gewünscht: ein versehentlicher Tipp setzte sonst einen Punkt C.
+- Wetter (`wetterHolen`): Open-Meteo mit `elevation` aus dem DGM1 — ohne sie wäre es der Druck auf der
+  Modellhöhe, nicht auf dem Gelände.
+- DB_REF (`dbrefGk`): nach Änderungen `node werkzeug/dbref-pruefen.mjs`. Die Genauigkeitsangaben im PDF
+  (`pdfGenauigkeit`) stammen aus Produktseiten und Metadaten der BVV — keine erfundenen Zahlen
+  nachtragen; für das DOM20 nennt die BVV ausdrücklich keine.
 
 ## Steinliste und Gleisweg (Oktober 2026)
 
