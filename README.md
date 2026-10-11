@@ -751,12 +751,13 @@ verlängern den Linienzug, die Ecken stehen dann als Marken im Diagramm. Oben st
 Höhendifferenz, an der Achse die Spanne.
 
 **Überhöhung.** Gezeichnet wird zunächst **unüberhöht** — so, wie das Gelände tatsächlich
-verläuft. Ein Tipp auf die Angabe rechts in der Legende schaltet weiter: 2×, 5×, 10×, wieder
-unüberhöht; die Wahl bleibt gespeichert. Die Bildhöhe richtet sich nach dem Gelände: Flaches Gelände
-unüberhöht gibt ein flaches Bild und eine kleinere Leiste. Wäre das Bild höher als 160 px — steiles
-Gelände oder starke Überhöhung —, wird gestaucht, und die Angabe steht dann in der Signalfarbe mit dem
-tatsächlichen Faktor. Anfangs passte sich die Höhenachse immer dem Schnitt an; zwei Meter auf 300 m
-sahen dann wie ein Berg aus.
+verläuft. Der Regler *Überhöht* unter dem Bild reicht von 1× bis so steil, wie das Bild in die
+160 px der Leiste passt (höchstens 20×), logarithmisch geteilt; die Wahl bleibt gespeichert. Am
+rechten Ende steht „max“ hinter dem Wert. Mit Bäumen oder Gebäuden ist das oft schon bei 1,5×
+erreicht, bei flachem Gelände erst bei 20×. Die Bildhöhe richtet sich nach dem Gelände: Flaches
+Gelände unüberhöht gibt ein flaches Bild und eine kleinere Leiste. Bis Oktober 2026 gab es feste
+Stufen 1/2/5/10×; davon gingen mit DOM oder Gebäuden oft nur eine oder zwei. Anfangs passte sich die
+Höhenachse immer dem Schnitt an; zwei Meter auf 300 m sahen dann wie ein Berg aus.
 
 **Oberfläche DOM20** ist der Legendeneintrag und zugleich der Schalter. Er nennt vorher die
 Datenmenge; danach kommt die Oberfläche gestrichelt dazu und bei den Kennwerten die größte

@@ -784,7 +784,8 @@ body {
 }
 /* Steht die Gruppenzeile gleich unter der Überschrift, reicht deren Abstand */
 .sheet-sec > summary + .pal-label { margin-top: 0; }
-.pal { display: flex; gap: 7px; flex-wrap: wrap; }
+/* Zehn Farben in zwei gleichen Reihen statt einer, die irgendwo umbricht */
+.pal { display: grid; grid-template-columns: repeat(5, 40px); gap: 7px; }
 .pal-btn {
   width: 40px; height: 30px; padding: 0;
   border: 1px solid var(--line); border-radius: var(--r-knopf);
@@ -1225,14 +1226,6 @@ body {
 
 /* ---------- Querprofil ---------- */
 
-.prof-zahlen {
-  display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 8px 0 0;
-  font-size: .9rem; font-variant-numeric: tabular-nums;
-}
-.prof-zahlen b { font-weight: 650; }
-.prof-zahlen i { font-style: normal; font-weight: 400; color: var(--muted); }
-.prof-zahlen span { color: var(--muted); }
-
 /* Quer | Längs im Kopf, rechts vor dem Schließkreuz */
 .prof-art {
   margin-left: auto; align-self: center; display: inline-flex;
@@ -1292,47 +1285,81 @@ body {
 /* Gebäude (LoD2): deckende graue Blöcke, Gelände und Oberfläche laufen darüber */
 .prof-bild .geb { fill: color-mix(in srgb, var(--muted) 45%, var(--bg)); stroke: var(--text); stroke-width: .8; stroke-linejoin: miter; }
 .prof-dom.prof-geb::before { height: 8px; width: 12px; background: color-mix(in srgb, var(--muted) 45%, var(--bg)); border: 1px solid var(--text); }
-/* Breite und Überhöhung als Gruppe rechts: bricht die Zeile, wandern beide zusammen */
-.prof-chips { margin-left: auto; display: inline-flex; gap: 6px; }
-.prof-chips .prof-ueber { margin-left: 0; }
 .prof-bild .dom {fill: none; stroke: var(--text); stroke-width: 1.1; stroke-dasharray: 3 2.5; opacity: .75; }
 .prof-bild .beschr text { fill: var(--muted); }
 .prof-bild .beschr .ecke { fill: var(--warn); font-weight: 650; }
-.prof-bild .zeiger path { stroke: var(--text); stroke-width: 1; }
+/* Fadenkreuz: senkrecht durchgezogen, waagrecht gestrichelt bis an die Höhenachse */
+.prof-bild .zeiger path { fill: none; stroke: var(--text); stroke-width: 1; }
+.prof-bild .zeiger .waag { stroke-dasharray: 3 2; }
 .prof-bild .zeiger circle { fill: var(--warn); stroke: var(--bg); stroke-width: 1.5; }
 /* Freistellung wie bei den Beschriftungen auf der Karte, damit die Zahl über
    den Gitterlinien lesbar bleibt */
 .prof-bild .zeiger text { fill: var(--text); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
 
-.prof-legende {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 4px;
-  font-size: .74rem; color: var(--muted);
+/* Unter dem Bild: feste Zeilen, Name links, Bedienung rechts — Ebenen, Breite
+   bzw. Länge, Überhöhung. Bricht auf keinem Handy halb um. */
+.prof-regler {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px 10px;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
 }
-.prof-leg-dgm::before {
-  content: ""; display: inline-block; width: 14px; height: 2px; margin-right: 6px;
-  vertical-align: middle; background: var(--warn);
+.prof-rname {
+  grid-column: 1; font-size: .66rem; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
 }
-/* Der Legendeneintrag der Oberfläche ist zugleich ihr Schalter */
+.prof-ebenen { grid-column: 2 / 4; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+/* Der Legendeneintrag ist zugleich der Schalter der Ebene */
 .prof-dom {
-  padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--r-knopf);
-  background: var(--panel-2); color: var(--text); font: inherit; font-size: .74rem; cursor: pointer;
+  display: flex; align-items: center; min-width: 0; padding: 5px 8px;
+  border: 1px solid var(--line); border-radius: var(--r-knopf);
+  background: var(--panel-2); background-clip: padding-box; color: var(--muted);
+  font: inherit; font-size: .76rem; text-align: left; white-space: nowrap; cursor: pointer;
 }
 .prof-dom::before {
-  content: ""; display: inline-block; width: 14px; margin-right: 6px;
-  vertical-align: middle; border-top: 2px dashed var(--muted);
+  content: ""; flex: none; width: 14px; margin-right: 7px; border-top: 2px dashed var(--muted);
 }
-.prof-dom small { margin-left: 6px; font-size: .7rem; color: var(--muted); }
-.prof-dom.is-on { border-color: var(--accent); }
-/* Überhöhung: Angabe und Schalter in einem */
-.prof-ueber {
-  margin-left: auto; padding: 3px 7px;
-  border: 1px solid var(--line); border-radius: var(--r-knopf); background: var(--panel-2);
-  color: var(--text); font: inherit; font-size: .74rem; font-variant-numeric: tabular-nums;
-  white-space: nowrap; cursor: pointer;
+.prof-dom small { margin-left: auto; padding-left: 6px; font-size: .68rem; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.prof-dom.is-on {
+  color: var(--text); border-color: var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
 }
-.prof-ueber.gestaucht { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-/* Breite bzw. Länge am Gleis steht vor der Überhöhung; nur der erste Chip schiebt nach rechts */
-.prof-weite + .prof-ueber { margin-left: 0; }
+/* Regler über die festen Stufen: Striche wie auf einem Maßstab, eckiger Schieber */
+.prof-weite { --d: 12px; grid-column: 2; position: relative; display: block; height: 26px; }
+.prof-striche { position: absolute; inset: 0; pointer-events: none; }
+.prof-striche i {
+  position: absolute; top: 9px; width: 1px; height: 8px; background: var(--muted);
+  left: calc(var(--d) / 2 - .5px + (100% - var(--d)) * var(--p));
+}
+.prof-weite input {
+  position: relative; display: block; width: 100%; height: 26px; margin: 0;
+  -webkit-appearance: none; appearance: none; background: none; cursor: pointer;
+}
+.prof-weite input::-webkit-slider-runnable-track { height: 2px; background: var(--line); }
+.prof-weite input::-moz-range-track { height: 2px; background: var(--line); }
+.prof-weite input::-webkit-slider-thumb {
+  -webkit-appearance: none; width: var(--d); height: 20px; margin-top: -9px;
+  border: 1px solid var(--bg); border-radius: 2px; background: var(--accent);
+}
+.prof-weite input::-moz-range-thumb {
+  width: var(--d); height: 20px; box-sizing: border-box;
+  border: 1px solid var(--bg); border-radius: 2px; background: var(--accent);
+}
+.prof-weite input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.prof-wert {
+  grid-column: 3; min-width: 5.6em; text-align: right;
+  font-size: .8rem; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--text);
+}
+/* Steiler geht es nicht: Schieber grau, kein Zeiger */
+.prof-weite input:disabled { cursor: default; }
+.prof-weite input:disabled::-webkit-slider-thumb { background: var(--muted-2); }
+.prof-weite input:disabled::-moz-range-thumb { background: var(--muted-2); }
+/* Die Stelle unter dem Finger auf der Karte: Ring mit dunklem Rand und Mittelpunkt */
+.prof-ring i {
+  position: absolute; inset: 0; border: 3px solid #f59e0b; border-radius: 50%;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .8), inset 0 0 0 1.5px rgba(0, 0, 0, .8);
+}
+.prof-ring i::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .8);
+}
 .prof-quelle { margin: 7px 0 0; font-size: .68rem; line-height: 1.45; color: var(--muted-2); }
 .prof-quelle a { color: inherit; }
 /* Im Profil braucht das Diagramm den Platz: flachere Knöpfe als in der Ergebnisleiste */

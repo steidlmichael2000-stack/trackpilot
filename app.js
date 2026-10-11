@@ -1850,6 +1850,12 @@ const PALETTEN = {
   violett: { name: 'Violett', dark: { accent: '#a78bfa', ink: '#06070b' }, light: { accent: '#6d4fd6', ink: '#ffffff' } },
   orange:  { name: 'Orange',  dark: { accent: '#f5a524', ink: '#06070b' }, light: { accent: '#96590a', ink: '#ffffff' } },
   gruen:   { name: 'Grün',    dark: { accent: '#34d399', ink: '#06070b' }, light: { accent: '#0f8a62', ink: '#ffffff' } },
+  // Seit 11.10.2026; jeder Ton gegen Grund und Fläche nachgerechnet, mindestens 4,8:1
+  tuerkis: { name: 'Türkis',  dark: { accent: '#22d3ee', ink: '#06070b' }, light: { accent: '#0e7490', ink: '#ffffff' } },
+  rot:     { name: 'Rot',     dark: { accent: '#ff3b30', ink: '#06070b' }, light: { accent: '#d50000', ink: '#ffffff' } },
+  pink:    { name: 'Pink',    dark: { accent: '#f472b6', ink: '#06070b' }, light: { accent: '#be185d', ink: '#ffffff' } },
+  gelb:    { name: 'Gelb',    dark: { accent: '#facc15', ink: '#06070b' }, light: { accent: '#8a6500', ink: '#ffffff' } },
+  oliv:    { name: 'Oliv',    dark: { accent: '#a3c95a', ink: '#06070b' }, light: { accent: '#53701a', ink: '#ffffff' } },
 };
 
 let prefs = {
@@ -1858,7 +1864,7 @@ let prefs = {
   abSort: 'nah',                         // Abstecken: Punktliste nach Entfernung, Name oder Datei
   abKompass: false,                      // Abstecken: Pfeil nach dem Handy statt nach der Karte
   parzFarbe: 'auto',                     // 'auto' (nach Grundkarte) oder '#rrggbb'
-  profUeber: 1,                          // Querprofil: Überhöhung (1, 2, 5 oder 10)
+  profUeber: 1,                          // Querprofil: Überhöhung, 1 bis 20
   gpArt: 'quer', gpBreite: 50, gpLaenge: 250,   // Profil am Gleis: Quer/Längs, je Seite bzw. Richtung in m
   gpUeberLaengs: 10,                     // Profil am Gleis, längs: eigene Überhöhung
   tourAngeboten: false,                  // die Tour wurde beim ersten Start schon einmal angeboten
@@ -5015,13 +5021,15 @@ function hoeheFuellen(el) {
  * Gerätespeicher.
  */
 
-/* Überhöhung: unüberhöht als Vorgabe, ein Tipp auf die Angabe schaltet weiter.
+/* Überhöhung: unüberhöht als Vorgabe, ein Regler bis so steil, wie es passt.
  * Die Bildhöhe richtet sich nach dem Gelände — flaches Gelände unüberhöht gibt
- * ein flaches Bild und eine kleinere Leiste. Wäre es höher als PROF_PLOT_MAX,
- * wird gestaucht, und die Angabe nennt den tatsächlichen Faktor. Eine Stufe,
- * in der die Höhe einfach das Bild füllt, gab es anfangs; sie zeichnete zwei
- * Meter auf 300 m wie einen Berg und ist wieder raus. */
-const PROF_UEBER = [1, 2, 5, 10];
+ * ein flaches Bild und eine kleinere Leiste. Höher als PROF_PLOT_MAX wird es
+ * nicht; der Regler endet dort („max"). Feste Stufen 1/2/5/10× gab es bis
+ * Oktober 2026: Mit Bäumen oder Gebäuden gingen oft nur ein oder zwei davon,
+ * der Rest war gestaucht oder aus. Eine Stufe, in der die Höhe einfach das
+ * Bild füllt, gab es anfangs; sie zeichnete zwei Meter auf 300 m wie einen
+ * Berg und ist wieder raus — deshalb beginnt der Regler bei 1×. */
+const PROF_UEBER_MAX = 20;
 const PROF_PLOT_MIN = 56;              // px Zeichenfläche, darunter wird es unleserlich
 const PROF_PLOT_MAX = 160;
 const PROF_KACHELN_FRAGEN = 4;
@@ -5307,9 +5315,9 @@ function profGebKnopf() {
   // Vorher unbekannt, wie groß die Kachel ist: gepackt meist 0,2–1 MB je 2 km × 2 km
   const n = gebKachelnFuer(profLinie()).length;
   const [zusatz, titel] = profGebLaedt ? ['lädt …', 'Gebäude werden geladen']
-    : profGebAn ? ['×', 'Gebäude ausblenden']
+    : profGebAn ? ['', 'Gebäude ausblenden']
     : [`≈${n} MB`, `Gebäude aus dem 3D-Gebäudemodell LoD2 dazuladen — ${n} Kachel${n > 1 ? 'n' : ''} zu 2 km, gepackt meist unter 1 MB, danach auf dem Gerät`];
-  return `<button type="button" class="prof-dom prof-geb${profGebAn ? ' is-on' : ''}" id="profGeb" ` +
+  return `<button type="button" class="prof-dom prof-geb${profGebAn ? ' is-on' : ''}" id="profGeb" aria-pressed="${profGebAn}" ` +
     `title="${titel}" aria-label="${titel}">Gebäude<small>${zusatz}</small></button>`;
 }
 
@@ -5335,9 +5343,9 @@ function profDomKnopf() {
   // „+0,8 MB": dazuladen, und was es kostet — kurz, damit die Legende einzeilig bleibt
   const mb = profMB(profZellen(profLinie(), 51.2) * PROF_DOM_BLOCK_KB * 1024);
   const [zusatz, titel] = profLaedt === 'dom' ? ['lädt …', 'Oberfläche wird geladen']
-    : profDomAn ? ['×', 'Oberfläche ausblenden']
+    : profDomAn ? ['', 'Oberfläche ausblenden']
     : ['+' + mb, `Gebäude und Bewuchs aus dem DOM20 dazuladen, rund ${mb}`];
-  return `<button type="button" class="prof-dom${profDomAn ? ' is-on' : ''}" id="profDom" ` +
+  return `<button type="button" class="prof-dom${profDomAn ? ' is-on' : ''}" id="profDom" aria-pressed="${profDomAn}" ` +
     `title="${titel}" aria-label="${titel}">Oberfläche<small>${zusatz}</small></button>`;
 }
 
@@ -5367,34 +5375,6 @@ function profNeigung(p) {
   return n > 1 && d > 0 ? (n * sxy - sx * sy) / d * 1000 : NaN;
 }
 
-/** Die Zeile mit den Kennwerten über dem Diagramm. */
-function profZahlen() {
-  const kw = profKennwerte(), g = profGleis;
-  const obj = kw.obj ? `<span>Objekte bis ${nfH.format(kw.obj.hoehe)} m` +
-    (g ? '' : ` bei ${nfM.format(kw.obj.station)} m`) + '</span>' : '';
-  const gleis = h => `<b><i>Gleis</i> ${Number.isFinite(h) ? nfH.format(h) + ' m' : '–'}</b>`;
-  if (g && g.art === 'quer') {
-    // Links und rechts außen gegen das Gleis: Liegt es im Einschnitt, steht beides im Plus
-    const L = profDgm.laenge, h = profWertBei(profDgm, L / 2);
-    const li = profWertBei(profDgm, 0) - h, re = profWertBei(profDgm, L) - h;
-    const seiten = [Number.isFinite(li) && `links ${profVz(li)}`, Number.isFinite(re) && `rechts ${profVz(re)}`].filter(Boolean);
-    // Abstand von der Gleisachse zur nächsten Gebäudewand je Seite, wenn Gebäude geladen sind
-    const gw = profGeb && gebWand(profGeb, L);
-    return `<p class="prof-zahlen">${gleis(h)}` +
-      (seiten.length ? `<span>${seiten.join(' · ')} m</span>` : '') +
-      (profGeb ? `<span>Gebäude ${gw || 'keine im Schnitt'}</span>` : '') + obj + '</p>';
-  }
-  if (g) {
-    const h = profWertBei(profDgm, profDgm.ecken[g.mitteIndex]);
-    const ng = profNeigung(profDgm);
-    return `<p class="prof-zahlen">${gleis(h)}` +
-      (Number.isFinite(ng) ? `<b title="Ausgleichsgerade über den ganzen Schnitt; plus heißt: steigt mit dem Kilometer">` +
-        `<i>Neigung</i> ${profVz(ng)} ‰</b>` : '') +
-      (Number.isFinite(kw.dh) ? `<span>Δh ${profVz(kw.dh)} m</span>` : '') + obj + '</p>';
-  }
-  // Die Spanne von tiefstem bis höchstem Punkt steht an der Achse
-  return `<p class="prof-zahlen"><b>${esc(messText(profDgm.laenge))}</b><b>Δh ${profVz(kw.dh)} m</b>${obj}</p>`;
-}
 
 /* Die Leiste besteht aus drei Teilen: oben Kopf und Diagramm, in der Mitte die
  * Sprungreihe, unten Knöpfe und Quelle. Ändert sich nur der Inhalt — nach einem
@@ -5425,14 +5405,18 @@ function profLeiste() {
   } else if (!profDgm) {
     teile.push('<p class="bb-note plain">Gelände wird geladen …</p>');
   } else {
-    /* Am Gleis braucht die Legende den Platz für den Breiten-Chip; das Gelände
-     * ist auch ohne Eintrag die Fläche, und die Oberfläche trägt ihren Strich
-     * im eigenen Knopf. Sonst bräche die Zeile auf dem Handy um. */
-    teile.push(profZahlen(),
-      '<div class="prof-bild" id="profBild"></div>',
-      `<div class="prof-legende">${g ? '' : '<span class="prof-leg-dgm">Gelände</span>'}${profGebKnopf()}${profDomKnopf()}` +
-      `<span class="prof-chips">${g ? gpWeiteKnopf() : ''}` +
-      '<button type="button" class="prof-ueber" id="profUeber"></button></span></div>');
+    /* Unter dem Bild feste Zeilen mit Namen davor, statt einer Chip-Reihe, die
+     * auf dem Handy irgendwo umbricht. Die Kennwerte stehen nicht mehr über dem
+     * Bild — der Zeiger nennt sie an jeder Stelle, das PDF mit Erklärung. */
+    teile.push('<div class="prof-bild" id="profBild"></div>',
+      '<div class="prof-regler">' +
+      `<span class="prof-rname">Ebenen</span><span class="prof-ebenen">${profGebKnopf()}${profDomKnopf()}</span>` +
+      (g ? gpWeiteRegler() : '') +
+      '<label class="prof-rname" for="profUeber">Überhöht</label>' +
+      '<span class="prof-weite"><span class="prof-striche" id="profUeberStriche" aria-hidden="true"></span>' +
+      '<input type="range" id="profUeber" min="0" max="1000" step="1" value="0"></span>' +
+      '<output class="prof-wert" id="profUeberWert" for="profUeber"></output>' +
+      '</div>');
     if (profDgm.hoehe.some(z => !Number.isFinite(z))) {
       teile.push('<p class="bb-note">Teilweise außerhalb Bayerns — dort fehlen die Höhen.</p>');
     }
@@ -5503,13 +5487,22 @@ function profLeiste() {
     if (profGebAn) { profGebAn = false; profGeb = null; profLeiste(); }
     else profGebLaden();
   });
-  an('#profUeber', () => {
-    prefs[profUeberSchluessel()] = PROF_UEBER[(PROF_UEBER.indexOf(profUeberWahl()) + 1) % PROF_UEBER.length];
-    saveStore();
-    const el = $('#profBild');
-    if (el) profBildSetzen(el);
-  });
-  an('#profWeite', gpWeiter);
+  const weite = b.querySelector('#profWeite');
+  if (weite) {
+    // Beim Ziehen nur die Zahl, geladen wird erst beim Loslassen
+    weite.addEventListener('input', () => { $('#profWeiteWert').textContent = gpWeiteText(gpWeiteStufen()[weite.value]); });
+    weite.addEventListener('change', () => gpWeiteSetzen(gpWeiteStufen()[weite.value]));
+  }
+  const ueber = b.querySelector('#profUeber');
+  if (ueber) {
+    // Das Bild folgt beim Ziehen sofort, gespeichert wird beim Loslassen
+    ueber.addEventListener('input', () => {
+      prefs[profUeberSchluessel()] = Math.max(1, profUeberAusPos(Number(ueber.value), Number(ueber.dataset.oben)));
+      const el = $('#profBild');
+      if (el) profBildSetzen(el, true);
+    });
+    ueber.addEventListener('change', () => saveStore());
+  }
   // Quer am Gleis erst fragen: dieser Schnitt oder die Serie; sonst gleich los
   an('#profPdfBtn', () => {
     if (profPdf && profPdf.laeuft) return;
@@ -5698,19 +5691,27 @@ async function gpRechnen() {
   profRechnen({ behalten: true });
 }
 
-/* Der Chip ±50 m: Breite je Seite (quer) oder Länge je Richtung (längs). */
-function gpWeiteKnopf() {
-  const quer = profGleis.art === 'quer', w = quer ? gpBreite() : gpLaenge();
-  const titel = (quer ? `${w} m zu jeder Seite des Gleises` : `${w} m in jede Richtung am Gleis entlang`) +
-    ' · antippen: umschalten';
-  return `<button type="button" class="prof-ueber prof-weite" id="profWeite" title="${titel}" ` +
-    `aria-label="${titel}">±${nfM.format(w)} m</button>`;
+/* Breite je Seite (quer) oder Länge je Richtung (längs) als Regler über die
+ * festen Stufen. Ein Chip, der bei jedem Tipp weiterschaltet, ging nur nach
+ * oben und sprang am Ende auf die kleinste zurück. */
+const gpWeiteStufen = () => profGleis.art === 'quer' ? GP_BREITEN : GP_LAENGEN;
+const gpWeiteText = w => `je ${nfM.format(w)} m`;
+
+function gpWeiteRegler() {
+  const quer = profGleis.art === 'quer', stufen = gpWeiteStufen(), w = quer ? gpBreite() : gpLaenge();
+  const titel = quer ? 'Breite zu jeder Seite des Gleises' : 'Länge in jede Richtung am Gleis entlang';
+  const striche = stufen.map((_, i) => `<i style="--p:${(i / (stufen.length - 1)).toFixed(4)}"></i>`).join('');
+  return `<label class="prof-rname" for="profWeite">${quer ? 'Breite' : 'Länge'}</label>` +
+    `<span class="prof-weite"><span class="prof-striche" aria-hidden="true">${striche}</span>` +
+    `<input type="range" id="profWeite" min="0" max="${stufen.length - 1}" step="1" value="${stufen.indexOf(w)}" ` +
+    `title="${titel}" aria-valuetext="${gpWeiteText(w)}"></span>` +
+    `<output class="prof-wert" id="profWeiteWert" for="profWeite">${gpWeiteText(w)}</output>`;
 }
 
-function gpWeiter() {
-  if (!profGleis) return;
-  if (profGleis.art === 'quer') prefs.gpBreite = GP_BREITEN[(GP_BREITEN.indexOf(gpBreite()) + 1) % GP_BREITEN.length];
-  else prefs.gpLaenge = GP_LAENGEN[(GP_LAENGEN.indexOf(gpLaenge()) + 1) % GP_LAENGEN.length];
+function gpWeiteSetzen(w) {
+  if (!profGleis || !w) return;
+  if (profGleis.art === 'quer') { if (w === gpBreite()) return; prefs.gpBreite = w; }
+  else { if (w === gpLaenge()) return; prefs.gpLaenge = w; }
   saveStore();
   profGleis.neuZeigen = true;
   gpRechnen();
@@ -5870,30 +5871,41 @@ const pdfKoord = (lat, lon) => {
   return [`${lat.toFixed(5).replace('.', ',')}° N  ${lon.toFixed(5).replace('.', ',')}° O`, `UTM 32: ${nf.format(e)} / ${nf.format(n)}`];
 };
 
-/** Die Angaben rechts unter dem Luftbild, als [Bezeichnung, Wert]. */
+/** Die Angaben rechts unter dem Luftbild, als [Bezeichnung, Wert, Erklärung].
+ *  Die Erklärung steht klein darunter — in der Leiste stehen diese Zahlen nicht
+ *  mehr, hier sollen sie ohne Rätseln lesbar sein. */
 function pdfAngaben() {
   const g = profGleis, kw = profKennwerte(), raus = [];
   const hm = z => Number.isFinite(z) ? `${nfH.format(z)} m` : '–';
   if (g && g.art === 'quer') {
     const q = pdfQuerWerte(profDgm);
-    raus.push(['Höhe am Gleis', `${hm(q.h)} ü. NHN`], ['Gelände außen', `links ${profVz(q.li)} · rechts ${profVz(q.re)} m`]);
-    const gw = profGeb && gebWand(profGeb, profDgm.laenge);
-    if (gw) raus.push(['Gebäude ab Gleis', gw]);
-    raus.push(['Breite', `±${nfM.format(gpBreite())} m, links in km-Richtung`]);
+    raus.push(['Höhe am Gleis', `${hm(q.h)} ü. NHN`, 'Gelände in der Gleisachse (DGM1)'],
+      ['Gelände am Rand', `links ${profVz(q.li)} · rechts ${profVz(q.re)} m`, 'Außenrand des Schnitts gegen die Höhe am Gleis'],
+      ...(profGeb ? [['Gebäude ab Gleis', gebWand(profGeb, profDgm.laenge) || 'keine im Schnitt',
+        'waagrecht von der Gleisachse bis zur nächsten Wand']] : []),
+      ['Breite', `je ${nfM.format(gpBreite())} m`, 'links und rechts mit Blick in Richtung steigender km']);
   } else if (g) {
-    raus.push(['Höhe am Gleis', `${hm(profWertBei(profDgm, profDgm.ecken[g.mitteIndex]))} ü. NHN`]);
+    raus.push(['Höhe am Gleis', `${hm(profWertBei(profDgm, profDgm.ecken[g.mitteIndex]))} ü. NHN`, 'Gelände in der Gleisachse am gesuchten km']);
     const ng = profNeigung(profDgm);
-    if (Number.isFinite(ng)) raus.push(['Neigung', `${profVz(ng)} ‰ (Ausgleichsgerade)`]);
-    raus.push(['Höhenunterschied', `${profVz(kw.dh)} m Anfang–Ende`], ['Gleislänge', messText(profDgm.laenge)]);
+    if (Number.isFinite(ng)) raus.push(['Neigung', `${profVz(ng)} ‰`, 'Ausgleichsgerade über den Schnitt; plus: steigt mit km']);
+    raus.push(['Höhenunterschied', `${profVz(kw.dh)} m`, 'Gelände am Ende minus am Anfang'], ['Gleislänge', messText(profDgm.laenge)]);
   } else {
-    raus.push(['Länge', messText(profDgm.laenge)], ['Höhenunterschied', `${profVz(kw.dh)} m A–B`],
-      ['Tiefster / höchster', `${hm(kw.min)} / ${hm(kw.max)}`]);
-    if (profVersatz) raus.push(['Versetzt', `${profVersatz > 0 ? '+' : '−'}${nfM.format(Math.abs(profVersatz))} m links von A→B`]);
+    raus.push(['Länge', messText(profDgm.laenge)], ['Höhenunterschied', `${profVz(kw.dh)} m`, 'Gelände bei B minus bei A'],
+      ['Tiefster / höchster', `${hm(kw.min)} / ${hm(kw.max)}`, 'Gelände im ganzen Schnitt, ü. NHN']);
+    if (profVersatz) raus.push(['Versetzt', `${profVersatz > 0 ? '+' : '−'}${nfM.format(Math.abs(profVersatz))} m`, 'parallel, plus: links von A→B']);
   }
-  if (kw.obj) raus.push(['Objekte (DOM20)', `bis ${nfH.format(kw.obj.hoehe)} m über Gelände`]);
+  if (kw.obj) raus.push(['Objekte (DOM20)', `bis ${nfH.format(kw.obj.hoehe)} m`, 'höchster Punkt der Oberfläche über dem Gelände']);
   const ort = g ? g.mitte : profLinie()[0];
   if (ort) { const [a, b] = pdfKoord(ort[0], ort[1]); raus.push([g ? 'Lage am Gleis' : 'Lage A', a], ['', b]); }
   return raus;
+}
+
+/** Ein Satz unter dem Titel: was der Schnitt zeigt und wie er liegt. */
+function pdfSchnittText() {
+  const g = profGleis;
+  if (g && g.art === 'quer') return 'Querschnitt rechtwinklig zum Gleis, Blick in Richtung steigender km: links im Bild ist links vom Gleis.';
+  if (g) return 'Längsschnitt in der Gleisachse; die km-Angaben stehen an der Achse.';
+  return `Geländeschnitt entlang der getippten Punkte ${profName(0)}–${profName(profPunkte.length - 1)}.`;
 }
 
 /** quellen: was im PDF vorkommt — { dom, geb, dop, osm } */
@@ -5932,7 +5944,8 @@ async function profPdfErstellen(art) {
   };
   stand('PDF wird erstellt …');
   try {
-    const g = profGleis, F = PDF_FARBEN, wahl = profUeberWahl();
+    // Dieselbe Überhöhung wie im Bild der Leiste, nicht die womöglich steilere gemerkte Wahl
+    const g = profGleis, F = PDF_FARBEN, wahl = profUeberRunden(profUeberWirksam());
     const heute = new Date().toLocaleDateString('de-DE');
     let titel, name;
     if (g && g.art === 'quer') {
@@ -5985,12 +5998,8 @@ async function profPdfErstellen(art) {
     const weite = g ? (g.art === 'quer' ? `±${nfM.format(gpBreite())} m` : `±${nfM.format(gpLaenge())} m`) : messText(L);
     pdfKopf(s, titel, `${heute} · ${weite} · ${pdfUeberText(wahl, f.k)}`);
 
-    // Kennwerte als eine Zeile über dem Diagramm, wie in der Leiste
-    const tmp = document.createElement('div');
-    tmp.innerHTML = profZahlen();
-    // Δ kennt die Grundschrift nicht (WinAnsi) — ausgeschrieben
-    const zeile = [...tmp.firstElementChild.children].map(c => c.textContent.trim().replace('Δh', 'Höhenunterschied')).join('    ');
-    s.text(PDF_RAND, 74, zeile, { groesse: 10, farbe: F.text });
+    // Die Kennwerte stehen mit Erklärung rechts unter dem Luftbild; hier nur, was der Schnitt zeigt
+    s.text(PDF_RAND, 74, pdfSchnittText(), { groesse: 9, farbe: F.fein });
     pdfProfil(s, box, { dgm: profDgm, dom: profDom, geb: profGeb }, achse, f);
     const leg = [['Gelände DGM1', F.gelLinie, null]];
     if (profDom) leg.push(['Oberfläche DOM20', F.dom, [2.5, 2]]);
@@ -6014,9 +6023,11 @@ async function profPdfErstellen(art) {
     s.text(kbox.x, kbox.y + kbox.h + 10, mitBild ? `Luftbild DOP20${serie ? ` · ${serie.length} Schnitte, alle ${PDF_SERIE.schritt} m` : ''}` : '',
       { groesse: 7, farbe: F.fein });
     let ay = kbox.y + kbox.h + 30;
-    for (const [k, v] of pdfAngaben()) {
+    for (const [k, v, erkl] of pdfAngaben()) {
       if (k) s.text(kbox.x, ay, k, { groesse: 7.5, farbe: F.fein });
       s.text(kbox.x + 82, ay, v, { groesse: 8, farbe: F.text });
+      // Über die ganze Spaltenbreite, rechts neben der Bezeichnung wäre sie zu schmal
+      if (erkl) { ay += 9; s.text(kbox.x, ay, erkl, { groesse: 6.5, farbe: F.fein }); }
       ay += 12.5;
     }
     const quellen = { dom: !!profDom, geb: !!profGeb, dop: mitBild, osm: !!g };
@@ -6256,10 +6267,44 @@ function profAchse(L) {
  * wer zwischen Quer und Längs wechselt, müsste sonst jedes Mal umschalten. */
 const profUeberSchluessel = () => profGleis && profGleis.art === 'laengs' ? 'gpUeberLaengs' : 'profUeber';
 
-/** Die gewählte Überhöhung; was nicht in der Liste steht, gilt als Vorgabe. */
+/** Die gewählte Überhöhung; was außerhalb 1 … PROF_UEBER_MAX liegt, gilt als Vorgabe. */
 function profUeberWahl() {
-  const k = profUeberSchluessel();
-  return PROF_UEBER.includes(prefs[k]) ? prefs[k] : k === 'gpUeberLaengs' ? 10 : 1;
+  const k = profUeberSchluessel(), v = prefs[k];
+  return Number.isFinite(v) && v >= 1 && v <= PROF_UEBER_MAX ? v : k === 'gpUeberLaengs' ? 10 : 1;
+}
+
+/** Die Überhöhung, die im Bild gilt: die gewählte, höchstens so steil, wie die Leiste es hergibt. */
+const profUeberWirksam = () => profAbbild ? Math.min(profUeberWahl(), profAbbild.kMax) : profUeberWahl();
+
+/* Unter 10 mit einer Stelle, darüber ganze Zahlen — so zeigt es der Regler,
+ * und so wird es gespeichert. */
+const profUeberRunden = v => v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+const profUeberText = v => (v >= 10 ? nfM.format(v) : nfH.format(v).replace(/,0$/, '')) + '×';
+
+/* Der Regler reicht von 1× bis so steil, wie das Bild in die Leiste passt
+ * (höchstens PROF_UEBER_MAX). Die Skala ist logarithmisch: Von 1× auf 2× ist
+ * derselbe Weg wie von 5× auf 10×. Die Striche stehen auf runden Werten. */
+const profUeberOben = kMax => Math.min(PROF_UEBER_MAX, kMax);
+// Ganz rechts ungerundet: 5,3 statt 5,33 läge knapp unter dem Ende, und „max" fehlte
+const profUeberAusPos = (pos, oben) => pos >= 1000 ? oben : profUeberRunden(Math.exp(pos / 1000 * Math.log(oben)));
+
+function profUeberReglerSetzen(wahl, kMax, ausRegler) {
+  const r = $('#profUeber');
+  if (!r) return;
+  const oben = profUeberOben(kMax), fest = oben < 1.05;
+  r.dataset.oben = oben;
+  r.disabled = fest;
+  // Beim Ziehen nicht zurücksetzen — der Wert kommt gerade vom Finger
+  if (!ausRegler) r.value = fest ? 0 : Math.round(Math.log(Math.max(1, wahl)) / Math.log(oben) * 1000);
+  const marken = fest ? [0] : [1, 2, 5, 10, PROF_UEBER_MAX].filter(v => v < oben * 0.9).map(v => Math.log(v) / Math.log(oben)).concat(1);
+  $('#profUeberStriche').innerHTML = marken.map(p => `<i style="--p:${p.toFixed(4)}"></i>`).join('');
+  // „max": steiler geht es in der Leiste nicht
+  const amEnde = wahl >= kMax * 0.995 && kMax < PROF_UEBER_MAX;
+  $('#profUeberWert').textContent = profUeberText(profUeberRunden(wahl)) + (amEnde ? ' max' : '');
+  const titel = fest ? 'Schon unüberhöht füllt das Bild die Leiste — steiler geht es hier nicht'
+    : 'Höhen gegenüber der Strecke überhöht, bis so steil, wie das Bild in die Leiste passt';
+  r.title = titel;
+  r.setAttribute('aria-valuetext', $('#profUeberWert').textContent);
 }
 
 /** Tiefster und höchster Wert über Gelände, Oberfläche und Gebäude. */
@@ -6287,17 +6332,18 @@ function profHoehenfenster(zmin, zmax, L, pw, wahl, phMin, phMax) {
 /* Das Diagramm, in der tatsächlichen Breite der Leiste gezeichnet: Mit
  * width = viewBox liegen die 1-px-Gitterlinien auf der Pixelmitte und bleiben
  * scharf, statt beim Skalieren über zwei Pixel zu verschwimmen. */
-function profBildSetzen(el) {
+function profBildSetzen(el, ausRegler = false) {
   const w = Math.max(160, Math.round(el.clientWidth));
   const li = 38, re = 4, ob = 14, un = 16;
   const pw = w - li - re;
   const L = profDgm.laenge || 1;
-  const proMeter = pw / L;               // px je Meter Station
 
   const [zmin, zmax] = profZSpanne({ dgm: profDgm, dom: profDom, geb: profGeb });
   if (!(zmax >= zmin)) { el.innerHTML = ''; return; }
 
-  const wahl = profUeberWahl();
+  // Der steilste Faktor, den die Leiste hergibt; die Wahl wird darauf begrenzt statt gestaucht
+  const kMax = profHoehenfenster(zmin, zmax, L, pw, Infinity, PROF_PLOT_MIN, PROF_PLOT_MAX).k;
+  const wahl = Math.min(profUeberWahl(), kMax);
   const { ph, y0, y1 } = profHoehenfenster(zmin, zmax, L, pw, wahl, PROF_PLOT_MIN, PROF_PLOT_MAX);
   const h = ob + ph + un;
   const yStep = profSchritt((y1 - y0) / 3);
@@ -6339,26 +6385,11 @@ function profBildSetzen(el) {
     `<path class="dgm" d="${dgm.map(t => t.d).join('')}"/>` +
     (dom ? `<path class="dom" d="${dom}"/>` : '') +
     `<g class="beschr">${beschr}</g>` +
-    '<g class="zeiger" hidden><path d=""/><circle r="3"/><text></text></g></svg>';
+    '<g class="zeiger" hidden><path class="senk" d=""/><path class="waag" d=""/><circle r="3.5"/><text></text></g></svg>';
 
-  /* Die Angabe ist zugleich der Schalter. Gestaucht (steiler, als das Bild hoch
-   * werden darf) steht sie in der Signalfarbe mit dem tatsächlichen Faktor. */
-  const k = (ph / (y1 - y0)) / proMeter;
-  // Unter 10 mit einer Stelle: „gestaucht auf 5×" bei tatsächlich 4,8 wäre irreführend
-  const kText = v => (v >= 10 ? nfM.format(v) : nfH.format(v).replace(/,0$/, '')) + '×';
-  const gestaucht = k < wahl * 0.97;
-  const ueber = $('#profUeber');
-  if (ueber) {
-    ueber.textContent = gestaucht ? `${kText(k)} überhöht` : wahl === 1 ? 'unüberhöht' : `${kText(wahl)} überhöht`;
-    ueber.classList.toggle('gestaucht', gestaucht);
-    ueber.title = (gestaucht
-      ? (wahl === 1 ? 'Unüberhöht' : `${kText(wahl)} überhöht`) + ` wäre höher als die Leiste — gestaucht auf ${kText(k)}`
-      : wahl === 1 ? 'Höhen im selben Maßstab wie die Strecke' : `Höhen ${kText(wahl)} überhöht`) +
-      ' · antippen: umschalten';
-    ueber.setAttribute('aria-label', 'Überhöhung: ' + ueber.title);
-  }
+  profAbbild = { X, Y, li, pw, ob, ph, L, kMax, zeiger: achse.zeiger };
+  profUeberReglerSetzen(wahl, kMax, ausRegler);
 
-  profAbbild = { X, Y, li, pw, ob, ph, L, zeiger: achse.zeiger };
   updateBH();            // die Bildhöhe hängt am Maßstab
   const svg = el.querySelector('svg');
   const zeigen = ev => {
@@ -6381,13 +6412,17 @@ function profZeigerSetzen() {
   if (!a || !g || !profDgm || profWahl < 0) return;
   const i = profWahl, s = profDgm.station[i], z = profDgm.hoehe[i];
   const x = Math.round(a.X(s)) + 0.5;
-  g.hidden = false;
-  g.querySelector('path').setAttribute('d', `M${x} ${a.ob}V${a.ob + a.ph}`);
+  // SVG-Elemente kennen die Eigenschaft hidden nicht — nur das Attribut wirkt
+  g.removeAttribute('hidden');
+  g.querySelector('.senk').setAttribute('d', `M${x} ${a.ob}V${a.ob + a.ph}`);
+  // Fadenkreuz: die waagrechte Linie führt die Höhe bis an die Achse
+  const y = Number.isFinite(z) ? Math.round(a.Y(z)) + 0.5 : null;
+  g.querySelector('.waag').setAttribute('d', y === null ? '' : `M${a.li} ${y}H${a.li + a.pw}`);
   const kreis = g.querySelector('circle');
-  kreis.style.display = Number.isFinite(z) ? '' : 'none';
-  if (Number.isFinite(z)) {
+  kreis.style.display = y === null ? 'none' : '';
+  if (y !== null) {
     kreis.setAttribute('cx', x);
-    kreis.setAttribute('cy', a.Y(z).toFixed(1));
+    kreis.setAttribute('cy', y);
   }
 
   let t = `${a.zeiger(s)} · ${Number.isFinite(z) ? nfH.format(z) + ' m' : 'ohne Wert'}`;
@@ -6412,9 +6447,12 @@ function profZeigerSetzen() {
   }
 
   const ll = utm32Zurueck(profDgm.ost[i], profDgm.nord[i]);
+  /* Der Ring lag als dünner Kreis in derselben Farbe auf der gestrichelten
+   * Schnittlinie und ging darin unter: jetzt mit dunklem Rand und Mittelpunkt. */
   if (!profRing) {
-    profRing = L.circleMarker(ll, {
-      radius: 8, color: MESS_FARBE, weight: 2.5, fill: false, interactive: false
+    profRing = L.marker(ll, {
+      icon: L.divIcon({ className: 'prof-ring', html: '<i></i>', iconSize: [26, 26], iconAnchor: [13, 13] }),
+      interactive: false, keyboard: false, zIndexOffset: 1000
     }).addTo(profLayer);
   } else {
     profRing.setLatLng(ll);

@@ -121,10 +121,11 @@ const TOUR_SCHRITTE = [
   },
   {
     titel: 'Das Geländeprofil',
-    text: 'Der Querschnitt am Gleis aus dem amtlichen Geländemodell, unüberhöht. Die Knöpfe darunter ' +
+    text: 'Der Querschnitt am Gleis aus dem amtlichen Geländemodell, unüberhöht. Wischen über das Bild ' +
+      'zeigt Höhe und Stelle auf der Karte. Der Regler stellt die Breite ein, die Knöpfe darunter ' +
       'springen meterweise die Strecke entlang, „Längs" zeigt den Verlauf am Gleis. Über den Messknopf ' +
-      'geht das Profil auch frei zwischen getippten Punkten. „Oberfläche" legt Gebäude und Bewuchs dazu. ' +
-      'Nur in Bayern.',
+      'geht das Profil auch frei zwischen getippten Punkten. „Gebäude" und „Oberfläche" legen ' +
+      'Häuser und Bewuchs dazu. Nur in Bayern.',
     ziel: () => tourSichtbar('#bottom'),
     vorher: async lauf => {
       /* Am Gleis, wenn das Ergebnis aus Schritt 2 noch dasteht — sonst frei,
