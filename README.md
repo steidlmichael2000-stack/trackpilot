@@ -61,10 +61,11 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   der Ortungsgenauigkeit als Zahl) und der Abstand zum letzten Messpunkt. Nur zum Verfolgen
   bleibt die Zeile weg — auch bei geladenen KML-Dateien: Das Ansteuern eines Punkts läuft über
   das Abstecken, in dem man ihn auswählt.
-- **Tour durch die App** — das **?** unten links neben dem © führt in neun Schritten durch alle
+- **Tour durch die App** — das **?** unten links neben dem © führt in elf Schritten durch alle
   Funktionen und führt sie live vor: Es tippt eine Beispielstrecke ein und sucht sie, setzt einen
   Punkt, öffnet Messmenü und Einstellungen und zeichnet ein Profil. Beim allerersten Start bietet
-  die App die Tour einmal an (siehe unten).
+  die App die Tour einmal an (siehe unten). Die Leisten von Profil, Profilmappe, Polygon, Live und
+  Abstecken haben oben rechts ein eigenes **?**, das nur diese Leiste Knopf für Knopf erklärt.
 - **Querprofil** — zwei oder mehr Punkte antippen, unten steht der Geländeschnitt aus dem amtlichen
   DGM1 (1 m Gitter); auf Knopfdruck kommt die Oberfläche mit Gebäuden und Bewuchs aus dem DOM20 als
   gestrichelte Linie dazu. Ein Finger auf dem Diagramm zeigt die Stelle auf der Karte, die Knöpfe
@@ -170,14 +171,16 @@ UTM-Maßstabs — die Abbildung vergrößert in Bayern um bis zu 0,12 %, Fläche
 Eine unabhängige Gegenprobe über die Krümmungsradien ergab für ein Viereck von 5.492 m² dasselbe auf
 den Hundertstel-Quadratmeter. Kreuzt sich der Umring, steht statt einer Zahl die Warnung: Eine
 Fläche ergibt eine Acht nicht. **Zurück** öffnet eine geschlossene Fläche wieder, sonst nimmt es den
-letzten Punkt.
+letzten Punkt. Jeder Punkt lässt sich ziehen (Griff 26 px wie bei A und B im Profil); Linie und
+Fläche laufen mit, gefangen und neu gerechnet wird beim Loslassen. Fadenkreuz, *Mitte* und
+*Standort* hat das Polygon seit Oktober 2026 nicht mehr — gebraucht wurden sie nur beim Live-Messen.
 
 **Live.** Ein Tipp setzt den Startpunkt, jeder weitere setzt ihn neu. Vom Start läuft eine
 gestrichelte Linie zum Fadenkreuz in der Bildmitte, die Entfernung steht direkt daneben — beim
 Schieben der Karte läuft sie mit, in jedem Bild, und steht immer an derselben Stelle des
 Bildschirms, ruhig zu lesen. Für „genau 20 m von diesem Punkt" schiebt man also, bis 20,0 m dasteht.
 
-Der Finger trifft keine 20 cm — deshalb in beiden Abläufen diese Wege statt des Antippens:
+Der Finger trifft keine 20 cm — deshalb beim Live-Messen diese Wege statt des Antippens:
 **Mitte** setzt auf das Fadenkreuz, **Standort** übernimmt die eigene Position. Läuft die
 Standortverfolgung, steht der Abstand vom eigenen Standort zum Start (Live) bzw. zum letzten Punkt
 (Polygon) außerdem in der Zeile oben; im Gelände ist „genau 20 m" damit eine Laufaufgabe: hingehen,
@@ -740,9 +743,9 @@ eine Blase mit Text, *Zurück* und *Weiter*. Am Rechner gehen auch die Pfeiltast
 beendet sie. Während der Tour nimmt die Ebene alle Griffe ab — die Karte bewegt sich nur durch die
 Vorführung.
 
-Die neun Schritte: Suchzeile, Ergebnis, langer Druck setzt einen Punkt, Standort und mitlaufender
-Kilometer, Messmenü, Geländeprofil, Karten und Auflagen, eigene Dateien und Abstecken, Quellen und
-das ?. Was sie erklärt, führt sie vor: Sie tippt `5100 12,5` Zeichen für Zeichen ein (ohne die
+Die elf Schritte: Suchzeile, Ergebnis, langer Druck setzt einen Punkt, Standort und mitlaufender
+Kilometer, Messmenü mit seinen vier Werkzeugen, Geländeprofil, das ? in der Profilleiste, Karten und
+Auflagen, Wetter, eigene Dateien und Abstecken, Quellen und das ?. Was sie erklärt, führt sie vor: Sie tippt `5100 12,5` Zeichen für Zeichen ein (ohne die
 Tastatur des Handys aufzuklappen), sucht die Strecke wirklich, setzt einen Punkt, öffnet Messmenü
 und Einstellungen und zeichnet den Querschnitt am Gleis des Ergebnisses (ohne Ergebnis ein freies
 300-m-Profil durch die Kartenmitte). Klappt eine Vorführung nicht — ohne
@@ -751,6 +754,12 @@ Netz, außerhalb Bayerns —, sagt die Blase das, statt zu warten; nach höchste
 Die Blase steht unter dem Ziel, wenn dort Platz ist, sonst darüber, sonst daneben (am großen
 Bildschirm neben dem offenen Menü); passt sie nirgends, steht sie unten am Rand — auf dem Handy
 beim Menü, dessen Knöpfe dann oben sichtbar bleiben.
+
+**Das ? in den Werkzeugleisten** (Profil, Profilmappe, Polygon, Live, Abstecken) nutzt dieselbe Ebene
+für eine kurze Tour nur durch diese Leiste: Diagramm, Ebenen, Regler, Sprünge, PDF und so weiter, je
+nachdem, was gerade dasteht — ein noch nicht geladenes Profil hat weniger Schritte. Sie räumt nichts
+weg und führt nichts vor; nur beim PDF klappt sie die Auswahl kurz auf und danach wieder zu. Danach
+steht der Fokus wieder auf dem ?.
 
 **Beim allerersten Start** bietet die App die Tour einmal an, in einer kleinen Blase über dem
 ©-Kasten. Sie gilt als gemacht, sobald sie gezeigt wurde: Wer *Nein, danke* sagt, wird nicht wieder

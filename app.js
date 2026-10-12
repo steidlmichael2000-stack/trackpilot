@@ -4818,12 +4818,6 @@ function messZeichnen() {
     }
   }
 
-  messPunkte.forEach(p => {
-    L.circleMarker(p, {
-      radius: 5, color: '#fff', weight: 2, fillColor: MESS_FARBE, fillOpacity: 1, interactive: false
-    }).addTo(messLayer);
-  });
-
   /* Der Hinweis, dass ein Tipp auf den ersten Punkt schließt: ein gestrichelter
    * Ring, solange es etwas zu schließen gibt. Ohne ihn fände das niemand. */
   if (messArt === 'polygon' && !messZu && n >= 3) {
@@ -4831,7 +4825,52 @@ function messZeichnen() {
       radius: 11, color: MESS_FARBE, weight: 2, dashArray: '3 3', fill: false, interactive: false
     }).addTo(messLayer);
   }
+
+  if (messArt !== 'polygon') {
+    messPunkte.forEach(p => {
+      L.circleMarker(p, {
+        radius: 5, color: '#fff', weight: 2, fillColor: MESS_FARBE, fillOpacity: 1, interactive: false
+      }).addTo(messLayer);
+    });
+    return;
+  }
+
+  /* Beim Polygon lässt sich jeder Punkt ziehen — Griff wie bei A und B im
+   * Profil (26 px). Beim Ziehen laufen nur die Linie und die Fläche mit,
+   * gefangen und neu beschriftet wird beim Loslassen. Ein Tipp auf einen Griff
+   * erreicht die Karte nicht mehr; deshalb schließt der Griff des ersten Punkts
+   * die Fläche selbst. */
+  const umriss = messLayer.getLayers().find(l => l instanceof L.Polyline) || null;
+  messPunkte.forEach((p, i) => {
+    const m = L.marker(p, {
+      draggable: true, keyboard: false, autoPan: true, zIndexOffset: 500,
+      icon: L.divIcon({ className: 'prof-griff', iconSize: [26, 26], iconAnchor: [13, 13], html: '<i></i>' })
+    }).addTo(messLayer);
+    m.on('drag', () => { if (umriss) umriss.setLatLngs(messPunkte.map((q, j) => j === i ? m.getLatLng() : q)); });
+    m.on('dragend', () => messPunktGezogen(i, m.getLatLng()));
+    if (i === 0 && !messZu && n >= 3) m.on('click', () => messTipp(m.getLatLng()));
+  });
 }
+
+/** Ein Polygonpunkt wurde gezogen: dort ablegen, gefangen wie beim Tippen. */
+function messPunktGezogen(i, latlng) {
+  const nah = messKandidatenFinden(latlng);
+  const f = nah.length && nah[0].dist <= MESS_FANG_MAX_M ? nah[0] : null;
+  messPunkte[i] = f ? f.koord : [latlng.lat, latlng.lng];
+  if (f) toast(`Gefangen auf ${f.name}`);
+  messKandidaten = [];         // die Auswahl gehörte zum zuletzt getippten Punkt
+  messZeichnen();
+  messLeiste();
+  liveLeiste();
+}
+
+/* Das ? links neben dem × der Werkzeugleisten: geht die Leiste Knopf für Knopf
+ * durch (HILFE in tour.js; der Zuhörer hängt dort am Dokument). Im Quelltext
+ * direkt nach dem ×, damit „.bb-hilfe ~ .bb-head" dem Kopf Platz macht. */
+const hilfeKnopf = (art, was) => `<button type="button" class="bb-hilfe" data-hilfe="${art}" ` +
+  `aria-label="${was} erklären" title="${was} erklären">` +
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/>' +
+  '<path d="M9.7 9.6a2.4 2.4 0 1 1 3.4 2.2c-.7.4-1.1.9-1.1 1.7v.5"/><circle class="voll" cx="12" cy="16.8" r="1.1"/></svg></button>';
 
 function messLeiste() {
   const b = $('#bottom');
@@ -4887,6 +4926,7 @@ function messLeiste() {
     <button type="button" id="bbClose" class="bb-close" aria-label="Messen beenden">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
+    ${hilfeKnopf(live ? 'live' : 'polygon', titel)}
     <div class="bb-head">
       <p class="bb-title">${titel}</p>
       ${schild}
@@ -4896,9 +4936,10 @@ function messLeiste() {
       ? `<p class="bb-note plain">${esc(t)}</p>` : `<p class="bb-note">${esc(t.warn)}</p>`).join('')}
     ${wahl}
     <div class="bb-actions knapp">
-      <button type="button" id="messMitte">Mitte</button>
-      <button type="button" id="messHier"${ortAn() ? '' : ' disabled'}>Standort</button>
-      ${live ? '' : `<button type="button" id="messZurueck"${n ? '' : ' disabled'}>Zurück</button>
+      ${live ? `<button type="button" id="messMitte">Mitte</button>
+      <button type="button" id="messHier"${ortAn() ? '' : ' disabled'}>Standort</button>`
+      // Beim Polygon kein Fadenkreuz und kein Standort: Punkte werden getippt und gezogen
+      : `<button type="button" id="messZurueck"${n ? '' : ' disabled'}>Zurück</button>
       <button type="button" id="messLeer"${n ? '' : ' disabled'}>Leeren</button>`}
     </div>`;
 
@@ -5560,7 +5601,8 @@ function profLeiste() {
   if (g) {
     const art = (wert, text) => `<button type="button" data-gpart="${wert}" aria-pressed="${g.art === wert}"` +
       `${g.art === wert ? ' class="is-on"' : ''}>${text}</button>`;
-    kopf = `<p class="bb-title">${g.art === 'quer' ? 'Querprofil' : 'Längsprofil'}</p>` +
+    // Nur „Profil": Quer oder längs sagt der Umschalter daneben, und auf dem Handy braucht das ? die Breite
+    kopf = '<p class="bb-title">Profil</p>' +
       `<span class="tag warn" title="Strecke ${esc(g.ref)}">km ${fmtKm(g.km)}</span>` +
       `<span class="prof-art" role="group" aria-label="Schnitt">${art('quer', 'Quer')}${art('laengs', 'Längs')}</span>`;
   } else {
@@ -5582,6 +5624,7 @@ function profLeiste() {
     <button type="button" id="bbClose" class="bb-close" aria-label="Profil beenden">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
+    ${hilfeKnopf('profil', 'Profil')}
     <div class="bb-head">${kopf}</div>
     ${profPdfZeile()}
     ${teile.join('')}`;
@@ -6472,6 +6515,7 @@ function mappeLeiste() {
     <button type="button" id="bbClose" class="bb-close" aria-label="Profilmappe schließen">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
+    ${hilfeKnopf('mappe', 'Profilmappe')}
     <div class="bb-head"><p class="bb-title">Profilmappe</p><span class="tag" id="mappeAnzahl"></span></div>
     <textarea id="mappeText" class="mappe-text" rows="4" spellcheck="false" autocomplete="off"
       aria-label="Strecken und Kilometer, je Zeile eine Strecke"
@@ -8785,6 +8829,7 @@ function abListeZeigen(el) {
     `<button type="button" class="seg-btn${sort === art ? ' is-on' : ''}" data-absort="${art}">${text}</button>`;
   el.innerHTML = `
     <button type="button" class="bb-close" data-abzu aria-label="Abstecken beenden">${AB_ZU}</button>
+    ${hilfeKnopf('abstecken', 'Abstecken')}
     <div class="bb-head">
       <p class="bb-title">Abstecken</p>
       <span class="tag">Punkt wählen</span>
@@ -8877,6 +8922,7 @@ function abZielZeigen(el) {
   const k = o.koord;
   el.innerHTML = `
     <button type="button" class="bb-close" data-abzu aria-label="Abstecken beenden">${AB_ZU}</button>
+    ${hilfeKnopf('abstecken', 'Abstecken')}
     <div class="ab-kopf">
       <!-- Der Pfeil ist zugleich der Schalter: Antippen wechselt zwischen Karte und Kompass -->
       <button type="button" class="ab-richtung${prefs.abKompass ? ' is-on' : ''}" data-abkompass
@@ -9393,9 +9439,9 @@ function syncButtons() {
     }
   }
 
-  // Das Fadenkreuz gehört zu Polygon und Live (Mitte, laufende Zahl), nicht zum Profil
+  // Das Fadenkreuz gehört nur zu Live (Mitte, laufende Zahl) — nicht zu Polygon und Profil
   const kreuz = $('#mitteKreuz');
-  if (kreuz) kreuz.hidden = !messModus;
+  if (kreuz) kreuz.hidden = !(messModus && messArt === 'live');
 
   const mb = $('#mapMessBtn');
   if (mb) {

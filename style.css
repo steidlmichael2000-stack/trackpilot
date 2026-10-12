@@ -1069,6 +1069,19 @@ body {
 .bb-close svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; }
 .bb-close:active { color: var(--text); }
 
+/* Das ? links neben dem ×: erklärt die Werkzeugleiste (HILFE in tour.js) */
+.bb-hilfe {
+  position: absolute; top: 5px; right: 38px;
+  width: 32px; height: 32px; padding: 0;
+  display: grid; place-items: center;
+  border: none; border-radius: 50%;
+  background: none; color: var(--muted-2); cursor: pointer;
+}
+.bb-hilfe svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.bb-hilfe .voll { fill: currentColor; stroke: none; }
+.bb-hilfe:active { color: var(--text); }
+.bb-hilfe ~ .bb-head, .bb-hilfe ~ .ab-kopf { padding-right: 62px; }
+
 .bb-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-right: 30px; }
 .bb-title { font-size: 1.02rem; font-weight: 650; margin: 0; }
 .bb-sub { font-size: .76rem; color: var(--muted); margin: 2px 0 0; }

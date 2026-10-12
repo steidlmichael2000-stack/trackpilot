@@ -219,6 +219,14 @@ umbenennt oder neue Funktionen einbaut, zieht die Schritte in `TOUR_SCHRITTE` na
 erklärt die Tour eine App, die es so nicht mehr gibt.
 
 - Das ? macht den ©-Kasten 21 px breiter; die Grenze für die Ecken-Anordnung (1010 px) hängt daran.
+- **Werkzeug-Touren** (`HILFE` in `tour.js`, Knopf `hilfeKnopf` in `app.js`): das ? links neben dem ×
+  in den Leisten von Profil, Profilmappe, Polygon, Live und Abstecken. Die Schritte zielen auf
+  Elemente der Leisten (`#profBild`, `.prof-ebenen`, `#profWeite`, `#mappeText`, `.ab-richtung` …).
+  Wer eine Leiste umbaut, zieht `HILFE` nach — Schritte ohne Ziel fallen still heraus, ein
+  umbenanntes Element fehlt dann in der Erklärung, ohne dass es auffällt.
+- Das ? braucht 32 px im Kopf der Leiste. Am Gleis heißt das Profil deshalb nur noch „Profil" (Quer
+  oder Längs sagt der Umschalter); mit „Querprofil" rutschte das Teilen-Zeichen auf 375 px in eine
+  zweite Zeile.
 - Beim Prüfen im Testbrowser: Ohne Bildanforderung friert er die 0,25-s-Übergänge von Loch und
   Blase ein, `getBoundingClientRect` meldet dann Zwischenstände. Die gesetzten Werte in `style`
   vergleichen oder vorher einen Screenshot auslösen.
