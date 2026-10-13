@@ -5,7 +5,7 @@
  * neue Version sofort ankommt statt hinter einem alten Cache zu hängen.
  */
 
-const VERSION = 'v45';
+const VERSION = 'v46';
 const SHELL = `trackpilot-shell-${VERSION}`;
 const TILES = `trackpilot-tiles-${VERSION}`;
 const DATA = `trackpilot-data-${VERSION}`;
@@ -18,7 +18,7 @@ const KEEP = [SHELL, TILES, DATA, NETZ];
 const ALT_PRAEFIX = 'railnav-';
 
 const SHELL_FILES = [
-  './', 'index.html', 'style.css', 'app.js', 'hoehen.js', 'pdf.js', 'gebaeude.js', 'tour.js',
+  './', 'index.html', 'style.css', 'app.js', 'hoehen.js', 'pdf.js', 'gebaeude.js', 'tour.js', 'radar-werk.js',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/leaflet-rotate.js',
   // Mit ?v=lapis, genau wie index.html und das Manifest es anfordern: Der Cache
   // vergleicht die volle Adresse, ohne den Zusatz fände er offline nichts.

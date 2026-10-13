@@ -110,15 +110,25 @@ ist, steht die dunkle Karte unverändert.
   auch fertige Canvas-Kacheln weg. Farbwahl: lange drücken oder Rechtsklick auf *Parzellen*.
   Das Punktraster der Nutzung (2 × 2 px) filtert `parzPunkteWeg` heraus; `punkte` steht deshalb wie
   `farbe` in `options`.
-- **Regenradar beim Abspielen** wartet auf die Karte (`karteLaedtNoch`): Der DWD braucht 1–7 s je
-  Kachel, und auf dem Handy teilen sich Radar und Karte die Leitung.
-- **Regenradar** (`radar…`): Ebene erst anlegen, wenn die Zeitachse da ist, und **nie ohne
-  `TIME`** — die Vorgabe „current" des DWD ist der Uhr am nächsten, meist schon Vorhersage; das gab
-  eine Naht an der Kachelkante. Bildwechsel über eine zweite, unsichtbar ladende Ebene.
-  `maps.dwd.de` bleibt aus dem Service Worker draußen. Geglättet mit `INTERPOLATIONS=bilinear`
-  (roh waren es grobe 1-km-Kästchen; bicubic erfindet Inseln), Bilder bis Zoomstufe 14, Kacheln
-  512 px (DWD spricht nur HTTP/1.1 — weniger Abfragen, weniger Nachzügler). Nähte an Kachelkanten
-  nur über mehrere Bilder messen, ein einzelnes streut.
+- **Regenradar** (`radar…` in `app.js`, `radar-werk.js`): seit 13.10.2026 **Zahlen statt Bilder** —
+  WCS-GeoTIFF (Float32, mm je 5 min, × 12 = mm/h) statt WMS-Kacheln, damit der Zeitregler gleitet
+  wie in WarnWetter: Der Worker schätzt je Paar, wohin der Regen zieht, der Shader (`RADAR_FS`)
+  schiebt beide Bilder zur Zwischenzeit, mischt und färbt erst dann ein. Nicht auf Überblenden
+  zurückbauen — WarnWetter verschiebt (Video vom 11.10.2026, scharfe Kanten, keine Doppelkontur).
+  - Zeitachse zuerst, dann die Ebene; Zeitpunkte immer mit `TIME`. Vorhersagen ohne Cache holen und
+    nach einer neuen Messung verwerfen (`radarAchseNeu`, im Worker `stand`).
+  - Die Zeichenfläche (`RadarSchicht`) liegt in der **tilePane** und sortiert sich per z-index wie die
+    Kachelebenen (`ordneAuflagen`); die Lage rechnet sie wie `GridLayer._setZoomTransform`. Gemessen
+    0 px Versatz nach Schieben und Zoomen, < 0,6 px gedreht.
+  - Ausschnitt 2 × die Sicht, mindestens 250 km, höchstens 400 Zellen (`scalesize`); das Raster des
+    Dienstes weicht vom angefragten Rahmen ab — **immer die Lage aus dem TIFF nehmen**.
+  - Bewegungsschätzung **ohne Strafe für weite Wege**: schon 0,0002 je Zelle und d² verfälschte eine
+    Verschiebung von (4, −3) zu (3,74, −2,64). Nach Änderungen `node werkzeug/radar-pruefen.mjs`.
+  - Braucht WebGL2 (wie MapLibre). `maps.dwd.de` bleibt aus dem Service Worker draußen,
+    `radar-werk.js` steht in `SHELL_FILES`.
+  - Beim Prüfen im Testbrowser: Ist das Fenster verdeckt, läuft kein `requestAnimationFrame` —
+    Abspielen dann mit untergeschobenem rAF testen, Bilder per `readPixels` direkt nach
+    `radarZeichnenJetzt()`.
 
 ## Messmenü und Querprofil (Oktober 2026)
 
@@ -241,4 +251,5 @@ werden kann (sonst bleibt der alte im Dienst). Steht dort eine Datei, die es nic
 gibt, kommt nie wieder ein Update an — beim Ändern der Liste jede Datei prüfen.
 
 Vorher `node --test tests/robustheit.test.mjs` (Service Worker, WMS, KMZ; von
-Codex übernommen) und nach Änderungen an `hoehen.js` `node werkzeug/hoehen-pruefen.mjs`.
+Codex übernommen) und nach Änderungen an `hoehen.js` `node werkzeug/hoehen-pruefen.mjs`,
+an `radar-werk.js` `node werkzeug/radar-pruefen.mjs`.

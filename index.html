@@ -168,13 +168,14 @@
   <div id="live" class="live" hidden></div>
 
   <!-- Regenradar: Zeitleiste und Legende, nur solange die Auflage an ist.
-       Links eine Stunde Messung, rechts zwei Stunden Vorhersage des DWD. -->
+       Links eine Stunde Messung, rechts zwei Stunden Vorhersage des DWD.
+       Stufenlos: Zwischen den Fünfminutenbildern rechnet die App (radar-werk.js). -->
   <div id="radar" class="radar" hidden>
     <div class="radar-zeile">
       <button id="radarSpiel" class="radar-knopf" type="button" aria-label="Abspielen" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path class="spiel" d="M7 4.5v15l12.5-7.5z"/><path class="pause" d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z"/></svg>
       </button>
-      <input id="radarZeit" class="radar-zeit" type="range" min="-60" max="120" step="5" value="0"
+      <input id="radarZeit" class="radar-zeit" type="range" min="-60" max="120" step="any" value="0"
              aria-label="Zeitpunkt des Radarbilds, in Minuten zur letzten Messung">
       <p id="radarText" class="radar-text" aria-live="polite"><b>—</b><small>lädt …</small></p>
       <button id="radarZu" class="radar-knopf" type="button" aria-label="Regenradar ausblenden">

@@ -41,9 +41,9 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   Bildgrundkarten, auf denen sie sonst fehlen, und für die dunkle Karte, deren eigene sie durch
   deutlichere ersetzen. Dazu
   eigener Standort, Link zum Teilen, Betriebsstellensuche über Name, DS100 oder UIC.
-- **Regenradar** mit Zeitleiste: eine Stunde Messung zurück, zwei Stunden Vorhersage voraus, zum
-  Abspielen in Viertelstunden — für die Frage, ob man den Außentermin noch trocken schafft
-  (siehe unten).
+- **Regenradar** mit Zeitleiste: eine Stunde Messung zurück, zwei Stunden Vorhersage voraus,
+  stufenlos zu schieben und abzuspielen — der Regen zieht zwischen den Fünfminutenbildern weiter,
+  statt zu springen. Für die Frage, ob man den Außentermin noch trocken schafft (siehe unten).
 - **Abstecken.** Punkte aus geladenen KML-Dateien ansteuern: Liste nach Entfernung, Name oder
   Dateireihenfolge, dann Entfernung, Richtungspfeil und Versatz nach Nord und Ost vom eigenen
   Standort, *Nächster* geht zum nächstgelegenen noch nicht angesteuerten Punkt. Der Pfeil richtet
@@ -1023,50 +1023,77 @@ auf drei Nachkommastellen gerundet hinaus; der Service Worker legt nichts davon 
 ## Regenradar
 
 Unter *Wetter → Regenradar* liegt das Niederschlagsradar des Deutschen Wetterdienstes über der
-Karte: Layer `Niederschlagsradar` aus `maps.dwd.de/geoserver/dwd/wms`, das RV-Produkt mit 1 km
-Raster, alle 5 Minuten neu, in mm/h. Der Dienst gibt CORS frei und rechnet in `EPSG:3857`, läuft also
-direkt als Leaflet-WMS. Es liegt über der Grundkarte und unter Parzellen und Bahn-Layer — eine
-Fläche, über der die Linien scharf bleiben, statt eingefärbt zu werden.
+Karte: das RV-Produkt mit 1 km Raster, alle 5 Minuten neu. Es liegt über der Grundkarte und unter
+Parzellen und Bahn-Layer — eine Fläche, über der die Linien scharf bleiben, statt eingefärbt zu
+werden.
 
 Solange es an ist, steht unter der Suchzeile eine **Zeitleiste**: links eine Stunde Messung
 (durchgezogen), rechts zwei Stunden Vorhersage (gestrichelt), dazwischen eine Marke für die letzte
-Messung. Daneben die Uhrzeit des gezeigten Bildes und ob es Messung oder Vorhersage ist; darunter
-die Farbstufen des Dienstes. **▶** spielt den Verlauf in Viertelstunden ab und wartet dabei jedes
-Bild ab, statt im festen Takt halbe Bilder zu zeigen. Das **×** schaltet das Radar ab. Bei offenem
-Menü tritt die Leiste zurück.
+Messung. Daneben die Uhrzeit und ob es Messung oder Vorhersage ist; darunter die Farbstufen des
+Dienstes. Der Regler läuft **stufenlos**: Zwischen zwei Fünfminutenbildern zieht der Regen weiter,
+wie in der DWD-App WarnWetter. Die Uhrzeit springt dabei wie dort von Messung zu Messung. **▶**
+spielt den Verlauf gleitend ab, 20 Minuten je Sekunde, steht am Ende kurz und beginnt von vorn.
+Das **×** schaltet das Radar ab. Bei offenem Menü tritt die Leiste zurück. Solange noch Bilder
+fehlen, steht „lädt … %" unter der Uhrzeit.
 
-Zwei Dinge, die nicht offensichtlich sind:
+### Zahlen statt Bilder
+
+Bis 13.10.2026 kamen fertig eingefärbte WMS-Kacheln, je Zeitpunkt ein Bild, und der Regler sprang in
+Fünfminutenschritten. Zum Gleiten braucht es Werte: WarnWetter blendet nicht über, es verschiebt. In
+einem Bildschirmvideo der App wandert das Regenband weiter, während die Uhr noch auf derselben
+Marke steht, scharfrandig und ohne die Doppelkontur, die ein Überblenden zeigen würde. Aus zwei
+Farbbildern lässt sich so ein Zwischenstand nicht rechnen.
+
+Deshalb holt die App die Rohwerte über den **WCS** desselben GeoServers
+(`maps.dwd.de/geoserver/dwd/ows`, Coverage `dwd__Niederschlagsradar`): je Zeitpunkt ein GeoTIFF des
+Ausschnitts, Float32 in **mm je 5 Minuten** (× 12 = mm/h — gegen GetFeatureInfo und die Farben des
+WMS geprüft), Deflate-gepackt, in `EPSG:3857` vom Dienst selbst gerechnet. Gemessen 15–80 KB und
+0,3–3 s je Zeitpunkt; die WMS-Kacheln brauchten 1–7 s. Ohne `geotiff:compression=Deflate` wären es
+1 MB statt 26 KB. Der Ausschnitt ist doppelt so groß wie die Sicht, mindestens 250 km; größere
+verkleinert der Dienst (`scalesize`) auf höchstens 400 Zellen je Richtung. Das Raster der Antwort
+weicht vom angefragten Rahmen ab, die Lage kommt deshalb immer aus dem TIFF. Alle 37 Zeitpunkte
+werden vorgeladen, die um den Regler zuerst — gemessen 6–8 s für alle, drei Abrufe zugleich (der
+Dienst spricht nur HTTP/1.1).
+
+**Bewegung** (`radar-werk.js`, ein Worker): Je Paar benachbarter Zeitpunkte sucht er für Blöcke von
+etwa 15 km, wohin der Regen am besten passt (Summe der Abweichungen von log(1 + mm/h), bis rund
+140 km/h), verfeinert auf Bruchteile einer Zelle, glättet über die Nachbarn und füllt regenfreie
+Blöcke von dort auf. Eine Strafe für weite Wege gibt es nicht — schon eine kleine machte aus einer
+Verschiebung von (4, −3) Zellen (3,74, −2,64), weil schwacher Regen so glatt ist, dass die Strafe
+den Ausschlag gibt. Gemessen an einem echten Paar sinkt die Abweichung zum nächsten Bild mit der
+geschätzten Bewegung von 24,3 auf 15,6.
+
+**Zeichnen** (WebGL2, `RADAR_FS` in `app.js`): Für einen Zeitpunkt zwischen A und B wird A um den
+Anteil der Bewegung vorgeschoben, B um den Rest zurück, beide gemischt und **erst danach**
+eingefärbt — so bleiben die Stufen scharf abgesetzt, statt zu verschwimmen. Zwischen den Zellen
+bilinear, wie zuvor `INTERPOLATIONS=bilinear` beim WMS; *bicubic* schwingt über und erfindet kleine
+Inseln. Die Kanten der Stufen sind einen Bildpunkt breit geglättet. Gemessen 2,6 ms je Bild bei
+1920 × 1200 Bildpunkten; die Fläche ist auf 4 Millionen Bildpunkte begrenzt.
+
+Weitere Punkte, die nicht offensichtlich sind:
 
 - **Ohne Zeitangabe geht es nicht.** Ohne `TIME` nimmt der Dienst „current", und das ist nicht die
   letzte Messung, sondern der Zeitschritt, der der Uhr am nächsten liegt — meist schon einer der
-  Vorhersage. Eine erste Fassung legte die Ebene an, bevor die Zeitachse da war: Eine Kachel kam ohne
-  Zeit, die Nachbarkachel mit, und ein Regengebiet endete schnurgerade an der Kachelkante. Die letzte
-  Messung steht als Vorgabe von `REFERENCE_TIME` in den Capabilities der Ebene; über den Ebenenpfad
-  (`…/dwd/Niederschlagsradar/wms`) sind die 38 KB klein statt 875 KB für den ganzen Dienst. Gemessen
-  lag sie 6 Minuten hinter der Uhr. `TIME` allein genügt dann: Für einen vergangenen Zeitpunkt
-  liefert der Dienst die Messung, für einen künftigen die Vorhersage des neuesten Laufs.
-- **Bildwechsel über eine zweite Ebene.** Die lädt unsichtbar, und erst wenn alle Kacheln da sind,
-  wird getauscht. Sonst stünde zwischen zwei Bildern jedes Mal die leere Karte — beim Abspielen ein
-  Flackern im Takt.
+  Vorhersage. Die letzte Messung steht als Vorgabe von `REFERENCE_TIME` in den Capabilities der
+  WMS-Ebene; über den Ebenenpfad (`…/dwd/Niederschlagsradar/wms`) sind die 38 KB klein statt 875 KB
+  für den ganzen Dienst. Gemessen lag sie 6 Minuten hinter der Uhr. `TIME` allein genügt dann: Für
+  einen vergangenen Zeitpunkt liefert der Dienst die Messung, für einen künftigen die Vorhersage des
+  neuesten Laufs.
+- **Neue Messung, neuer Lauf.** Die App sieht alle fünf Minuten nach. Messungen bleiben, alles nach
+  der alten Messung war Vorhersage des alten Laufs und wird neu geholt — Vorhersagen deshalb ohne
+  Zwischenspeicher, und eine verspätete Antwort des alten Laufs wird verworfen. Ein gewählter
+  Zeitpunkt bleibt stehen, nur „letzte Messung" geht mit.
+- **Die Zeichenfläche liegt in der Kachelebene** (`tilePane`) und sortiert sich wie die Kacheln per
+  z-index. In der Vektorebene läge sie über dem Bahn-Layer und würde bei großen KML-Dateien während
+  einer Geste ausgeblendet. Ihre Lage rechnet sie wie Leaflets Kachelebenen: gemessen 0 px Versatz
+  nach Schieben und Zoomen, unter 0,6 px bei gedrehter Karte.
+- Braucht **WebGL2** (wie MapLibre für die dunkle Karte); ohne steht „braucht WebGL2" in der Leiste.
+  Der Service Worker lässt `maps.dwd.de` durch: Ein Radarbild ist nach fünf Minuten alt und gehört
+  nicht in den Offlinevorrat.
 
-**Geglättet wird beim Dienst selbst.** Die Daten haben 1 km Raster, roh gezeigt sind das auf
-Ortsebene grobe Kästchen — so sah die erste Fassung aus, deutlich gröber als die DWD-App
-WarnWetter. Mit dem GeoServer-Parameter `INTERPOLATIONS=bilinear` rechnet der Dienst die Werte
-zwischen den Zellen aus und färbt erst danach ein; aus den Treppen werden weiche Bänder. *bicubic*
-wäre noch runder, schwingt aber über und erfindet kleine Inseln, die nicht gemessen sind. Nähte an
-den Kachelkanten gibt es nicht: Über vier Bilder gemessen wechselt die Farbe dort kaum öfter als
-mitten in einer Kachel (Faktor 1,05). Einzelne Bilder streuen — ein einzelner Vergleich hatte erst
-eine Naht vorgetäuscht.
-
-In voller Schärfe kommen die Bilder bis Zoomstufe 14 (rund 6 m je Pixel), darüber werden sie nur
-noch vergrößert; die geglätteten Kanten bleiben damit bis in die Ortsansicht scharf. Die Kacheln
-sind 512 statt 256 px groß, bei gleicher Auflösung: Der Dienst spricht nur HTTP/1.1, der Browser
-stellt also höchstens sechs Abfragen gleichzeitig, und ein Bild ist erst fertig, wenn die langsamste
-Kachel da ist. Auf dem Handy sind das 6 statt 15 Abfragen je Bild, beim Abspielen im Mittel 1,3 s
-statt 2,5 bis 4 s. Solange die
-App offen ist, sieht sie alle fünf Minuten nach einer neuen Messung; ein gewählter Zeitpunkt bleibt
-dabei stehen, nur „letzte Messung" geht mit. Der Service Worker lässt `maps.dwd.de` durch: Ein
-Radarbild ist nach fünf Minuten alt und gehört nicht in den Offlinevorrat.
+Prüfen: `node werkzeug/radar-pruefen.mjs` liest ein aktuelles GeoTIFF, vergleicht den Höchstwert
+mit GetFeatureInfo, verschiebt ein Bild um eine bekannte Strecke und lässt sie finden und prüft an
+einem echten Paar, dass die geschätzte Bewegung das nächste Bild besser trifft als keine.
 
 ## Eigener WMS-Layer
 

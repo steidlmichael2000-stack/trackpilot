@@ -2757,7 +2757,7 @@ function buildParzRow() {
  *  Grenzen und Gleise scharf, statt eingefärbt zu werden. */
 function ordneAuflagen() {
   if (wmsLayer) wmsLayer.bringToFront();
-  for (const layer of [radarVorn, radarHinten, parzLayer, ormLayer]) {
+  for (const layer of [radarSchicht, parzLayer, ormLayer]) {
     if (layer && map.hasLayer(layer)) layer.bringToFront();
   }
 }
@@ -3032,51 +3032,54 @@ function wmsLogin() {
 
 /* -------- Regenradar -------- */
 
-/* Niederschlagsradar des DWD über dessen GeoServer: Layer „Niederschlagsradar",
- * das RV-Produkt, 1 km, alle 5 Minuten, in mm/h. Der Dienst gibt CORS frei und
- * rechnet in EPSG:3857, läuft also direkt als Leaflet-WMS (geprüft 09.10.2026).
+/* Niederschlagsradar des DWD, das RV-Produkt: 1 km, alle 5 Minuten. Eine Stunde
+ * Messung zurück, zwei Stunden Vorhersage voraus.
  *
- * Zeit: Die Zeitachse reicht drei Tage zurück und zwei Stunden über die letzte
- * Messung hinaus. TIME allein genügt — für einen vergangenen Zeitpunkt liefert
- * der Dienst die Messung, für einen künftigen die Vorhersage des neuesten Laufs
- * (nachgeprüft: dasselbe Bild mit und ohne REFERENCE_TIME). Weglassen darf man
- * TIME aber nicht, siehe radarSetzen. Die letzte Messung steht als Vorgabe von
- * REFERENCE_TIME in den Capabilities der Ebene; die sind über den Ebenenpfad
- * 38 KB klein statt 875 KB für den ganzen Dienst. Gemessen lag sie 6 Minuten
- * hinter der Uhr.
+ * Seit 13.10.2026 kommen Zahlen statt Bilder: über den WCS desselben GeoServers,
+ * nicht mehr als eingefärbte WMS-Kacheln. Der Zeitregler soll gleiten wie in der
+ * DWD-App WarnWetter, und die blendet nicht über, sie verschiebt: In einem Video
+ * vom 11.10.2026 wandert das Regenband bei Stuttgart weiter, während die Uhr noch
+ * auf derselben Fünfminutenmarke steht, scharfrandig und ohne Doppelkontur. Das
+ * geht nur mit Werten — aus zwei Farbbildern lässt sich kein Zwischenstand mit
+ * sauberen Stufen rechnen.
  *
- * Geglättet vom Dienst selbst (INTERPOLATIONS=bilinear, ein GeoServer-Parameter):
- * Er rechnet die Werte zwischen den 1-km-Zellen aus und färbt erst danach ein —
- * statt Treppen aus Kästchen entstehen weiche Bänder wie in der DWD-App WarnWetter.
- * Bis 10.10.2026 kamen die Zellen roh, das wirkte auf Ortsebene grob. Nicht
- * bicubic: Das schwingt über und erfindet kleine Inseln, die nicht gemessen sind;
- * bilinear bleibt zwischen den Nachbarwerten.
+ * Abruf: je Zeitpunkt ein GeoTIFF des Ausschnitts, Float32 in mm je 5 Minuten
+ * (× 12 = mm/h; gegen GetFeatureInfo und die WMS-Farben geprüft), Deflate,
+ * EPSG:3857 vom Dienst selbst. Gemessen 15–80 KB und 0,3–3 s je Zeitpunkt; die
+ * WMS-Kacheln brauchten 1–7 s. Große Ausschnitte verkleinert der Dienst
+ * (scalesize) auf höchstens RADAR_RASTER Zellen je Richtung: ganz Deutschland in
+ * voller Auflösung wären 888 × 1006 Zellen, 3,6 MB je Zeitpunkt im Speicher.
+ * Alle 37 Zeitpunkte werden vorgeladen, die um den Regler herum zuerst.
  *
- * Bilder in voller Schärfe bis Zoomstufe 14 (rund 6 m je Pixel), danach nur noch
- * vergrößert — die geglätteten Kanten bleiben damit bis in die Ortsansicht
- * scharf. Bei Stufe 12 (vorher) verschwammen sie beim Vergrößern.
+ * radar-werk.js liest die TIFFs und schätzt je Paar benachbarter Zeitpunkte,
+ * wohin der Regen zieht. Der Shader (RADAR_FS) schiebt beide Bilder zur
+ * Zwischenzeit hin, mischt sie und färbt erst danach ein — bilinear zwischen den
+ * Zellen wie zuvor INTERPOLATIONS=bilinear beim WMS. Nicht bicubic: Das schwingt
+ * über und erfindet Inseln, die nicht gemessen sind.
  *
- * Kacheln mit 512 statt 256 px, bei gleicher Auflösung je Pixel: Der Dienst
- * spricht nur HTTP/1.1, der Browser stellt also höchstens 6 Abfragen zugleich,
- * und ein Bild ist erst fertig, wenn die langsamste Kachel da ist. Gemessen am
- * 10.10.2026 auf dem Handyausschnitt: 6 statt 15 Abfragen, beim Abspielen im
- * Mittel 1,3 s je Bild statt 2,5 bis 4 s. Nähte an den Kachelkanten gibt es mit
- * keiner der beiden Größen — über vier Bilder wechselte die Farbe an der Kante
- * kaum öfter als mitten in der Kachel (Faktor 1,05 bei 512, 1,21 bei 256 px).
- *
- * Gewechselt wird das Bild über eine zweite Ebene: Die lädt unsichtbar, und erst
- * wenn alle Kacheln da sind, wird getauscht. Sonst stünde zwischen zwei Bildern
- * jedes Mal die leere Karte — beim Abspielen ein Flackern im Takt.
+ * Zeit: TIME allein genügt — für einen vergangenen Zeitpunkt liefert der Dienst
+ * die Messung, für einen künftigen die Vorhersage des neuesten Laufs. Die letzte
+ * Messung steht als Vorgabe von REFERENCE_TIME in den Capabilities der
+ * WMS-Ebene; die sind über den Ebenenpfad 38 KB klein statt 875 KB für den
+ * ganzen Dienst. Gemessen lag sie 6 Minuten hinter der Uhr.
  *
  * Der Service Worker lässt maps.dwd.de durch (nicht in TILE_HOSTS): Ein Radarbild
  * ist nach fünf Minuten alt und gehört nicht in den Offlinevorrat. */
-const RADAR_WMS = 'https://maps.dwd.de/geoserver/dwd/wms';
+const RADAR_WCS = 'https://maps.dwd.de/geoserver/dwd/ows';
 const RADAR_CAPS = 'https://maps.dwd.de/geoserver/dwd/Niederschlagsradar/wms?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0';
+const RADAR_CRS = 'http://www.opengis.net/def/crs/EPSG/0/3857';
 const RADAR_ZURUECK = 60;      // Minuten Messung vor der letzten
 const RADAR_VOR = 120;         // Minuten Vorhersage — so weit rechnet der DWD
-const RADAR_SPIEL = 15;        // Schritt beim Abspielen, Minuten
+const RADAR_SCHRITT = 5 * 60000;
+const RADAR_TEMPO = 20;        // Minuten je Sekunde beim Abspielen
+const RADAR_HALT = 1500;       // ms am Ende stehen, dann von vorn
 const RADAR_DECKUNG = 0.7;
 const RADAR_FRISCH = 5 * 60000;
+const RADAR_RASTER = 400;      // Zellen je Richtung höchstens
+const RADAR_ZELLE = 1464;      // Mercator-Meter je Zelle in voller Auflösung (im Süden; im Norden mehr)
+const RADAR_BEREICH_MIN = 250000;   // Mercator-Meter: kleiner wird kein Ausschnitt geholt
+const RADAR_GLEICHZEITIG = 3;  // Abrufe zugleich — der Dienst spricht nur HTTP/1.1
+const RADAR_GEBIET = [[45.68, 1.47], [56.21, 18.73]];   // Abdeckung laut DescribeCoverage
 
 /* Farbstufen des Dienstes, aus GetLegendGraphic (application/json), mm/h */
 const RADAR_STUFEN = [
@@ -3087,31 +3090,457 @@ const RADAR_STUFEN = [
 
 let radarRef = null;           // letzte Messung, ms
 let radarRefGeholt = 0;
-let radarVersatz = 0;          // gezeigt: Minuten zur letzten Messung
-let radarVorn = null;          // die sichtbare Ebene
-let radarHinten = null;        // die gerade unsichtbar ladende
+let radarVersatz = 0;          // gezeigt: Minuten zur letzten Messung, stufenlos
+let radarSchicht = null;       // die Leaflet-Ebene mit der Zeichenfläche
+let radarGl = null;            // WebGL2: Programm, Uniform-Orte, leere Bewegung
+let radarKaputt = '';          // warum es nicht geht, sonst leer
+let radarWerk = null;
+let radarSatz = null;          // gezeigter Ausschnitt samt Bildern und Bewegungen
+let radarSatzNeu = null;       // ein neuer Ausschnitt, der noch lädt
+let radarSatzZahl = 0;
 let radarSpielt = false;
-let radarSpielTimer = 0;
+let radarSpielZeit = 0;
+let radarHaltRest = 0;
 let radarFrischTimer = 0;
-let radarZiehTimer = 0;
 let radarHolt = false;         // die Zeitachse wird gerade erfragt
+let radarZeichnenOffen = false;
+let radarTextAlt = '';
 
 const radarUhr = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 const radarIso = ms => new Date(ms).toISOString().replace('.000Z', 'Z');
+const radarMeter = ll => L.Projection.SphericalMercator.project(L.latLng(ll));
+const radarLatLng = (x, y) => L.Projection.SphericalMercator.unproject(L.point(x, y));
+const radarEnthaelt = (a, b) => b.x0 >= a.x0 && b.y0 >= a.y0 && b.x1 <= a.x1 && b.y1 <= a.y1;
 
-function radarEbene(zeit) {
-  const l = L.tileLayer.wms(RADAR_WMS, {
-    layers: 'Niederschlagsradar', format: 'image/png', transparent: true, version: '1.3.0',
-    interpolations: 'bilinear',      // unbekannte Optionen hängt Leaflet als WMS-Parameter an
-    tileSize: 512,                   // bei WMS ohne zoomOffset: der Ausschnitt folgt der Kachelgröße
-    // Erst nach der Geste nachladen: Der Dienst braucht 1–7 s je Kachel, Abfragen
-    // mitten im Schieben kommen ohnehin zu spät und halten nur die Leitung auf
-    updateWhenIdle: true, updateWhenZooming: false,
-    opacity: RADAR_DECKUNG, maxZoom: 22, maxNativeZoom: 14, crossOrigin: 'anonymous',
+/** Sichtbarer Ausschnitt in Mercator-Metern — bei gedrehter Karte das Rechteck
+ *  um die gedrehte Sicht (leaflet-rotate rechnet getBounds so). */
+function radarSicht() {
+  const b = map.getBounds(), sw = radarMeter(b.getSouthWest()), ne = radarMeter(b.getNorthEast());
+  return { x0: sw.x, y0: sw.y, x1: ne.x, y1: ne.y };
+}
+
+/* Shader: Bildpunkt → Rasterzelle (uGs, uGo), Bewegung an dieser Stelle holen,
+ * A ein Stück vor, B ein Stück zurück, mischen, in mm/h einfärben. Die Kanten
+ * der Stufen über fwidth geglättet: einen Bildpunkt breit, nicht treppig. Die
+ * Ausgabe ist vormultipliert — eine leere Stufe ist vec4(0). */
+const RADAR_VS = `#version 300 es
+in vec2 aPos;
+out vec2 vUv;
+void main() {
+  vUv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+const RADAR_FS = `#version 300 es
+precision highp float;
+#define N ${RADAR_STUFEN.length}
+in vec2 vUv;
+uniform sampler2D uA, uB, uFluss;
+uniform vec2 uGs, uGo, uN, uFn;
+uniform float uS, uT, uMitFluss;
+uniform float uStufe[N];
+uniform vec3 uFarbe[N];
+out vec4 farbe;
+
+float wert(sampler2D t, vec2 g) {
+  if (g.x < 0.0 || g.y < 0.0 || g.x > uN.x || g.y > uN.y) return 0.0;
+  return texture(t, g / uN).r;
+}
+vec4 stufe(int k) { return k <= 0 ? vec4(0.0) : vec4(uFarbe[k - 1], 1.0); }
+
+void main() {
+  vec2 g = vUv * uGs + uGo;
+  vec2 v = uMitFluss > 0.5 ? texture(uFluss, g / (uFn * uS)).rg : vec2(0.0);
+  float a = wert(uA, g - uT * v);
+  float b = wert(uB, g + (1.0 - uT) * v);
+  float w = mix(a, b, uT) * 12.0;
+  float d = max(fwidth(w), 1e-5);
+  int k = 0;
+  for (int i = 0; i < N; i++) if (w >= uStufe[i]) k = i + 1;
+  float unten = k > 0 ? (w - uStufe[k - 1]) / d : 1e9;
+  float oben = k < N ? (uStufe[k] - w) / d : 1e9;
+  vec4 c = stufe(k);
+  if (unten < oben) c = mix(stufe(k - 1), c, clamp(0.5 + unten, 0.0, 1.0));
+  else c = mix(stufe(k + 1), c, clamp(0.5 + oben, 0.0, 1.0));
+  farbe = c;
+}`;
+
+function radarGlAnlegen(el) {
+  const gl = el.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false });
+  if (!gl) return null;
+  const shader = (typ, quelle) => {
+    const s = gl.createShader(typ);
+    gl.shaderSource(s, quelle);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, shader(gl.VERTEX_SHADER, RADAR_VS));
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, RADAR_FS));
+  gl.bindAttribLocation(prog, 0, 'aPos');
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  // Ein Dreieck über die ganze Fläche
+  gl.bindVertexArray(gl.createVertexArray());
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const ort = {};
+  for (const n of ['uA', 'uB', 'uFluss', 'uGs', 'uGo', 'uN', 'uFn', 'uS', 'uT', 'uMitFluss', 'uStufe', 'uFarbe']) {
+    ort[n] = gl.getUniformLocation(prog, n);
+  }
+  gl.uniform1i(ort.uA, 0);
+  gl.uniform1i(ort.uB, 1);
+  gl.uniform1i(ort.uFluss, 2);
+  gl.uniform1fv(ort.uStufe, RADAR_STUFEN.map(([, v]) => v));
+  gl.uniform3fv(ort.uFarbe, RADAR_STUFEN.flatMap(([f]) => hexRgb(f).map(c => c / 255)));
+  const g = { gl, ort, max: Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), ...gl.getParameter(gl.MAX_VIEWPORT_DIMS)) };
+  radarGl = g;
+  g.ohneFluss = radarTextur(1, 1, true, new Float32Array(2));
+  return g;
+}
+
+/** Werte (R16F) oder Bewegung (RG16F, zwei = true). Halbe Genauigkeit reicht —
+ *  0,01 mm je 5 min ist der kleinste Wert — und ist filterbar ohne Erweiterung. */
+function radarTextur(w, h, zwei, daten) {
+  if (!radarGl) return null;
+  const gl = radarGl.gl, tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, zwei ? gl.RG16F : gl.R16F, w, h, 0, zwei ? gl.RG : gl.RED, gl.FLOAT, daten);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return tex;
+}
+
+function radarTexWeg(tex) {
+  if (radarGl && tex) radarGl.gl.deleteTexture(tex);
+}
+
+/* Die Zeichenfläche als Leaflet-Ebene. In der tilePane, damit sie mit den
+ * Kachelebenen per z-index sortiert wird (ordneAuflagen) — unter Parzellen und
+ * Bahn-Layer — und anders als die overlayPane während einer Geste nicht
+ * ausgeblendet wird (gesteBild).
+ *
+ * Lage wie bei Leaflets Kachelebenen (GridLayer._setZoomTransform): Ursprung
+ * beim Zeichnen merken, bei Zoom und Zoomanimation nur per transform
+ * nachführen. Neu gezeichnet wird erst am Ende einer Bewegung, und nur, wenn
+ * die Fläche die Sicht nicht mehr deckt oder die Zoomstufe eine andere ist. Die
+ * Fläche reicht ein Viertel der Sicht über jeden Rand. */
+const RadarSchicht = L.Layer.extend({
+  options: {
+    pane: 'tilePane',
     attribution: 'Regenradar: Quelle <a href="https://www.dwd.de/">Deutscher Wetterdienst</a>'
-  });
-  if (zeit) l.setParams({ time: zeit }, true);
-  return l;
+  },
+
+  onAdd(m) {
+    if (!this._el) {
+      const el = this._el = L.DomUtil.create('canvas', 'leaflet-layer radar-flaeche');
+      if (m._zoomAnimated) el.classList.add('leaflet-zoom-animated');
+      el.style.opacity = RADAR_DECKUNG;
+      el.style.zIndex = 1;
+      el.addEventListener('webglcontextlost', e => { e.preventDefault(); radarGlVerloren(); });
+      el.addEventListener('webglcontextrestored', radarGlWieder);
+      try {
+        if (!radarGlAnlegen(el)) radarKaputt = 'braucht WebGL2';
+      } catch (err) {
+        console.warn('Regenradar, WebGL:', err);
+        radarKaputt = 'Grafikfehler';
+      }
+    }
+    this.getPane().appendChild(this._el);
+    this._rahmen = null;
+    this._rahmenPruefen();
+    return this;
+  },
+
+  onRemove() {
+    L.DomUtil.remove(this._el);
+    this._rahmen = null;
+    return this;
+  },
+
+  getEvents() {
+    const ev = {
+      zoom: this._lage, viewreset: this._lage,
+      moveend: this._rahmenPruefen, zoomend: this._rahmenPruefen,
+      rotateend: this._rahmenPruefen, resize: this._rahmenPruefen
+    };
+    if (this._map._zoomAnimated) ev.zoomanim = this._lage;
+    return ev;
+  },
+
+  // Wie GridLayer.bringToFront: über alle Ebenen der Pane, per z-index
+  bringToFront() {
+    if (this._map && this._el) {
+      let hoechst = 0;
+      for (const el of this.getPane().children) {
+        if (el !== this._el && el.style.zIndex) hoechst = Math.max(hoechst, +el.style.zIndex);
+      }
+      this._el.style.zIndex = hoechst + 1;
+    }
+    return this;
+  },
+
+  _lage(e) {
+    const r = this._rahmen, m = this._map;
+    if (!r || !m) return;
+    const anim = !!(e && e.type === 'zoomanim');
+    const zoom = anim ? e.zoom : m.getZoom(), mitte = anim ? e.center : m.getCenter();
+    const massstab = m.getZoomScale(zoom, r.z);
+    const pos = r.nwPx.multiplyBy(massstab).subtract(m._getNewPixelOrigin(mitte, zoom)).round();
+    L.DomUtil.setTransform(this._el, pos, massstab);
+  },
+
+  _rahmenPruefen() {
+    const m = this._map;
+    if (!m) return;
+    const sicht = radarSicht();
+    radarBereichPruefen(sicht);
+    const r = this._rahmen, z = m.getZoom();
+    if (r && r.z === z && radarEnthaelt(r.m, sicht)) { this._lage(); return; }
+
+    const rx = (sicht.x1 - sicht.x0) / 4, ry = (sicht.y1 - sicht.y0) / 4;
+    const mm = { x0: sicht.x0 - rx, y0: sicht.y0 - ry, x1: sicht.x1 + rx, y1: sicht.y1 + ry };
+    const nwPx = m.project(radarLatLng(mm.x0, mm.y1), z), sePx = m.project(radarLatLng(mm.x1, mm.y0), z);
+    const breite = Math.max(1, sePx.x - nwPx.x), hoehe = Math.max(1, sePx.y - nwPx.y);
+    /* Bis zur doppelten Pixeldichte, höchstens 4 Millionen Bildpunkte. Gemessen
+     * am Rechner 2,6 ms je Bild bei 2,3 Millionen; ein Handy-Grafikchip ist ein
+     * Mehrfaches langsamer, und beim Abspielen läuft das jedes Bild. */
+    const grenze = radarGl ? radarGl.max : 4096;
+    const pr = Math.min(window.devicePixelRatio || 1, 2, grenze / breite, grenze / hoehe, Math.sqrt(4e6 / (breite * hoehe)));
+    const el = this._el;
+    el.width = Math.max(1, Math.round(breite * pr));
+    el.height = Math.max(1, Math.round(hoehe * pr));
+    el.style.width = breite + 'px';
+    el.style.height = hoehe + 'px';
+    this._rahmen = { z, m: mm, nwPx };
+    this._lage();
+    radarZeichnenJetzt();      // gleich, sonst steht die frisch geleerte Fläche ein Bild lang leer
+  }
+});
+
+function radarGlVerloren() {
+  radarGl = null;
+  for (const s of [radarSatz, radarSatzNeu]) if (s) { s.bilder.clear(); s.fluesse.clear(); }
+  radarSatz = radarSatzNeu = null;
+}
+
+function radarGlWieder() {
+  if (!radarSchicht || !radarSchicht._el) return;
+  try { radarGlAnlegen(radarSchicht._el); } catch (err) { console.warn('Regenradar, WebGL:', err); return; }
+  if (radarSchicht._map) { radarSchicht._rahmen = null; radarSchicht._rahmenPruefen(); }
+}
+
+/* -- Ausschnitte und Abruf -- */
+
+/** Den Ausschnitt, den die Sicht verlangt: doppelt so groß wie sie, mindestens
+ *  RADAR_BEREICH_MIN, beschnitten auf die Abdeckung des Radars. Null, wenn die
+ *  Sicht ganz außerhalb liegt. Dreimal so groß wäre seltener neu zu holen, aber
+ *  auf dem hohen Handyausschnitt schon bei Zoomstufe 9 verkleinert (2,6 km je
+ *  Zelle statt 1,5) — die Ränder wurden sichtbar kantig. */
+function radarWunsch(sicht) {
+  const g0 = radarMeter(RADAR_GEBIET[0]), g1 = radarMeter(RADAR_GEBIET[1]);
+  const schnitt = { x0: Math.max(g0.x, sicht.x0), y0: Math.max(g0.y, sicht.y0), x1: Math.min(g1.x, sicht.x1), y1: Math.min(g1.y, sicht.y1) };
+  if (schnitt.x1 - schnitt.x0 < 1000 || schnitt.y1 - schnitt.y0 < 1000) return null;
+  const cx = (sicht.x0 + sicht.x1) / 2, cy = (sicht.y0 + sicht.y1) / 2;
+  const hx = Math.max(RADAR_BEREICH_MIN, 2 * (sicht.x1 - sicht.x0)) / 2;
+  const hy = Math.max(RADAR_BEREICH_MIN, 2 * (sicht.y1 - sicht.y0)) / 2;
+  const b = {
+    x0: Math.round(Math.max(g0.x, cx - hx)), y0: Math.round(Math.max(g0.y, cy - hy)),
+    x1: Math.round(Math.min(g1.x, cx + hx)), y1: Math.round(Math.min(g1.y, cy + hy))
+  };
+  const nx = (b.x1 - b.x0) / RADAR_ZELLE, ny = (b.y1 - b.y0) / RADAR_ZELLE;
+  const f = Math.max(1, nx / RADAR_RASTER, ny / RADAR_RASTER);
+  return { sicht: schnitt, bereich: b, groesse: f > 1 ? [Math.round(nx / f), Math.round(ny / f)] : null, zelle: RADAR_ZELLE * f };
+}
+
+/** Deckt der Ausschnitt die Sicht, und ist er nicht viel gröber als nötig?
+ *  Sonst einen neuen holen. Der alte bleibt stehen, bis der neue das Bild
+ *  für den Regler hat. */
+function radarBereichPruefen(sicht) {
+  if (radarRef == null || !radarGl) return;
+  const w = radarWunsch(sicht);
+  if (!w) return;
+  const ziel = radarSatzNeu || radarSatz;
+  if (ziel && radarEnthaelt(ziel.bereich, w.sicht) && ziel.zelle <= w.zelle * 1.6) return;
+  if (radarSatzNeu) radarSatzWeg(radarSatzNeu);
+  const satz = {
+    id: ++radarSatzZahl, bereich: w.bereich, groesse: w.groesse, zelle: w.zelle, geo: null,
+    bilder: new Map(), fluesse: new Map(), offen: new Set(), fehler: new Map()
+  };
+  radarWerkHolen().postMessage({ art: 'satz', satz: satz.id, ref: radarRef });
+  if (radarSatz) radarSatzNeu = satz; else radarSatz = satz;
+  radarLaden();
+}
+
+function radarSatzWeg(satz) {
+  for (const tex of satz.bilder.values()) radarTexWeg(tex);
+  for (const f of satz.fluesse.values()) radarTexWeg(f.tex);
+  satz.bilder.clear();
+  satz.fluesse.clear();
+  if (satz === radarSatz) radarSatz = null;
+  if (satz === radarSatzNeu) radarSatzNeu = null;
+}
+
+function radarZeiten() {
+  const z = [];
+  if (radarRef != null) for (let m = -RADAR_ZURUECK; m <= RADAR_VOR; m += 5) z.push(radarRef + m * 60000);
+  return z;
+}
+
+/** Das Paar um einen Zeitpunkt: früheres Bild und Anteil des späteren. */
+function radarPaar(versatz = radarVersatz) {
+  const t0 = radarRef + Math.floor(versatz / 5) * RADAR_SCHRITT;
+  return { t0, f: (radarRef + versatz * 60000 - t0) / RADAR_SCHRITT };
+}
+
+function radarSatzTraegt(satz, versatz = radarVersatz) {
+  if (!satz || radarRef == null) return false;
+  const { t0, f } = radarPaar(versatz);
+  return satz.bilder.has(t0) && (f < 1e-3 || satz.bilder.has(t0 + RADAR_SCHRITT));
+}
+
+/** Fehlende Zeitpunkte holen, die um den Regler zuerst. */
+function radarLaden() {
+  const satz = radarSatzNeu || radarSatz;
+  if (!satz || radarRef == null) return;
+  const jetzt = radarRef + radarVersatz * 60000;
+  const fehlt = radarZeiten()
+    .filter(t => !satz.bilder.has(t) && !satz.offen.has(t) && (satz.fehler.get(t) || 0) < 3)
+    .sort((a, b) => Math.abs(a - jetzt) - Math.abs(b - jetzt));
+  while (satz.offen.size < RADAR_GLEICHZEITIG && fehlt.length) radarBildHolen(satz, fehlt.shift());
+}
+
+function radarUrl(satz, t) {
+  const b = satz.bereich;
+  return `${RADAR_WCS}?service=WCS&version=2.0.1&request=GetCoverage&coverageId=dwd__Niederschlagsradar` +
+    `&format=image/tiff&geotiff:compression=Deflate&subsettingCrs=${RADAR_CRS}&outputCrs=${RADAR_CRS}` +
+    `&subset=X(${b.x0},${b.x1})&subset=Y(${b.y0},${b.y1})&subset=time("${radarIso(t)}")` +
+    (satz.groesse ? `&scalesize=i(${satz.groesse[0]}),j(${satz.groesse[1]})` : '');
+}
+
+/* Bis der Worker das Bild zurückgibt, bleibt es in offen. Vorhersagen ohne
+ * Zwischenspeicher: Dieselbe Adresse liefert mit jedem Lauf ein anderes Bild. */
+async function radarBildHolen(satz, t) {
+  satz.offen.add(t);
+  const ref = radarRef;
+  try {
+    const r = await fetch(radarUrl(satz, t), { cache: t > ref ? 'no-store' : 'default' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (!/tiff/.test(r.headers.get('content-type') || '')) throw new Error('keine TIFF-Antwort');
+    const puffer = await r.arrayBuffer();
+    if (satz !== radarSatz && satz !== radarSatzNeu) return;
+    radarWerkHolen().postMessage({ art: 'bild', satz: satz.id, t, ref, puffer }, [puffer]);
+  } catch (err) {
+    radarBildFehlt(satz, t, err);
+  }
+}
+
+function radarBildFehlt(satz, t, err) {
+  satz.offen.delete(t);
+  satz.fehler.set(t, (satz.fehler.get(t) || 0) + 1);
+  console.warn('Regenradar', radarIso(t), err);
+  setTimeout(radarLaden, 2000);
+  radarLeisteWerte();
+}
+
+function radarWerkHolen() {
+  if (!radarWerk) {
+    radarWerk = new Worker('radar-werk.js', { type: 'module' });
+    radarWerk.onmessage = e => radarWerkAntwort(e.data);
+    radarWerk.onerror = e => console.warn('Regenradar, Worker:', e.message || e);
+  }
+  return radarWerk;
+}
+
+function radarWerkAntwort(m) {
+  const satz = [radarSatz, radarSatzNeu].find(s => s && s.id === m.satz);
+  if (!satz) return;
+  if (m.art === 'fehler') { radarBildFehlt(satz, m.t, m.text); return; }
+
+  if (m.art === 'bild') {
+    satz.offen.delete(m.t);
+    // Eine Vorhersage aus einem Lauf, den es nicht mehr gibt
+    if (m.t > m.ref && m.ref !== radarRef) return;
+    if (!radarZeiten().includes(m.t)) return;
+    const geo = { w: m.w, h: m.h, x0: m.x0, yOben: m.yOben, dx: m.dx, dy: m.dy };
+    if (!satz.geo) satz.geo = geo;
+    else if (geo.w !== satz.geo.w || geo.h !== satz.geo.h || Math.abs(geo.x0 - satz.geo.x0) > 1 || Math.abs(geo.yOben - satz.geo.yOben) > 1) {
+      console.warn('Regenradar: Raster passt nicht zum Ausschnitt', radarIso(m.t), geo, satz.geo);
+      return;
+    }
+    const tex = radarTextur(m.w, m.h, false, m.werte);
+    if (!tex) return;
+    radarTexWeg(satz.bilder.get(m.t));
+    satz.bilder.set(m.t, tex);
+    if (satz === radarSatzNeu && radarSatzTraegt(satz)) {
+      radarSatzWeg(radarSatz);
+      radarSatz = satz;
+      radarSatzNeu = null;
+    }
+    radarLaden();
+  } else if (m.art === 'fluss') {
+    const tex = radarTextur(m.fw, m.fh, true, m.fluss);
+    if (!tex) return;
+    const alt = satz.fluesse.get(m.t);
+    if (alt) radarTexWeg(alt.tex);
+    satz.fluesse.set(m.t, { tex, fw: m.fw, fh: m.fh, s: m.s });
+  }
+  if (satz === radarSatz) radarZeichnen();
+  radarLeisteWerte();
+}
+
+/* -- Zeichnen -- */
+
+function radarZeichnen() {
+  if (radarZeichnenOffen) return;
+  radarZeichnenOffen = true;
+  requestAnimationFrame(() => { radarZeichnenOffen = false; radarZeichnenJetzt(); });
+}
+
+/* Zwischen zwei Bildern mit ihrer Bewegung. Fehlt die noch, wird überblendet;
+ * fehlt eines der Bilder, steht das nächste geladene da. */
+function radarZeichnenJetzt() {
+  const g = radarGl, schicht = radarSchicht, r = schicht && schicht._rahmen;
+  if (!g || !r) return;
+  const gl = g.gl, el = schicht._el;
+  gl.viewport(0, 0, el.width, el.height);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  const satz = radarSatz;
+  if (!satz || !satz.geo || radarRef == null) return;
+
+  let { t0, f } = radarPaar();
+  let a = satz.bilder.get(t0), b = satz.bilder.get(t0 + RADAR_SCHRITT), fl = satz.fluesse.get(t0);
+  if (a && f < 1e-3) {
+    b = a; f = 0; fl = null;
+  } else if (!a || !b) {
+    const jetzt = radarRef + radarVersatz * 60000;
+    let naechst = null, abstand = Infinity;
+    for (const [t, tex] of satz.bilder) {
+      if (Math.abs(t - jetzt) < abstand) { abstand = Math.abs(t - jetzt); naechst = tex; }
+    }
+    if (!naechst) return;
+    a = b = naechst; f = 0; fl = null;
+  }
+
+  const geo = satz.geo, o = g.ort;
+  gl.uniform2f(o.uGs, (r.m.x1 - r.m.x0) / geo.dx, (r.m.y1 - r.m.y0) / geo.dy);
+  gl.uniform2f(o.uGo, (r.m.x0 - geo.x0) / geo.dx, (geo.yOben - r.m.y1) / geo.dy);
+  gl.uniform2f(o.uN, geo.w, geo.h);
+  gl.uniform1f(o.uT, f);
+  gl.uniform1f(o.uMitFluss, fl ? 1 : 0);
+  if (fl) { gl.uniform2f(o.uFn, fl.fw, fl.fh); gl.uniform1f(o.uS, fl.s); }
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, a);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, b);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, fl ? fl.tex : g.ohneFluss);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
 /** Die letzte Messung beim Dienst erfragen. Liefert true, wenn sie neu ist. */
@@ -3144,8 +3573,9 @@ function radarSetzen() {
   if (!an) {
     radarSpielen(false);
     clearInterval(radarFrischTimer);
-    for (const l of [radarVorn, radarHinten]) if (l) map.removeLayer(l);
-    radarVorn = radarHinten = null;
+    if (radarSchicht && map.hasLayer(radarSchicht)) map.removeLayer(radarSchicht);
+    for (const s of [radarSatz, radarSatzNeu]) if (s) radarSatzWeg(s);
+    if (radarWerk) radarWerk.postMessage({ art: 'satz', satz: -1 });
     if (leiste) leiste.hidden = true;
     return;
   }
@@ -3153,20 +3583,21 @@ function radarSetzen() {
   radarLeisteWerte();
   clearInterval(radarFrischTimer);
   radarFrischTimer = setInterval(radarFrisch, 60000);
-  if (radarVorn || radarHolt) return;
+  if ((radarSchicht && map.hasLayer(radarSchicht)) || radarHolt) return;
 
-  /* Die Ebene erst anlegen, wenn die Zeitachse da ist, und dann immer mit fester
-   * Zeit. Ohne TIME nimmt der Dienst „current", und das ist nicht die letzte
-   * Messung, sondern der Zeitschritt, der der Uhr am nächsten liegt — meist
-   * schon einer der Vorhersage. Am 09.10.2026 lag so eine Kachel ohne Zeit neben
-   * einer mit: Das Regengebiet endete an der Kachelkante. */
+  /* Die Ebene erst anlegen, wenn die Zeitachse da ist: Ohne sie weiß die App
+   * nicht, welche Zeitpunkte es gibt. Ist der Dienst nicht zu erreichen, versucht
+   * es radarFrisch jede Minute wieder. */
   radarHolt = true;
+  radarLeisteWerte();
   radarRefHolen().then(() => {
     radarHolt = false;
-    if (!auflageGewaehlt('radar') || radarVorn) return;
-    // Ist der Dienst nicht zu erreichen, bleibt nur seine Vorgabe — dann einheitlich
-    radarVorn = radarEbene(radarRef != null ? radarIso(radarRef + radarVersatz * 60000) : null).addTo(map);
-    ordneAuflagen();
+    if (!auflageGewaehlt('radar') || (radarSchicht && map.hasLayer(radarSchicht))) return;
+    if (radarRef != null) {
+      if (!radarSchicht) radarSchicht = new RadarSchicht();
+      radarSchicht.addTo(map);
+      ordneAuflagen();
+    }
     radarLeisteWerte();
   });
 }
@@ -3174,98 +3605,108 @@ function radarSetzen() {
 /* Jede Minute nachsehen, ob es eine neue Messung gibt — aber nur, wenn die
  * letzte Nachfrage fünf Minuten her ist und die App gerade zu sehen ist. */
 async function radarFrisch() {
-  if (!radarVorn || document.hidden || radarSpielt) return;
+  if (document.hidden || radarSpielt) return;
+  if (!radarSchicht || !map.hasLayer(radarSchicht)) {
+    if (auflageGewaehlt('radar') && !radarHolt) radarSetzen();
+    return;
+  }
   if (Date.now() - radarRefGeholt < RADAR_FRISCH) return;
-  if (await radarRefHolen()) radarZeigen(radarVersatz);
+  const alt = radarRef;
+  if (await radarRefHolen()) radarAchseNeu(alt);
 }
 
-/** Zeitpunkt zeigen. Liefert true, wenn dafür ein Bild geladen wird. */
-function radarZeigen(versatz) {
-  radarVersatz = Math.max(-RADAR_ZURUECK, Math.min(RADAR_VOR, versatz));
+/* Eine neue Messung ist da. Messungen bis zur alten bleiben, alles danach war
+ * Vorhersage des alten Laufs und wird neu geholt — auch die Bewegung an der
+ * Nahtstelle. Was vorn aus der Stunde fällt, kommt weg. */
+function radarAchseNeu(alt) {
+  const zeiten = new Set(radarZeiten());
+  const ziel = radarSatzNeu || radarSatz;
+  for (const satz of [radarSatz, radarSatzNeu]) {
+    if (!satz) continue;
+    const weg = [];
+    for (const [t, tex] of satz.bilder) {
+      if (t > alt || !zeiten.has(t)) { weg.push(t); radarTexWeg(tex); satz.bilder.delete(t); }
+    }
+    for (const [t, f] of satz.fluesse) {
+      if (t >= alt || !zeiten.has(t)) { radarTexWeg(f.tex); satz.fluesse.delete(t); }
+    }
+    for (const t of [...satz.offen]) if (t > alt) satz.offen.delete(t);
+    satz.fehler.clear();
+    if (satz === ziel && radarWerk) radarWerk.postMessage({ art: 'weg', satz: satz.id, zeiten: weg, ref: radarRef });
+  }
+  radarLaden();
+  radarZeichnen();
   radarLeisteWerte();
-  if (!radarVorn || radarRef == null) return false;
-
-  const zeit = radarIso(radarRef + radarVersatz * 60000);
-  if (radarHinten && radarHinten.wmsParams.time === zeit) return true;     // lädt schon
-  if (!radarHinten && radarVorn.wmsParams.time === zeit) return false;     // steht schon
-
-  // Ein noch ladendes Bild ist überholt
-  if (radarHinten) map.removeLayer(radarHinten);
-  const neu = radarEbene(zeit);
-  neu.setOpacity(0);
-  neu.once('load', () => {
-    if (neu !== radarHinten) return;
-    neu.setOpacity(RADAR_DECKUNG);
-    map.removeLayer(radarVorn);
-    radarVorn = neu;
-    radarHinten = null;
-    radarLeisteWerte();
-    if (radarSpielt) radarSpielWeiter();
-  });
-  radarHinten = neu;
-  neu.addTo(map);
-  ordneAuflagen();
-  radarLeisteWerte();
-  return true;
 }
 
 function radarSpielen(an) {
   radarSpielt = !!an;
-  clearTimeout(radarSpielTimer);
   const btn = $('#radarSpiel');
   if (btn) {
     btn.classList.toggle('is-on', radarSpielt);
     btn.setAttribute('aria-pressed', String(radarSpielt));
     btn.setAttribute('aria-label', radarSpielt ? 'Anhalten' : 'Abspielen');
   }
-  if (radarSpielt) radarSpielWeiter(true);
-}
-
-/* Abspielen in Viertelstunden von der ersten Messung bis zum Ende der
- * Vorhersage, dort kurz stehen und von vorn. Weiter geht es erst, wenn das
- * Bild da ist — auf dem Handy dauert das mal eine halbe, mal drei Sekunden,
- * und ein fester Takt zeigte dann halbe Bilder. */
-/* Abspielen gibt der Karte den Vortritt: Das nächste Bild wird erst geholt, wenn
- * die Grundkarte und die Auflagen fertig sind und die Karte stillsteht. Auf dem
- * Handy teilen sich beide die Leitung; am 11.10.2026 brauchte der DWD beim
- * Abspielen im Mittel 3 s je Kachel, und solange das lief, kam ein frisch
- * geschobener Ausschnitt der Karte nur stückweise. */
-let radarKarteBewegt = false;
-
-function karteLaedtNoch() {
-  if (radarKarteBewegt) return true;
-  const grund = baseLayers[prefs.base];
-  if (grund && map.hasLayer(grund) && grund.isLoading && grund.isLoading()) return true;
-  if (ormLayer && map.hasLayer(ormLayer) && ormLayer.isLoading()) return true;
-  return !!(glAn && gl && !gl.areTilesLoaded());
-}
-
-function radarSpielWeiter(start = false) {
-  clearTimeout(radarSpielTimer);
   if (!radarSpielt) return;
-  const amEnde = radarVersatz >= RADAR_VOR;
-  radarSpielTimer = setTimeout(() => {
-    if (!radarSpielt) return;
-    if (karteLaedtNoch()) { radarSpielTimer = setTimeout(() => radarSpielWeiter(true), 400); return; }
-    const naechst = amEnde ? -RADAR_ZURUECK : (Math.floor(radarVersatz / RADAR_SPIEL) + 1) * RADAR_SPIEL;
-    if (!radarZeigen(naechst)) radarSpielWeiter();
-  }, start ? 0 : amEnde ? 1600 : 650);
+  if (radarVersatz >= RADAR_VOR) radarVersatz = -RADAR_ZURUECK;
+  radarHaltRest = 0;
+  radarSpielZeit = performance.now();
+  requestAnimationFrame(radarSpielSchritt);
+}
+
+/* Abspielen gleitet, RADAR_TEMPO Minuten je Sekunde, von der ersten Messung bis
+ * zum Ende der Vorhersage; dort kurz stehen und von vorn. Fehlt das Bild an der
+ * nächsten Stelle noch, wartet es, statt über die Lücke zu springen. */
+function radarSpielSchritt(jetzt) {
+  if (!radarSpielt) return;
+  const dt = Math.min(100, jetzt - radarSpielZeit);
+  radarSpielZeit = jetzt;
+  if (radarHaltRest > 0) {
+    radarHaltRest -= dt;
+    if (radarHaltRest <= 0) {
+      if (radarSatzTraegt(radarSatz, -RADAR_ZURUECK)) radarVersatz = -RADAR_ZURUECK;
+      else radarHaltRest = 1;
+    }
+  } else if (radarVersatz >= RADAR_VOR) {
+    radarHaltRest = RADAR_HALT;
+  } else {
+    const weiter = Math.min(RADAR_VOR, radarVersatz + dt * RADAR_TEMPO / 1000);
+    if (radarSatzTraegt(radarSatz, weiter)) radarVersatz = weiter;
+  }
+  radarLeisteWerte();
+  radarZeichnenJetzt();
+  requestAnimationFrame(radarSpielSchritt);
 }
 
 function radarLeisteWerte() {
   const zeit = $('#radarZeit'), text = $('#radarText');
   if (zeit && document.activeElement !== zeit) zeit.value = String(radarVersatz);
   if (!text) return;
-  if (radarRef == null) {
-    // Ohne Zeitachse zeigt die Ebene, was der Dienst von sich aus für jetzt hält
-    text.innerHTML = radarVorn ? '<b>jetzt</b><small>ohne Zeitachse</small>' : '<b>—</b><small>lädt …</small>';
-    return;
+  let html, vorhersage = false, laedt = false;
+  if (radarKaputt) {
+    html = `<b>—</b><small>${esc(radarKaputt)}</small>`;
+  } else if (radarRef == null) {
+    html = radarHolt ? '<b>—</b><small>lädt …</small>' : '<b>—</b><small>nicht erreichbar</small>';
+  } else {
+    /* Die Uhr auf fünf Minuten wie in WarnWetter: Das Bild gleitet, die Anzeige
+     * springt von Messung zu Messung. */
+    const stufe = Math.round(radarVersatz / 5) * 5;
+    let art = stufe > 0 ? 'Vorhersage' : stufe === 0 ? 'letzte Messung' : 'Messung';
+    const satz = radarSatzNeu || radarSatz;
+    if (!satz) art = 'lädt …';      // noch kein Ausschnitt angefragt
+    else {
+      const zeiten = radarZeiten(), da = zeiten.filter(t => satz.bilder.has(t)).length;
+      const aufgegeben = zeiten.every(t => satz.bilder.has(t) || (satz.fehler.get(t) || 0) >= 3);
+      if (da === 0 && aufgegeben) art = 'nicht erreichbar';
+      else if (da < zeiten.length && !aufgegeben) art = `lädt ${Math.round(da / zeiten.length * 100)} %`;
+    }
+    html = `<b>${esc(radarUhr.format(radarRef + stufe * 60000))}</b><small>${art}</small>`;
+    vorhersage = stufe > 0;
+    laedt = !radarSatzTraegt(radarSatz);
   }
-  const art = radarVersatz > 0 ? 'Vorhersage' : radarVersatz === 0 ? 'letzte Messung' : 'Messung';
-  text.innerHTML = `<b>${esc(radarUhr.format(radarRef + radarVersatz * 60000))}</b><small>${art}</small>`;
-  text.classList.toggle('vorhersage', radarVersatz > 0);
-  // Grau, solange das gewählte Bild noch lädt — beim Abspielen nicht, da blinkte es im Takt
-  text.classList.toggle('laedt', !!radarHinten && !radarSpielt);
+  if (html !== radarTextAlt) { text.innerHTML = html; radarTextAlt = html; }
+  text.classList.toggle('vorhersage', vorhersage);
+  text.classList.toggle('laedt', laedt);
 }
 
 function radarLegende() {
@@ -3285,23 +3726,19 @@ function radarBinden() {
   radarLegende();
   const zeit = $('#radarZeit');
   if (zeit) {
-    // Beim Ziehen gleich die Uhrzeit, das Bild erst, wenn der Finger kurz ruht
+    // Stufenlos: Das Bild folgt dem Finger, auch zwischen den Fünfminutenmarken
     zeit.addEventListener('input', () => {
       radarSpielen(false);
-      radarVersatz = Number(zeit.value);
+      radarVersatz = Math.max(-RADAR_ZURUECK, Math.min(RADAR_VOR, Number(zeit.value)));
       radarLeisteWerte();
-      clearTimeout(radarZiehTimer);
-      radarZiehTimer = setTimeout(() => radarZeigen(Number(zeit.value)), 220);
+      radarZeichnen();
+      radarLaden();      // zuerst holen, was um die neue Stelle liegt
     });
-    zeit.addEventListener('change', () => { clearTimeout(radarZiehTimer); radarZeigen(Number(zeit.value)); });
   }
   on('#radarSpiel', 'click', () => radarSpielen(!radarSpielt));
   on('#radarZu', 'click', () => { if (auflageGewaehlt('radar')) toggleOverlay('radar'); });
   // Zurück aus dem Hintergrund: gleich nachsehen statt bis zur nächsten vollen Minute
   document.addEventListener('visibilitychange', () => { if (!document.hidden) radarFrisch(); });
-  // Solange geschoben oder gezoomt wird, holt das Abspielen kein neues Bild (karteLaedtNoch)
-  map.on('movestart zoomstart', () => { radarKarteBewegt = true; });
-  map.on('moveend zoomend', () => { radarKarteBewegt = false; });
 }
 
 /* -------- Eigene KML-Dateien -------- */
