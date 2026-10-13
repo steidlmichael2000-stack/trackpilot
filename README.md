@@ -1156,6 +1156,11 @@ gilt: In Reutlingen liegen 0 von 3000 Stellen mehr als 0,3 m unter dem Gelände,
 gegen DOM1 im Median 0,19 m, bei 90 % unter 1,7 m (das 1-m-Raster verschmiert Kanten stärker als
 das DOM20 in Bayern, dort 0,16 bzw. 0,50 m).
 
+**Luftbild im PDF.** Liegt das Gelände nur in Baden-Württemberg, kommt das Luftbild der PDF-Seite
+aus dem DOP20-WMS des LGL (`WMS_LGL-BW_ATKIS_DOP_20_C`, Ebene `IMAGES_DOP_20_RGB`), das CORS für alle
+freigibt — 880 × 660 px in 1,3 s. Vorher kam es auch dort vom bayerischen Dienst und blieb weiß.
+An der Grenze, wo das Profil beide Länder berührt, bleibt es beim bayerischen.
+
 `hoehen-pruefen.mjs` prüft BW gegen den Text derselben Datei, unabhängig gelesen (2000 Stellen,
 exakt), und die Grenze an der Donau zwischen Ulm und Neu-Ulm: 300 Punkte über 2,3 km alle mit Wert;
 im Überlappungsstreifen weichen beide Länder im Median 6 cm voneinander ab, 90 % unter 16 cm, an

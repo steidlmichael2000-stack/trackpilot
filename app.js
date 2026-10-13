@@ -6795,8 +6795,14 @@ const PDF_FARBEN = {
   gelaende: '#faeeda', gelLinie: '#ba7517', schild: '#854f0b', dom: '#444441',
   geb: '#d3d1c7', gebLinie: '#5f5e5a', marke: '#888780', linie: '#f59e0b'
 };
-const PDF_DOP = 'https://geoservices.bayern.de/od/wms/dop/v1/dop20?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0' +
-  '&LAYERS=by_dop20c&STYLES=&CRS=EPSG:25832&FORMAT=image/jpeg';
+/* Luftbild je Land. Beide Dienste geben CORS frei (LGL am 13.10.2026 geprüft:
+ * Access-Control-Allow-Origin *, 880 × 660 px in 1,3 s). */
+const PDF_DOP = {
+  by: 'https://geoservices.bayern.de/od/wms/dop/v1/dop20?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0' +
+    '&LAYERS=by_dop20c&STYLES=&CRS=EPSG:25832&FORMAT=image/jpeg',
+  bw: 'https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0' +
+    '&LAYERS=IMAGES_DOP_20_RGB&STYLES=&CRS=EPSG:25832&FORMAT=image/jpeg'
+};
 const PDF_RAND = 36;
 
 /** Ein Profil in den Rahmen box {x, y, w}; f ist das Höhenfenster. Liefert die Höhe. */
@@ -6833,8 +6839,9 @@ function pdfProfil(s, box, d, achse, f) {
   return ob + f.ph + un;
 }
 
-/** Luftbild mit den Schnittlinien. linien: [[lat, lon], …] je Linie; hervor: Nummer der aktuellen. */
-async function pdfKarte(dok, s, box, linien, { hervor = -1, schilder = [] } = {}) {
+/** Luftbild mit den Schnittlinien. linien: [[lat, lon], …] je Linie; hervor: Nummer der aktuellen;
+ *  land: wessen DOP20 ('by' oder 'bw'). Gibt das Land zurück, wenn ein Bild kam, sonst ''. */
+async function pdfKarte(dok, s, box, linien, { hervor = -1, schilder = [], land = 'by' } = {}) {
   const F = PDF_FARBEN;
   const utm = linien.map(l => l.map(p => utm32Hin(p[0], p[1])));
   let e0 = Infinity, n0 = Infinity, e1 = -Infinity, n1 = -Infinity;
@@ -6849,7 +6856,7 @@ async function pdfKarte(dok, s, box, linien, { hervor = -1, schilder = [] } = {}
   let mitBild = false;
   try {
     const ab = new AbortController(), uhr = setTimeout(() => ab.abort(), 15000);
-    const r = await fetch(`${PDF_DOP}&BBOX=${e0.toFixed(1)},${n0.toFixed(1)},${e1.toFixed(1)},${n1.toFixed(1)}` +
+    const r = await fetch(`${PDF_DOP[land]}&BBOX=${e0.toFixed(1)},${n0.toFixed(1)},${e1.toFixed(1)},${n1.toFixed(1)}` +
       `&WIDTH=${Math.round(box.w * 4)}&HEIGHT=${Math.round(box.h * 4)}`, { signal: ab.signal });
     clearTimeout(uhr);
     if (r.ok && /jpeg/.test(r.headers.get('content-type') || '')) {
@@ -6889,7 +6896,7 @@ async function pdfKarte(dok, s, box, linien, { hervor = -1, schilder = [] } = {}
   s.linie([[nx, ny], [nx + 4, ny + 9], [nx - 4, ny + 9]], { farbe: null, fuellung: F.text });
   s.text(nx, ny + 18, 'N', { groesse: 7.5, fett: true, farbe: F.text, anker: 'middle' });
   s.rechteck(box.x, box.y, box.w, box.h, { farbe: F.rahmen, breite: 0.5 });
-  return mitBild;
+  return mitBild ? land : '';
 }
 
 /** Quer am Gleis: Höhe am Gleis und Gelände außen gegen das Gleis. */
@@ -7013,6 +7020,7 @@ function pdfGenauigkeit(s, x, y, quellen) {
     quellen.geb && (quellen.gebBy || !quellen.gebBw) && [quellen.gebBw ? 'LoD2 Bayern' : 'Gebäude LoD2', 'Dachhöhe typ. ±0,2–0,3 m, bis über 1 m'],
     quellen.gebBw && ['LoD2 BW', 'ohne Angabe des LGL'],
     quellen.dop && ['Luftbild DOP20', 'Lage ±0,4–0,6 m'],
+    quellen.dopBw && ['Luftbild DOP20', 'ohne Angabe des LGL'],
   ].filter(Boolean);
   s.text(x, y, 'Genauigkeit', { groesse: 7.5, fett: true, farbe: F.text });
   y += 10;
@@ -7096,7 +7104,11 @@ async function pdfSchnittSeite(dok, z, { titel, nr = 1, gesamt = 1, serie = null
   const schilder = serie ? [] : g && g.art === 'quer' ? [['links', linien[0][0]], ['rechts', linien[0][1]]]
     : g ? [] : linien[0].map((p, i) => [profName(i), p]);
   if (g && g.art === 'laengs') schilder.push(['km ' + fmtKm(g.kms[0]), linien[0][0]], ['km ' + fmtKm(g.kms[g.kms.length - 1]), linien[0][n - 1]]);
-  const mitBild = await pdfKarte(dok, s, kbox, linien, { hervor, schilder });
+  /* Luftbild des Landes, in dem das Gelände liegt; an der Grenze (beide) das
+   * bayerische wie bisher — der Rahmen um Bayern reicht weit nach Württemberg,
+   * nach Lage allein ließe sich das nicht entscheiden. */
+  const gl = pdfLaender([z.dgm, ...(serie || []).map(q => q.dgm)]);
+  const mitBild = await pdfKarte(dok, s, kbox, linien, { hervor, schilder, land: gl.bw && !gl.by ? 'bw' : 'by' });
   s.text(kbox.x, kbox.y + kbox.h + 10, mitBild ? `Luftbild DOP20${serie ? ` · ${serie.length} Schnitte, alle ${PDF_SERIE.schritt} m` : ''}` : '',
     { groesse: 7, farbe: F.fein });
   let ay = kbox.y + kbox.h + 30;
@@ -7108,7 +7120,7 @@ async function pdfSchnittSeite(dok, z, { titel, nr = 1, gesamt = 1, serie = null
     ay += 12.5;
   }
   const dom = z.dom ? profLaender(z.dom) : {}, geb = gebLaender([z.geb, ...(serie || []).map(q => q.geb)]);
-  const quellen = { dom: !!z.dom, geb: !!z.geb, dop: mitBild, osm: !!g, ...pdfLaender([z.dgm, ...(serie || []).map(q => q.dgm)]),
+  const quellen = { dom: !!z.dom, geb: !!z.geb, dop: mitBild === 'by', dopBw: mitBild === 'bw', osm: !!g, ...gl,
     domBy: !!dom.by, domBw: !!dom.bw, domStand: z.dom ? domName(z.dom).replace(/^\S+ ?/, '') : '', gebBy: geb.by, gebBw: geb.bw };
   pdfGenauigkeit(s, kbox.x, ay + 6, quellen);
   pdfFuss(s, nr, gesamt, quellen);
@@ -7137,7 +7149,7 @@ function pdfFuss(s, nr, gesamt, quellen) {
   const domBy = quellen.dom && (quellen.domBy || !quellen.domBw), gebBy = quellen.geb && (quellen.gebBy || !quellen.gebBw);
   const bvv = [quellen.by && 'Gelände DGM1', domBy && 'Oberfläche DOM20', gebBy && 'Gebäude LoD2', quellen.dop && 'Luftbild DOP20']
     .filter(Boolean).join(', ');
-  const lgl = [quellen.bw && 'Gelände DGM1', quellen.domBw && 'Oberfläche DOM1', quellen.gebBw && 'Gebäude LoD2']
+  const lgl = [quellen.bw && 'Gelände DGM1', quellen.domBw && 'Oberfläche DOM1', quellen.gebBw && 'Gebäude LoD2', quellen.dopBw && 'Luftbild DOP20']
     .filter(Boolean).join(', ');
   const teile = [
     bvv && `${bvv}: Bayerische Vermessungsverwaltung – www.geodaten.bayern.de, CC BY 4.0, bearbeitet.`,

@@ -206,7 +206,8 @@ längs: rund 200 Lagen als Linienzug, `g.kms` gehört zu `profDgm.ecken`.
   werden zu „?" — „Δ" deshalb im PDF ausgeschrieben. Nach Änderungen `node werkzeug/pdf-pruefen.mjs`.
 - Diagramm und PDF teilen sich `profHoehenfenster`, `profZSpanne`, `profAchse` und `profPfad` (der liefert
   `d` fürs SVG und `punkte` fürs PDF). Wer den Maßstab ändert, ändert ihn an einer Stelle.
-- Das PDF-Luftbild ist ein GetMap am DOP20-WMS der BVV (der gibt CORS frei) — nicht über den Worker.
+- Das PDF-Luftbild ist ein GetMap am DOP20-WMS der BVV bzw. — liegt das Gelände nur in BW — des LGL
+  (`PDF_DOP.by`/`.bw`, beide mit CORS) — nicht über den Worker. `pdfKarte` gibt das Land zurück.
 - **Eine PDF-Seite zeichnet `pdfSchnittSeite` aus einem Schnappschuss (`profSchnitt()`), nicht aus den
   `prof…`-Variablen.** Die Profilmappe (`mappe…`) baut solche Schnitte selbst aus ihrer km-Liste;
   wer der Seite etwas hinzufügt, nimmt es aus `z` — auch `profAchse(L, z)` —, sonst zeigt eine
