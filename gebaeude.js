@@ -15,6 +15,14 @@
  * danach in IndexedDB — rund ein Zehntel der Datei.
  *
  * Kein CORS auf dem Server der BVV, deshalb wie DGM und DOM über den Worker.
+ *
+ * Seit 13.10.2026 auch Baden-Württemberg: LoD2 des LGL, Datenlizenz
+ * Deutschland – Namensnennung 2.0. Dasselbe CityGML-1.0-Profil der AdV, nur
+ * in Dateien zu 1 km, je vier in einem ZIP zu 2 × 2 km (siehe LGL_PRODUKTE in
+ * hoehen.js), und die Adresse unter xal: statt xAL:. HoeheGrund fehlt dort;
+ * gebraucht wird sie nur beim Prüfen — im Profil steht der Boden auf dem DGM.
+ * Am 13.10.2026 bei Stuttgart: 494 Gebäude, 17,6 MB Text, 2,1 MB gepackt,
+ * 0,5 MB im Vorrat.
  */
 
 const LOD2_KACHEL = 2000;                 // m
@@ -82,7 +90,11 @@ function gebLesen(xml) {
   for (const d of daecher) for (let i = 0; i < d.p.length; i += 2) {
     e0 = Math.min(e0, d.p[i]); e1 = Math.max(e1, d.p[i]); n0 = Math.min(n0, d.p[i + 1]); n1 = Math.max(n1, d.p[i + 1]);
   }
-  const strasse = roh(/<xAL:ThoroughfareName>([^<]*)</), nummer = roh(/<xAL:ThoroughfareNumber>([^<]*)</);
+  // Bayern schreibt xAL:, Baden-Württemberg xal:
+  const strasse = roh(/<xal:ThoroughfareName>([^<]*)</i);
+  // BW schreibt mehrere Nummern mit Komma und füllt fehlende mit „null" („6, null")
+  const nummer = roh(/<xal:ThoroughfareNumber>([^<]*)</i).split(',').map(s => s.trim())
+    .filter(s => s && s.toLowerCase() !== 'null').join(', ');
   return {
     id: roh(/<bldg:Building[^>]*gml:id="([^"]+)"/),
     fn: roh(/<bldg:function>([^<]+)</), dach: roh(/<bldg:roofType>([^<]+)</),
@@ -115,19 +127,28 @@ async function gebStromLesen(antwort) {
   return raus;
 }
 
-/** Alle Gebäude einer 2-km-Kachel (Südwestecke e, n in km, gerade Zahlen). */
-function gebaeudeKachel(e, n) {
-  const s = `${e}_${n}`;
+/** Alle Gebäude einer Kachel. Bayern: 2 km, Südwestecke e, n in km, gerade
+ *  Zahlen. BW (land 'bw'): 1 km aus dem ZIP des LGL. */
+function gebaeudeKachel(e, n, land = 'by') {
+  const s = land === 'bw' ? `bw/${e}_${n}` : `${e}_${n}`;
+  if (hoehenFehlen.has(`lod2/${s}`)) return Promise.resolve([]);
   const da = gebKacheln.get(s);
   if (da) { gebKacheln.delete(s); gebKacheln.set(s, da); return da; }
   const laden = (async () => {
     const vorrat = await vorratLesen(`lod2/${s}`);
     if (vorrat) return JSON.parse(new TextDecoder().decode(vorrat));
-    const r = await fetch(gebAdresseUrl(e, n));
-    if (r.status === 404) return [];                 // keine Kachel: außerhalb Bayerns
-    if (!r.ok) throw new Error(`Gebäude: HTTP ${r.status}`);
-    const liste = await gebStromLesen(r);
-    HOEHEN.geladen += Number(r.headers.get('content-length')) || 0;
+    let liste;
+    if (land === 'bw') {
+      const datei = await lglDatei('lod2', e, n);
+      if (!datei) { hoehenFehlen.add(`lod2/${s}`); return []; }
+      liste = await gebStromLesen(new Response(datei.daten));
+    } else {
+      const r = await fetch(gebAdresseUrl(e, n));
+      if (r.status === 404) { hoehenFehlen.add(`lod2/${s}`); return []; }   // keine Kachel: außerhalb Bayerns
+      if (!r.ok) throw new Error(`Gebäude: HTTP ${r.status}`);
+      liste = await gebStromLesen(r);
+      HOEHEN.geladen += Number(r.headers.get('content-length')) || 0;
+    }
     vorratSchreiben(`lod2/${s}`, new TextEncoder().encode(JSON.stringify(liste)));
     return liste;
   })();
@@ -137,7 +158,9 @@ function gebaeudeKachel(e, n) {
   return laden;
 }
 
-/** Welche 2-km-Kacheln berührt der Linienzug ([[lat, lon], …])? */
+/** Welche Kacheln berührt der Linienzug ([[lat, lon], …])? [[e, n, land], …] —
+ *  in Bayern zu 2 km, in BW zu 1 km, je nachdem, in wessen Rahmen die Stelle
+ *  liegt (an der Grenze beide). */
 function gebKachelnFuer(punkte) {
   const satz = new Map();
   const utm = punkte.map(p => utm32Hin(p[0], p[1]));
@@ -146,10 +169,17 @@ function gebKachelnFuer(punkte) {
     const schritte = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 200));
     for (let j = 0; j <= schritte; j++) {
       const e = a[0] + (b[0] - a[0]) * j / schritte, n = a[1] + (b[1] - a[1]) * j / schritte;
+      const [lat, lon] = utm32Zurueck(e, n);
       // 5 m Rand: ein Gebäude an der Kachelgrenze steht ganz in einer der beiden Dateien
       for (const de of [-5, 5]) for (const dn of [-5, 5]) {
-        const ke = Math.floor((e + de) / LOD2_KACHEL) * 2, kn = Math.floor((n + dn) / LOD2_KACHEL) * 2;
-        satz.set(`${ke}_${kn}`, [ke, kn]);
+        if (inLandRahmen('by', lat, lon)) {
+          const ke = Math.floor((e + de) / LOD2_KACHEL) * 2, kn = Math.floor((n + dn) / LOD2_KACHEL) * 2;
+          satz.set(`${ke}_${kn}`, [ke, kn, 'by']);
+        }
+        if (inLandRahmen('bw', lat, lon)) {
+          const ke = Math.floor((e + de) / 1000), kn = Math.floor((n + dn) / 1000);
+          satz.set(`bw/${ke}_${kn}`, [ke, kn, 'bw']);
+        }
       }
     }
   }
@@ -224,7 +254,7 @@ function gebBoden(dgm, s) {
  * entlang des Geländes geschlossen. Die Station kommt aus dgm.ecken, damit sie
  * zur Station des Geländeprofils passt (dort ellipsoidisch gemessen). */
 async function gebaeudeImSchnitt(punkte, dgm) {
-  const kacheln = await Promise.all(gebKachelnFuer(punkte).map(([e, n]) => gebaeudeKachel(e, n)));
+  const kacheln = await Promise.all(gebKachelnFuer(punkte).map(([e, n, land]) => gebaeudeKachel(e, n, land)));
   const utm = punkte.map(p => utm32Hin(p[0], p[1]));
   const stuecke = new Map();               // Gebäude → [{ s0, z0, s1, z1 }]
   const gesehen = new Set();

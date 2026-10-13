@@ -51,9 +51,10 @@ const BVV_DOWNLOAD = 'https://download1.bayernwolke.de/a';
 const HOEHEN_ARTEN = {
   dgm1: { aufloesung: 1, pixel: 1000, ganz: true, land: 'by', weiter: 'dgm1-bw',
     direkt: (e, n) => `${BVV_DOWNLOAD}/dgm/dgm1/${e}_${n}.tif` },
-  dom20: { aufloesung: 0.2, pixel: 5000, ganz: false, land: 'by',
+  dom20: { aufloesung: 0.2, pixel: 5000, ganz: false, land: 'by', weiter: 'dom1-bw',
     direkt: (e, n) => `${BVV_DOWNLOAD}/dom20/DOM/32${e}_${n}_20_DOM.tif` },
-  'dgm1-bw': { aufloesung: 1, pixel: 1000, ganz: true, land: 'bw', lgl: 'dgm1' }
+  'dgm1-bw': { aufloesung: 1, pixel: 1000, ganz: true, land: 'bw', lgl: 'dgm1' },
+  'dom1-bw': { aufloesung: 1, pixel: 1000, ganz: true, land: 'bw', lgl: 'dom1' }
 };
 
 /* Baden-Württemberg: Landesamt für Geoinformation und Landentwicklung (LGL),
@@ -64,6 +65,12 @@ const HOEHEN_ARTEN = {
  *   trägt (dgm1_32_513_5402_1_bw_2023.xyz) — gesucht wird deshalb im Verzeichnis.
  *   DGM1   XYZ-Text, 1000 × 1000 Werte von Nord nach Süd, Pixelmitte bei ,50
  *          wie in Bayern; 29 MB entpackt, rund 3,4 MB gepackt je Kilometer
+ *   DOM1   GeoTIFF 1000 × 1000, Float32, LZW mit Gleitkomma-Prädiktor, Blöcke
+ *          zu 512 × 512; rund 3,3 MB je Kilometer, im Archiv kaum kleiner.
+ *          Aus derselben Befliegung wie das DGM daneben (Stuttgart 2016,
+ *          Reutlingen 2017, Ulm 2021)
+ *   LoD2   CityGML 1.0 wie in Bayern, je Kilometer 18–50 MB, gepackt 2–5 MB
+ *          (gelesen in gebaeude.js)
  *
  * Kein CORS für fremde Seiten, also auch hier über den Worker. Der Server nimmt
  * Teilabfragen an: Erst das Verzeichnis am Dateiende (64 kB), dann nur die eine
@@ -232,7 +239,8 @@ async function tiffKopf(lies, anfang) {
     throw new Error(`Höhendaten: unerwartetes Format (${k.bits} bit, Typ ${k.format}, ${k.ebenen} Kanäle)`);
   }
   if (k.kompression !== 1 && k.kompression !== 5) throw new Error(`Höhendaten: Kompression ${k.kompression} wird nicht gelesen`);
-  if (k.praediktor !== 1) throw new Error(`Höhendaten: Prädiktor ${k.praediktor} wird nicht gelesen`);
+  // 3: Gleitkomma-Prädiktor, so liegt das DOM1 des LGL vor
+  if (k.praediktor !== 1 && k.praediktor !== 3) throw new Error(`Höhendaten: Prädiktor ${k.praediktor} wird nicht gelesen`);
   if (!k.skala || !k.tie || !k.offsets || !k.laengen) throw new Error('Höhendaten: Georeferenz oder Blocktabelle fehlt');
 
   /* GeoKeys: Raster als Fläche (Tiepunkt an der Pixelecke) oder als Punkt
@@ -405,14 +413,32 @@ async function zipEintrag(url, e) {
   return aus;
 }
 
-/** Die Datei eines Kilometers aus dem LGL-Archiv; null, wo es keine gibt. */
+/** Die Datei eines Kilometers aus dem LGL-Archiv: { daten, stand }; null, wo es
+ *  keine gibt. stand ist die Aktualität aus der CSV neben der Datei, also die
+ *  Befliegung („2016-04-06" bei Stuttgart) — die Jahreszahl im Dateinamen ist
+ *  die der Fortführung (beim DGM dort 2023). Fehlt die CSV oder geht ihr Abruf
+ *  schief, bleibt stand leer. */
 async function lglDatei(produkt, e, n) {
   const url = lglAdresse(produkt, e, n), p = LGL_PRODUKTE[produkt];
   const liste = await zipVerzeichnis(url);
   if (!liste) return null;
-  const muster = new RegExp(`(^|/)${p.datei}_32_${e}_${n}_1_bw[^/]*\\.${p.endung}$`, 'i');
-  const eintrag = liste.find(x => muster.test(x.name));
-  return eintrag ? zipEintrag(url, eintrag) : null;
+  const muster = endung => new RegExp(`(^|/)${p.datei}_32_${e}_${n}_1_bw[^/]*\\.${endung}$`, 'i');
+  const eintrag = liste.find(x => muster(p.endung).test(x.name));
+  if (!eintrag) return null;
+  const csv = liste.find(x => muster('csv').test(x.name));
+  const [daten, stand] = await Promise.all([
+    zipEintrag(url, eintrag),
+    csv ? zipEintrag(url, csv).then(lglStand, () => '') : ''
+  ]);
+  return { daten, stand };
+}
+
+/** „Aktualitaet" aus der Kachel-CSV des LGL (Semikolon, Kopfzeile). */
+function lglStand(bytes) {
+  const [kopf, zeile] = new TextDecoder().decode(bytes).split(/\r?\n/);
+  const i = (kopf || '').split(';').indexOf('Aktualitaet');
+  const wert = i >= 0 && zeile ? zeile.split(';')[i] : '';
+  return /^\d{4}-\d\d-\d\d$/.test(wert) ? wert : '';
 }
 
 /** XYZ-Text eines Kilometers → Float32Array, Zeile 0 im Norden wie im GeoTIFF.
@@ -445,17 +471,19 @@ function xyzLesen(text, e, n, npx = 1000) {
   return werte;
 }
 
-/** Ein Kilometer DGM1 aus BW als Raster; null, wo es keinen gibt. Im Vorrat
- *  liegen die Werte (4 MB), nicht der Text. */
+/** Ein Kilometer DGM1 aus BW als Raster: { werte, stand }; null, wo es keinen
+ *  gibt. Im Vorrat liegen die Werte (4 MB), nicht der Text. */
 async function lglRaster(art, e, n) {
   const def = HOEHEN_ARTEN[art], schluessel = `${art}/${e}_${n}`;
   const imVorrat = await vorratLesen(schluessel);
-  if (imVorrat) return new Float32Array(imVorrat.buffer, imVorrat.byteOffset, imVorrat.byteLength / 4);
-  const text = await lglDatei(def.lgl, e, n);
-  if (!text) return null;
-  const werte = xyzLesen(text, e, n, def.pixel);
-  vorratSchreiben(schluessel, new Uint8Array(werte.buffer));
-  return werte;
+  if (imVorrat) {
+    return { werte: new Float32Array(imVorrat.buffer, imVorrat.byteOffset, imVorrat.byteLength / 4), stand: imVorrat.stand };
+  }
+  const datei = await lglDatei(def.lgl, e, n);
+  if (!datei) return null;
+  const werte = xyzLesen(datei.daten, e, n, def.pixel);
+  vorratSchreiben(schluessel, new Uint8Array(werte.buffer), datei.stand);
+  return { werte, stand: datei.stand };
 }
 
 /* ---- Vorrat auf dem Gerät ----
@@ -498,19 +526,23 @@ async function vorratLesen(schluessel) {
     });
     if (!daten) return null;
     db.transaction('genutzt', 'readwrite').objectStore('genutzt').put(Date.now(), schluessel);
-    return new Uint8Array(daten);
+    // Mit Stand abgelegt: { b, stand } — sonst nur die Bytes, wie vor Oktober 2026
+    const bytes = new Uint8Array(daten.b || daten);
+    bytes.stand = daten.stand || '';
+    return bytes;
   } catch {
     return null;
   }
 }
 
-async function vorratSchreiben(schluessel, bytes) {
+async function vorratSchreiben(schluessel, bytes, stand = '') {
   try {
     const db = await hoehenDb();
     if (!db) return;
     await new Promise((ok, fehl) => {
       const tx = db.transaction(['dateien', 'genutzt'], 'readwrite');
-      tx.objectStore('dateien').put(bytes.slice().buffer, schluessel);
+      const b = bytes.slice().buffer;
+      tx.objectStore('dateien').put(stand ? { b, stand } : b, schluessel);
       tx.objectStore('genutzt').put(Date.now(), schluessel);
       tx.oncomplete = ok;
       tx.onerror = tx.onabort = () => fehl(tx.error);     // auch: Speicher voll
@@ -549,26 +581,31 @@ function hoehenKachel(art, e, n, teil = false) {
     return bekannt;
   }
 
-  const laden = def.lgl ? (async () => {
-    const werte = await lglRaster(art, e, n);
-    if (!werte) { hoehenFehlen.add(voll); return null; }
+  const laden = def.lgl && LGL_PRODUKTE[def.lgl].endung === 'xyz' ? (async () => {
+    const r = await lglRaster(art, e, n);
+    if (!r) { hoehenFehlen.add(voll); return null; }
     // Pixelmitte bei ,50 und Zeile 0 im Norden — wie die bayerischen Kacheln
     if (!def.schema) def.schema = { versatz: 0.5, links: 0, oben: def.pixel - 1 };
     const npx = def.pixel;
-    return { schluessel, art, e, n, kopf: { breite: npx, hoehe: npx, bw: npx, bh: npx, quer: 1, dl: 0, dr: 0 }, werte };
+    return { schluessel, art, e, n, stand: r.stand, werte: r.werte,
+      kopf: { breite: npx, hoehe: npx, bw: npx, bh: npx, quer: 1, dl: 0, dr: 0 } };
   })() : (async () => {
-    const url = hoehenAdresse(art, e, n);
-    let lies, anfang;
+    let lies, anfang, stand = '';
     // Beim teilweisen Lesen zuerst nachsehen, ob die ganze Datei im Vorrat liegt
     const imVorrat = def.ganz ? await vorratLesen(voll) : null;
     if (imVorrat) {
+      stand = imVorrat.stand;
       lies = async (von, laenge) => imVorrat.subarray(von, Math.min(von + laenge, imVorrat.byteLength));
     } else if (def.ganz && !teil) {
-      const datei = await hoehenHolen(url);
-      if (!datei) { hoehenFehlen.add(voll); return null; }   // keine Kachel: außerhalb Bayerns
-      vorratSchreiben(voll, datei);          // im Hintergrund
+      // DOM1 aus BW: das GeoTIFF aus dem Archiv, sonst die Datei der BVV
+      const geholt = def.lgl ? await lglDatei(def.lgl, e, n) : await hoehenHolen(hoehenAdresse(art, e, n));
+      if (!geholt) { hoehenFehlen.add(voll); return null; }   // keine Kachel: außerhalb des Landes
+      const datei = def.lgl ? geholt.daten : geholt;
+      if (def.lgl) stand = geholt.stand;
+      vorratSchreiben(voll, datei, stand);   // im Hintergrund
       lies = async (von, laenge) => datei.subarray(von, Math.min(von + laenge, datei.byteLength));
     } else {
+      const url = hoehenAdresse(art, e, n);
       anfang = await hoehenHolen(url, 0, 16384);
       if (!anfang) { hoehenFehlen.add(voll); return null; }
       lies = async (von, laenge) => {
@@ -598,7 +635,7 @@ function hoehenKachel(art, e, n, teil = false) {
       throw new Error(`Höhendaten: ${schluessel} liegt anders im Raster als die übrigen Kacheln`);
     }
     if (!def.schema) def.schema = { versatz: v, links: 0, oben: npx - 1 };
-    return { schluessel, art, e, n, kopf, lies };
+    return { schluessel, art, e, n, kopf, lies, stand };
   })();
 
   hoehenKacheln.set(schluessel, laden);
@@ -611,8 +648,23 @@ function blockEntpacken(kopf, roh, i) {
   const zeilen = kopf.kacheln ? kopf.bh : Math.min(kopf.bh, kopf.hoehe - i * kopf.bh);
   const soll = kopf.bw * zeilen * 4;
   if (!roh || !roh.length) return new Float32Array(soll / 4).fill(NaN);   // leerer Block
-  const bytes = kopf.kompression === 5 ? lzwEntpacken(roh, soll) : roh.slice(0, soll);
-  if (!kopf.le) {
+  let bytes = kopf.kompression === 5 ? lzwEntpacken(roh, soll) : roh.slice(0, soll);
+  if (kopf.praediktor === 3) {
+    /* Gleitkomma-Prädiktor (TIFF Technical Note 3): Je Zeile stehen erst die
+     * höchstwertigen Bytes aller Werte, dann die nächsten …, und jedes Byte als
+     * Differenz zum vorigen. Aufsummieren, dann wieder zu Werten zusammensetzen —
+     * die Ebenen sind unabhängig von der Byte-Reihenfolge der Datei. */
+    const w = kopf.bw, zb = w * 4, aus = new Uint8Array(soll);
+    for (let o = 0; o < soll; o += zb) {
+      for (let i = 1; i < zb; i++) bytes[o + i] = (bytes[o + i] + bytes[o + i - 1]) & 255;
+      for (let i = 0; i < w; i++) {
+        const p = o + 4 * i;
+        aus[p] = bytes[o + 3 * w + i]; aus[p + 1] = bytes[o + 2 * w + i];
+        aus[p + 2] = bytes[o + w + i]; aus[p + 3] = bytes[o + i];
+      }
+    }
+    bytes = aus;                                   // jetzt little-endian
+  } else if (!kopf.le) {
     for (let p = 0; p < soll; p += 4) {
       let t = bytes[p]; bytes[p] = bytes[p + 3]; bytes[p + 3] = t;
       t = bytes[p + 1]; bytes[p + 1] = bytes[p + 2]; bytes[p + 2] = t;
@@ -686,14 +738,14 @@ async function hoehenBloeckeLaden(kachel, indizes) {
  *  so füllt BW auch den Streifen an der Grenze, auf dem die bayerische Kachel
  *  schon liegt, aber nur NoData trägt. Gefragt wird ein Land nur im Rahmen
  *  um sein Gebiet. */
-async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = false, quellen = null } = {}) {
+async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = false, quellen = null, staende = null } = {}) {
   const aus = new Float32Array(ost.length).fill(NaN);
   let offen = Array.from({ length: ost.length }, (_, i) => i);
   for (let a = art; a && offen.length; a = HOEHEN_ARTEN[a].weiter) {
     const land = HOEHEN_ARTEN[a].land;
     const drin = offen.filter(i => inLandRahmen(land, ...utm32Zurueck(ost[i], nord[i])));
     if (!drin.length) continue;
-    const w = await hoehenWerteArt(a, Float64Array.from(drin, i => ost[i]), Float64Array.from(drin, i => nord[i]), verfahren, teil);
+    const w = await hoehenWerteArt(a, Float64Array.from(drin, i => ost[i]), Float64Array.from(drin, i => nord[i]), verfahren, teil, staende);
     let treffer = false;
     drin.forEach((i, j) => { if (Number.isFinite(w[j])) { aus[i] = w[j]; treffer = true; } });
     if (treffer && quellen) quellen.add(land);
@@ -702,7 +754,8 @@ async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = fals
   return aus;
 }
 
-async function hoehenWerteArt(art, ost, nord, verfahren, teil) {
+/** staende: ein Set für die Aktualität der benutzten Kacheln (nur BW kennt sie). */
+async function hoehenWerteArt(art, ost, nord, verfahren, teil, staende = null) {
   const def = HOEHEN_ARTEN[art], res = def.aufloesung, npx = def.pixel;
   const anzahl = ost.length;
   const aus = new Float32Array(anzahl).fill(NaN);
@@ -758,6 +811,7 @@ async function hoehenWerteArt(art, ost, nord, verfahren, teil) {
       if (c >= 0 && r >= 0 && c < k.breite && r < k.hoehe) noetig.add(Math.floor(r / k.bh) * k.quer + Math.floor(c / k.bw));
     }
     geladen.set(`${b.e}_${b.n}`, { kopf: k, bloecke: await hoehenBloeckeLaden(kachel, noetig) });
+    if (staende && kachel.stand && noetig.size) staende.add(kachel.stand);
   });
 
   const wert = (C, R) => {
@@ -850,15 +904,15 @@ async function hoehenProfil(punkte, art, { abstand, maxPunkte = 8000 } = {}) {
 
   const vorher = HOEHEN.geladen;
   const ostF = Float64Array.from(ost), nordF = Float64Array.from(nord);
-  const quellen = new Set();
-  const hoehe = await hoehenWerte(art, ostF, nordF, 'bilinear', { quellen });
+  const quellen = new Set(), staende = new Set();
+  const hoehe = await hoehenWerte(art, ostF, nordF, 'bilinear', { quellen, staende });
   return { art, station: Float64Array.from(station), ost: ostF, nord: nordF, hoehe, ecken,
-    laenge: gesamt, schritt, geladen: HOEHEN.geladen - vorher, quellen: [...quellen] };
+    laenge: gesamt, schritt, geladen: HOEHEN.geladen - vorher, quellen: [...quellen], staende: [...staende].sort() };
 }
 
 // Für die Prüfung unter Node (werkzeug/hoehen-pruefen.mjs); im Browser ohne Wirkung
 if (typeof module === 'object' && module.exports) {
   module.exports = { HOEHEN, HOEHEN_ARTEN, utm32Hin, utm32Zurueck, ellipsoidAbstand,
     lzwEntpacken, tiffKopf, hoehenKachel, hoehenWerte, hoehenWerteArt, hoehenPunkt, hoehenProfil,
-    lglAdresse, zipVerzeichnis, lglDatei, xyzLesen, inHoehenRahmen };
+    LGL_PRODUKTE, lglAdresse, zipVerzeichnis, lglDatei, xyzLesen, inHoehenRahmen, inLandRahmen, hoehenFehlen };
 }

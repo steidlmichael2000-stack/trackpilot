@@ -172,6 +172,11 @@ Messwerte stehen in der README, hier nur, was beim Weiterbauen nicht übersehen 
   eigene Art mit `land`, Rahmen in `HOEHEN_RAHMEN`, Quellenvermerk in `PROF_QUELLEN` und `pdfFuss`.
   `hoehenProfil` liefert `quellen` (`['by']`, `['bw']` oder beide) — Leiste und PDF richten den Vermerk
   danach. Das LGL verlangt das Jahr des Datenbezugs in Klammern.
+  DOM1 (`dom1-bw`, hinter `dom20.weiter`) ist GeoTIFF mit **Prädiktor 3** (`blockEntpacken`), LoD2 BW in
+  1-km-Dateien (`gebaeudeKachel(e, n, 'bw')`, `gebKachelnFuer` liefert `[e, n, land]`). `lglDatei` gibt
+  `{ daten, stand }` — stand = Befliegung aus der CSV, nicht das Jahr im Dateinamen; `hoehenProfil`
+  liefert sie als `staende`, die Leiste zeigt sie über `domName`. Gebäude-Land im PDF über die
+  ALKIS-Kennung (`DEBW…`). Das nDOM1 des LGL ist keine Gegenprobe für das DOM1 (passt nicht zu DOM − DGM).
 - **Bayerische Randkacheln sind beschnitten** (573_5361: 875 px, 125 m eingerückt). Der Leser rechnet mit
   `kopf.dl`/`kopf.dr`; die Raster-Lage ist für DGM1 und DOM20 fest (links 0, oben npx − 1).
 - **Höhe am Punkt** (`hoehenPunkt`, in der App `hoeheZeile`/`hoeheFuellen`): vom DGM nur Kopf und

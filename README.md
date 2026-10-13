@@ -1138,8 +1138,23 @@ Heidelberg 1,9 s, Karlsruhe 1,4 s, Reutlingen 1,8 s. Der allererste Abruf nach l
 einige Sekunden länger dauern, bis der Worker wach ist.
 
 Ein Stück für die *Höhe am Punkt* geht aus einem gepackten Archiv nicht; dort kommt der ganze
-Kilometer. Oberfläche (DOM1) und Gebäude (LoD2) des LGL liegen nach demselben Muster bereit, der
-Worker kennt die Pfade schon (`/bw/dom1/…`, `/bw/lod2/…`); eingebaut sind sie noch nicht.
+Kilometer.
+
+**Oberfläche und Gebäude.** Auch DOM1 und LoD2 kommen aus den Archiven des LGL (`/bw/dom1/…`,
+`/bw/lod2/…`) und springen ein, wo Bayern nichts hat. Das DOM1 ist ein GeoTIFF mit 1 m Raster
+(in Bayern 20 cm), Float32, LZW mit Gleitkomma-Prädiktor, rund 3,3 MB je Kilometer; es liegt danach
+im Vorrat. Aus der CSV neben jeder Datei liest die App die Befliegung und zeigt sie an
+(„DGM1 · DOM1 2016"); DGM und DOM eines Kilometers stammen aus derselben Befliegung (Stuttgart
+2016, Reutlingen 2017, Ulm 2021) — die Jahreszahl im Dateinamen ist die der Fortführung. Das LoD2 ist
+dasselbe CityGML-1.0-Profil wie in Bayern, je Kilometer 18–50 MB, gepackt 2–5 MB; die Adresse steht
+unter `xal:` statt `xAL:`, `HoeheGrund` fehlt (der Boden kommt im Profil ohnehin aus dem DGM).
+
+Nachgeprüft am 13.10.2026: Das nDOM1 des LGL taugt nicht als Gegenprobe für das DOM1 — es passt in
+keiner Kachel zu DOM − DGM. `hoehen-pruefen.mjs` prüft deshalb, was nur bei richtig gelesenen Werten
+gilt: In Reutlingen liegen 0 von 3000 Stellen mehr als 0,3 m unter dem Gelände, 19 % genau darauf.
+`gebaeude-pruefen.mjs` schneidet bei Stuttgart 40 zufällige Gebäude: alle getroffen, Dach LoD2
+gegen DOM1 im Median 0,19 m, bei 90 % unter 1,7 m (das 1-m-Raster verschmiert Kanten stärker als
+das DOM20 in Bayern, dort 0,16 bzw. 0,50 m).
 
 `hoehen-pruefen.mjs` prüft BW gegen den Text derselben Datei, unabhängig gelesen (2000 Stellen,
 exakt), und die Grenze an der Donau zwischen Ulm und Neu-Ulm: 300 Punkte über 2,3 km alle mit Wert;
@@ -1574,7 +1589,7 @@ dunkle Karte, Straßen und Ortsnamen von [OpenFreeMap](https://openfreemap.org/)
 Daten © OpenStreetMap). Regenradar: Quelle [Deutscher Wetterdienst](https://www.dwd.de/).
 DOP20, Geländerelief, Parzellarkarte und die Höhen in Profil und Höhenangabe (DGM1, DOM20): Bayerische
 Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de/) (CC BY 4.0); das
-Profil ist daraus berechnet. DGM1 in Baden-Württemberg: LGL-BW (2026), Datenlizenz Deutschland –
+Profil ist daraus berechnet. DGM1, DOM1 und LoD2 in Baden-Württemberg: LGL-BW (2026), Datenlizenz Deutschland –
 Namensnennung – Version 2.0, [www.lgl-bw.de](https://www.lgl-bw.de/), bearbeitet.
 Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause),
 [leaflet-rotate](https://github.com/Raruto/leaflet-rotate) (GPL-3.0) und

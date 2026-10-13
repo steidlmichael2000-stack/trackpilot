@@ -241,14 +241,14 @@ for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 529
   // Die Datei eines Kilometers aus dem Archiv, und ihr Text unabhängig gelesen
   const vorher = H.HOEHEN.geladen;
   let t0 = performance.now();
-  const text = await H.lglDatei('dgm1', 513, 5402);
+  const { daten: text, stand } = await H.lglDatei('dgm1', 513, 5402);
   const tLaden = performance.now() - t0, mb = (H.HOEHEN.geladen - vorher) / 2 ** 20;
   t0 = performance.now();
   const raster = H.xyzLesen(text, 513, 5402);
   const tLesen = performance.now() - t0;
   const zeilen = Buffer.from(text).toString('latin1').split(/\r?\n/).filter(Boolean).map(z => z.trim().split(/\s+/).map(Number));
-  pruefe(zeilen.length === 1e6 && raster.every(Number.isFinite),
-    `BW-Kachel 513_5402 (Stuttgart): ${zeilen.length} Zeilen, ${zahl(mb)} MB geladen in ${zahl(tLaden, 0)} ms, gelesen in ${zahl(tLesen, 0)} ms`);
+  pruefe(zeilen.length === 1e6 && raster.every(Number.isFinite) && stand === '2016-04-06',
+    `BW-Kachel 513_5402 (Stuttgart): ${zeilen.length} Zeilen, Stand ${stand}, ${zahl(mb)} MB geladen in ${zahl(tLaden, 0)} ms, gelesen in ${zahl(tLesen, 0)} ms`);
 
   const r = zufall(5135402), probe = Array.from({ length: 2000 }, () => zeilen[Math.floor(r() * zeilen.length)]);
   const ost = Float64Array.from(probe, z => z[0]), nord = Float64Array.from(probe, z => z[1]);
@@ -287,6 +287,36 @@ for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 529
     `Grenze Ulm/Neu-Ulm: ${N} Punkte über ${zahl(Math.hypot(e1 - e0, n1 - n0), 0)} m alle mit Wert (BY ${nurBy}, BW ${nurBw}, beide ${d.length})`);
   pruefe(d.length > 20 && quantil(d, 0.5) < 0.1,
     `Grenze Ulm/Neu-Ulm: BY und BW im Überlappungsstreifen Median ${zahl(quantil(d, 0.5) * 100, 1)} cm, 90 % ${zahl(quantil(d, 0.9) * 100, 1)} cm`);
+}
+
+/* ---- 10. DOM1 Baden-Württemberg ----
+ * GeoTIFF mit Gleitkomma-Prädiktor. Ein unabhängiger Leser fehlt hier, und das
+ * nDOM1 des LGL taugt nicht als Gegenprobe (es passt in keiner Kachel zu
+ * DOM − DGM, das LGL rechnet es offenbar aus einer anderen Oberfläche). Geprüft
+ * wird deshalb, was nur bei richtig gelesenen Werten gilt: Die Oberfläche liegt
+ * praktisch nie unter dem Gelände derselben Befliegung, und auf freiem Boden
+ * genau darauf. Falsch zusammengesetzte Bytes gäben Werte quer durch den
+ * Zahlenraum. Reutlingen 541_5378, Befliegung 2017; am 13.10.2026 dort 0 von
+ * 3000 Stellen unter dem Gelände, 19 % auf dem Boden (Stadt, deshalb nicht mehr). */
+{
+  const r = zufall(5415378), N = 3000;
+  const ost = Float64Array.from({ length: N }, () => 541000.5 + Math.floor(r() * 1000));
+  const nord = Float64Array.from({ length: N }, () => 5378000.5 + Math.floor(r() * 1000));
+  const t0 = performance.now(), vorher = H.HOEHEN.geladen, staende = new Set(), quellen = new Set();
+  const dom = await H.hoehenWerte('dom20', ost, nord, 'nachbar', { staende, quellen });
+  const tDom = performance.now() - t0, mb = (H.HOEHEN.geladen - vorher) / 2 ** 20;
+  const dgm = await H.hoehenWerteArt('dgm1-bw', ost, nord, 'nachbar', false);
+  let unter = 0, boden = 0, n = 0;
+  for (let i = 0; i < N; i++) {
+    if (!Number.isFinite(dom[i]) || !Number.isFinite(dgm[i])) continue;
+    n++;
+    if (dom[i] - dgm[i] < -0.3) unter++;
+    if (Math.abs(dom[i] - dgm[i]) < 0.1) boden++;
+  }
+  pruefe(n === N && [...quellen].join() === 'bw' && [...staende].join() === '2017-03-13',
+    `DOM1 BW Reutlingen: ${n} von ${N} Stellen mit Wert, Quelle ${[...quellen]}, Stand ${[...staende]}, ${zahl(mb)} MB in ${zahl(tDom, 0)} ms`);
+  pruefe(unter / n < 0.005 && boden / n > 0.1,
+    `DOM1 BW Reutlingen: ${unter} Stellen mehr als 0,3 m unter dem Gelände, ${zahl(boden / n * 100, 1)} % auf dem Boden (±0,1 m)`);
 }
 
 console.log(fehler ? `\n${fehler} Prüfung(en) fehlgeschlagen` : '\nAlle Prüfungen bestanden.');

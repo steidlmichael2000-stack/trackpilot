@@ -5978,6 +5978,8 @@ const PROF_PLOT_MAX = 160;
 const PROF_KACHELN_FRAGEN = 4;
 const PROF_KACHEL_MB = 3;              // DGM1, gemessen 1,5–3,9 MB je Kachel
 const PROF_DOM_BLOCK_KB = 110;         // DOM20: 13–64 MB je Kachel aus 400 Blöcken
+const PROF_DOM1_MB = 3.3;              // DOM1 BW: ganze Datei je Kilometer, danach auf dem Gerät
+const PROF_LOD2_BW_MB = 4;             // LoD2 BW: je Kilometer gepackt 2–5,4 MB
 /* Quellenvermerk nach CC BY 4.0 bzw. dl-de/by-2-0: Urheber mit Verweis auf die
  * Quelle, Lizenz, und dass bearbeitet wurde — „Profil aus …" sagt das. Eine
  * Zeile, damit die Leiste nicht wächst; der volle Wortlaut steht unter
@@ -6271,7 +6273,7 @@ async function profDomLaden() {
     if (lauf !== profLauf) return;
     if (!dom.hoehe.some(Number.isFinite)) {
       profDomAn = false;
-      toast('Die Oberfläche (DOM) gibt es bisher nur in Bayern.');
+      toast('Hier gibt es keine Oberfläche — das DOM gibt es für Bayern und Baden-Württemberg.');
     } else {
       profDom = dom;
       profDomDgm = dgmDort;
@@ -6311,11 +6313,17 @@ async function profGebLaden() {
 }
 
 function profGebKnopf() {
-  // Vorher unbekannt, wie groß die Kachel ist: gepackt meist 0,2–1 MB je 2 km × 2 km
-  const n = gebKachelnFuer(profLinie()).length;
+  /* Vorher unbekannt, wie groß die Kachel ist: Bayern gepackt meist 0,2–1 MB je
+   * 2 km × 2 km, BW 2–5,4 MB je Kilometer. Nur die Länder, in denen das Gelände
+   * liegt — der Rahmen um Bayern reicht weit nach Württemberg hinein. */
+  const l = profLaender(), kacheln = gebKachelnFuer(profLinie()).filter(([, , land]) => l[land]);
+  const nBy = kacheln.filter(k => k[2] === 'by').length, nBw = kacheln.length - nBy;
+  const mb = Math.max(1, Math.round(nBy + nBw * PROF_LOD2_BW_MB));
+  const art = [nBy && `${nBy} Kachel${nBy > 1 ? 'n' : ''} zu 2 km in Bayern, gepackt meist unter 1 MB`,
+    nBw && `${nBw} Kilometer in Baden-Württemberg, gepackt 2–5 MB`].filter(Boolean).join(', ');
   const [zusatz, titel] = profGebLaedt ? ['lädt …', 'Gebäude werden geladen']
     : profGebAn ? ['', 'Gebäude ausblenden']
-    : [`≈${n} MB`, `Gebäude aus dem 3D-Gebäudemodell LoD2 dazuladen — ${n} Kachel${n > 1 ? 'n' : ''} zu 2 km, gepackt meist unter 1 MB, danach auf dem Gerät`];
+    : [`≈${mb} MB`, `Gebäude aus dem 3D-Gebäudemodell LoD2 dazuladen — ${art}; danach auf dem Gerät`];
   return `<button type="button" class="prof-dom prof-geb${profGebAn ? ' is-on' : ''}" id="profGeb" aria-pressed="${profGebAn}" ` +
     `title="${titel}" aria-label="${titel}">Gebäude<small>${zusatz}</small></button>`;
 }
@@ -6338,12 +6346,30 @@ function profKennwerte(dgm = profDgm, dom = profDom, domDgm = profDomDgm) {
   return { min, max, dh: letzt - erst, obj };
 }
 
+/** In welchen Ländern liegt das Geländeprofil? Ohne Angabe: Bayern. */
+function profLaender(p = profDgm) {
+  const q = p && p.quellen && p.quellen.length ? p.quellen : ['by'];
+  return { by: q.includes('by'), bw: q.includes('bw') };
+}
+
+/** Name der Oberfläche samt Befliegung, wo bekannt: „DOM20", „DOM1 2016". */
+function domName(dom, mitJahr = true) {
+  const l = profLaender(dom);
+  const name = l.by && l.bw ? 'DOM20/DOM1' : l.bw ? 'DOM1' : 'DOM20';
+  const jahre = [...new Set((dom && dom.staende || []).map(s => s.slice(0, 4)))];
+  return mitJahr && jahre.length ? `${name} ${jahre.length > 1 ? `${jahre[0]}–${jahre[jahre.length - 1]}` : jahre[0]}` : name;
+}
+
 function profDomKnopf() {
-  // „+0,8 MB": dazuladen, und was es kostet — kurz, damit die Legende einzeilig bleibt
-  const mb = profMB(profZellen(profLinie(), 51.2) * PROF_DOM_BLOCK_KB * 1024);
+  /* „+0,8 MB": dazuladen, und was es kostet — kurz, damit die Legende einzeilig
+   * bleibt. Bayern in Blöcken des DOM20, BW je berührtem Kilometer DOM1 */
+  const l = profLaender(), linie = profLinie();
+  const byte = (l.by ? profZellen(linie, 51.2) * PROF_DOM_BLOCK_KB * 1024 : 0) +
+    (l.bw ? profZellen(linie, 1000) * PROF_DOM1_MB * 2 ** 20 : 0);
+  const mb = profMB(byte), quelle = l.by && l.bw ? 'DOM20 und DOM1' : l.bw ? 'DOM1' : 'DOM20';
   const [zusatz, titel] = profLaedt === 'dom' ? ['lädt …', 'Oberfläche wird geladen']
     : profDomAn ? ['', 'Oberfläche ausblenden']
-    : ['+' + mb, `Gebäude und Bewuchs aus dem DOM20 dazuladen, rund ${mb}`];
+    : ['+' + mb, `Gebäude und Bewuchs aus dem ${quelle} dazuladen, rund ${mb}`];
   return `<button type="button" class="prof-dom${profDomAn ? ' is-on' : ''}" id="profDom" aria-pressed="${profDomAn}" ` +
     `title="${titel}" aria-label="${titel}">Oberfläche<small>${zusatz}</small></button>`;
 }
@@ -6433,7 +6459,7 @@ function profLeiste() {
   } else {
     const v = `${profVersatz > 0 ? '+' : '−'}${nfM.format(Math.abs(profVersatz))} m`;
     kopf = '<p class="bb-title">Profil</p>' +
-      `<span class="tag warn">${profDom ? 'DGM1 · DOM20' : 'Gelände DGM1'}</span>` +
+      `<span class="tag warn">${profDom ? `DGM1 · ${domName(profDom)}` : 'Gelände DGM1'}</span>` +
       // Der Versatz ist zugleich sein Rücksetzer — antippen holt die getippte Linie zurück
       (profVersatz ? `<button type="button" class="tag prof-versatz" id="profVersatz" ` +
         `title="Parallel verschoben, plus nach links von A→B — antippen: zurück auf die getippte Linie">${v}</button>` : '');
@@ -6965,7 +6991,7 @@ function pdfAngaben(z) {
       ['Tiefster / höchster', `${hm(kw.min)} / ${hm(kw.max)}`, 'Gelände im ganzen Schnitt, ü. NHN']);
     if (z.versatz) raus.push(['Versetzt', `${z.versatz > 0 ? '+' : '−'}${nfM.format(Math.abs(z.versatz))} m`, 'parallel, plus: links von A→B']);
   }
-  if (kw.obj) raus.push(['Objekte (DOM20)', `bis ${nfH.format(kw.obj.hoehe)} m`, 'höchster Punkt der Oberfläche über dem Gelände']);
+  if (kw.obj) raus.push([`Objekte (${domName(z.dom, false)})`, `bis ${nfH.format(kw.obj.hoehe)} m`, 'höchster Punkt der Oberfläche über dem Gelände']);
   const ort = g ? g.mitte : z.linie[0];
   if (ort) pdfKoord(ort[0], ort[1]).forEach((t, i) => raus.push([i ? '' : g ? 'Lage am Gleis' : 'Lage A', t]));
   return raus;
@@ -6982,8 +7008,10 @@ function pdfGenauigkeit(s, x, y, quellen) {
     ['Koordinaten', 'so genau wie die Lage, aus der sie stammen'],
     quellen.by !== false && [quellen.bw ? 'DGM1 Bayern' : 'Gelände DGM1', 'Höhe ±0,2 m, Lage ±0,5 m (freies Gelände)'],
     quellen.bw && ['DGM1 BW', 'Genauigkeit 0,15 m laut Kachelangaben des LGL'],
-    quellen.dom && ['Oberfläche DOM20', 'regional verschieden, ohne feste Angabe'],
-    quellen.geb && ['Gebäude LoD2', 'Dachhöhe typ. ±0,2–0,3 m, bis über 1 m'],
+    quellen.dom && (quellen.domBy || !quellen.domBw) && ['Oberfläche DOM20', 'regional verschieden, ohne feste Angabe'],
+    quellen.domBw && ['Oberfläche DOM1', `1 m Raster, 0,15 m laut Kachelangaben${quellen.domStand ? `, Befliegung ${quellen.domStand}` : ''}`],
+    quellen.geb && (quellen.gebBy || !quellen.gebBw) && [quellen.gebBw ? 'LoD2 Bayern' : 'Gebäude LoD2', 'Dachhöhe typ. ±0,2–0,3 m, bis über 1 m'],
+    quellen.gebBw && ['LoD2 BW', 'ohne Angabe des LGL'],
     quellen.dop && ['Luftbild DOP20', 'Lage ±0,4–0,6 m'],
   ].filter(Boolean);
   s.text(x, y, 'Genauigkeit', { groesse: 7.5, fett: true, farbe: F.text });
@@ -7051,7 +7079,7 @@ async function pdfSchnittSeite(dok, z, { titel, nr = 1, gesamt = 1, serie = null
   s.text(PDF_RAND, 74, pdfSchnittText(z), { groesse: 9, farbe: F.fein });
   pdfProfil(s, box, z, achse, f);
   const leg = [['Gelände DGM1', F.gelLinie, null]];
-  if (z.dom) leg.push(['Oberfläche DOM20', F.dom, [2.5, 2]]);
+  if (z.dom) leg.push([`Oberfläche ${domName(z.dom)}`, F.dom, [2.5, 2]]);
   if (z.geb) leg.push(['Gebäude LoD2', F.gebLinie, 'block']);
   let lx = box.x + 34;
   const ly = box.y + f.ph + 40;
@@ -7079,10 +7107,19 @@ async function pdfSchnittSeite(dok, z, { titel, nr = 1, gesamt = 1, serie = null
     if (erkl) { ay += 9; s.text(kbox.x, ay, erkl, { groesse: 6.5, farbe: F.fein }); }
     ay += 12.5;
   }
-  const quellen = { dom: !!z.dom, geb: !!z.geb, dop: mitBild, osm: !!g, ...pdfLaender([z.dgm, ...(serie || []).map(q => q.dgm)]) };
+  const dom = z.dom ? profLaender(z.dom) : {}, geb = gebLaender([z.geb, ...(serie || []).map(q => q.geb)]);
+  const quellen = { dom: !!z.dom, geb: !!z.geb, dop: mitBild, osm: !!g, ...pdfLaender([z.dgm, ...(serie || []).map(q => q.dgm)]),
+    domBy: !!dom.by, domBw: !!dom.bw, domStand: z.dom ? domName(z.dom).replace(/^\S+ ?/, '') : '', gebBy: geb.by, gebBw: geb.bw };
   pdfGenauigkeit(s, kbox.x, ay + 6, quellen);
   pdfFuss(s, nr, gesamt, quellen);
   return quellen;
+}
+
+/** Aus welchen Ländern die Gebäude im Schnitt stammen — die ALKIS-Kennung
+ *  beginnt mit DEBY bzw. DEBW. */
+function gebLaender(listen) {
+  const ids = listen.flatMap(l => l || []).map(b => b.id || '');
+  return { by: ids.some(i => !/^DEBW/i.test(i)), bw: ids.some(i => /^DEBW/i.test(i)) };
 }
 
 /** Aus welchen Ländern die Geländehöhen stammen: { by, bw }. Ohne Angabe
@@ -7096,11 +7133,15 @@ function pdfLaender(dgms) {
 /** quellen: was im PDF vorkommt — { dom, geb, dop, osm, by, bw } */
 function pdfFuss(s, nr, gesamt, quellen) {
   const F = PDF_FARBEN, y = s.hoehe - 26;
-  const bvv = [quellen.by && 'Gelände DGM1', quellen.dom && 'Oberfläche DOM20', quellen.geb && 'Gebäude LoD2', quellen.dop && 'Luftbild DOP20']
+  // Ältere Aufrufe ohne Landesangabe für Oberfläche und Gebäude: Bayern
+  const domBy = quellen.dom && (quellen.domBy || !quellen.domBw), gebBy = quellen.geb && (quellen.gebBy || !quellen.gebBw);
+  const bvv = [quellen.by && 'Gelände DGM1', domBy && 'Oberfläche DOM20', gebBy && 'Gebäude LoD2', quellen.dop && 'Luftbild DOP20']
+    .filter(Boolean).join(', ');
+  const lgl = [quellen.bw && 'Gelände DGM1', quellen.domBw && 'Oberfläche DOM1', quellen.gebBw && 'Gebäude LoD2']
     .filter(Boolean).join(', ');
   const teile = [
     bvv && `${bvv}: Bayerische Vermessungsverwaltung – www.geodaten.bayern.de, CC BY 4.0, bearbeitet.`,
-    quellen.bw && `Gelände DGM1 in BW: LGL-BW (${new Date().getFullYear()}), dl-de/by-2-0, www.lgl-bw.de, bearbeitet.`,
+    lgl && `${lgl} in BW: LGL-BW (${new Date().getFullYear()}), dl-de/by-2-0, www.lgl-bw.de, bearbeitet.`,
     quellen.osm && 'Kilometrierung und Gleislage: © OpenStreetMap-Mitwirkende (ODbL).'
   ].filter(Boolean);
   s.linie([[PDF_RAND, y - 10], [s.breite - PDF_RAND, y - 10]], { farbe: F.rahmen, breite: 0.5 });
