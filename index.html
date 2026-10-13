@@ -212,9 +212,28 @@
              Das Feld vor dem Wort zeigt die Farbe, in der sie gerade gezeichnet werden. -->
         <button class="seg-btn parz-knopf" type="button" id="parzBtn" aria-controls="parzRow"
                 title="Lange drücken oder Rechtsklick: Farbe"><span class="parz-jetzt" aria-hidden="true"></span>Parzellen</button>
+        <!-- Das InfraGO-Netz. Tippen schaltet, lange drücken oder Rechtsklick öffnet
+             die Auswahl, was es zeigt. Die drei Striche vor dem Wort sagen, dass es da
+             etwas auszuwählen gibt — wie das Farbfeld bei den Parzellen. -->
+        <button class="seg-btn parz-knopf" type="button" id="ifgBtn" aria-controls="ifgWahl" aria-expanded="false"
+                title="Lange drücken oder Rechtsklick: was gezeigt wird"><svg class="ifg-wahl-zeichen" viewBox="0 0 10 9"
+                aria-hidden="true"><path d="M0 1.5h10M0 4.5h10M0 7.5h10"/></svg>DB-Netz</button>
       </div>
-      <!-- Farbwahl der Parzellen, zu bis zum langen Druck auf den Knopf — klappt
-           direkt unter seiner Reihe auf. Die Felder baut die App aus PARZ_FARBEN. -->
+      <div class="seg" role="group" aria-label="Straßen und Ortsnamen" style="margin-top:7px">
+        <button class="seg-btn" type="button" id="strBtn">Straßen</button>
+        <button class="seg-btn" type="button" id="ortBtn">Ortsnamen</button>
+      </div>
+      <!-- Die beiden Auswahlen klappen unter der ganzen Auflagengruppe auf, nicht
+           zwischen ihren Reihen: Dort sahen Straßen und Ortsnamen aus, als gehörten
+           sie zur Auswahl darüber. -->
+      <!-- Was die Auflage DB-Netz zeigt, zu bis zum langen Druck auf den Knopf.
+           Die Knöpfe baut die App aus IFG_INHALT. -->
+      <div class="parz-wahl" id="ifgWahl" hidden>
+        <p class="pal-label">DB-Netz zeigt</p>
+        <div id="ifgInhalt"></div>
+      </div>
+      <!-- Farbwahl der Parzellen, zu bis zum langen Druck auf den Knopf. Die Felder
+           baut die App aus PARZ_FARBEN. -->
       <div class="parz-wahl" id="parzWahl" hidden>
         <p class="pal-label">Farbe der Parzellen</p>
         <div class="pal parz-pal" id="parzRow" role="group" aria-label="Farbe der Parzellen"></div>
@@ -223,14 +242,10 @@
           <button class="seg-btn" type="button" id="parzPunkteBtn">Punktraster der Nutzung</button>
         </div>
       </div>
-      <div class="seg" role="group" aria-label="Straßen und Ortsnamen" style="margin-top:7px">
-        <button class="seg-btn" type="button" id="strBtn">Straßen</button>
-        <button class="seg-btn" type="button" id="ortBtn">Ortsnamen</button>
-      </div>
       <p class="pal-label">Rechenhilfen</p>
       <div class="seg" role="group" aria-label="Rechenhilfen">
         <button class="seg-btn" type="button" id="wegLinieBtn">Gleisweg</button>
-        <button class="seg-btn" type="button" id="steinLinieBtn">Steinlinie</button>
+        <button class="seg-btn" type="button" id="steinLinieBtn">Streckenlinie</button>
       </div>
       <label class="slider-row" for="baseOpacity">Hintergrund
         <input id="baseOpacity" type="range" min="0" max="100" step="5" value="100">
@@ -242,9 +257,17 @@
       <div class="erkl" id="erklKarte" hidden>
       <p class="fine">Ganz nach links heruntergezogen bleibt nur der Bahn- bzw. WMS-Layer stehen.</p>
       <p class="fine"><strong>Gleisweg</strong> ist die grüne Linie: der Verlauf zwischen den beiden
-      Steinen, an dem gerechnet wurde. <strong>Steinlinie</strong> ist die dünne blaue Verbindung durch
-      die Kilometersteine, die zeigt, welcher Strang gemeint ist. Beide belegen die Rechnung und lassen
-      sich hier abschalten, wenn sie die Karte verdecken — die Steine selbst bleiben stehen.</p>
+      Steinen, an dem gerechnet wurde. <strong>Streckenlinie</strong> ist die dünne blaue Linie der
+      gesuchten Strecke — die InfraGO-Linie, auf der gerechnet wird, oder die Verbindung durch die
+      Kilometersteine. Beide belegen die Rechnung und lassen sich hier abschalten, wenn sie die Karte
+      verdecken — die Kilometerpunkte selbst bleiben stehen.</p>
+      <p class="fine"><strong>DB-Netz</strong> zeigt die Infrastrukturdaten der DB InfraGO: Strecken mit
+      Nummer, Kilometer, Betriebsstellen, Bahnübergänge, Brücken und Tunnel. <strong>Lange drücken oder
+      Rechtsklick</strong> auf den Knopf öffnet die Auswahl, was davon gezeigt wird. Jedes erst ab seiner
+      Zoomstufe — Strecken ab 10, Betriebsstellen und Tunnel ab 12, Bahnübergänge ab 14, Kilometer und
+      Brücken ab 15. Ein Tipp auf einen Bahnübergang, eine Brücke, einen Tunnel, einen Kilometer oder
+      eine Betriebsstelle macht daraus ein Ergebnis mit Strecke und Kilometer. Ohne Netz, sobald die
+      Gegend einmal geladen war.</p>
       <p class="fine"><strong>Dunkel</strong> ist die dunkle Karte von OpenFreeMap. Sie wird
       als Vektorkarte gezeichnet und bleibt deshalb auch ganz nah scharf. Beim ersten Wählen
       lädt die App dafür einmal rund 1&nbsp;MB nach.</p>
@@ -448,11 +471,18 @@
       <p class="fine"><strong>Höhe.</strong> Unter dem Ergebnis, in den Sprechblasen und beim
       Abstecken steht die Geländehöhe aus dem DGM1 in Metern über Normalhöhennull. Dafür holt die
       App nur ein Stück der Geländekachel, rund 25&nbsp;kB. Nur in Bayern.</p>
-      <p class="fine"><strong>Keine amtliche Quelle.</strong> Die Positionen stammen aus in
-      OpenStreetMap erfassten Kilometersteinen und taugen zur groben Verortung — nicht für
-      Vermessung, Disposition oder sicherheitsrelevante Entscheidungen. Zwischen zwei Steinen
-      wird geradlinig interpoliert; im Bogen weicht das ab.</p>
-      <p class="fine">Daten © OpenStreetMap-Mitwirkende · Abfrage über die OpenRailwayMap-API ·
+      <p class="fine"><strong>Kilometrierung.</strong> Zuerst nach den offenen Infrastrukturdaten
+      der DB InfraGO (Stand Mai 2026): An rund 6000 Bahnübergängen nachgemessen liegt ein
+      Kilometer typisch 2–3&nbsp;m, im ungünstigen Zehntel 6&nbsp;m daneben. Wo InfraGO eine
+      Strecke nicht kennt — andere Betreiber, Werks- und Straßenbahnen —, rechnet die App mit den
+      in OpenStreetMap erfassten Kilometersteinen, typisch 10&nbsp;m, im ungünstigen Zehntel
+      gut 40&nbsp;m daneben.</p>
+      <p class="fine"><strong>Keine amtliche Auskunft.</strong> Auch mit den InfraGO-Daten taugen die
+      Positionen zur Verortung im Gelände — nicht für Vermessung, Disposition oder
+      sicherheitsrelevante Entscheidungen.</p>
+      <p class="fine">Kilometrierung und Betriebsstellen: DB InfraGO, Infrastrukturdaten
+      (Mobilithek, CC BY 4.0), bearbeitet ·
+      Daten © OpenStreetMap-Mitwirkende · Abfrage über die OpenRailwayMap-API ·
       Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild Esri, Maxar · Dunkle Karte, Straßen
       und Ortsnamen OpenFreeMap © OpenMapTiles, Daten © OpenStreetMap, gezeichnet mit MapLibre GL
       (BSD-3) · DOP20, Geländerelief, Parzellarkarte sowie DGM1, DOM20 und LoD2 in Profil und Höhe:
@@ -538,6 +568,8 @@
 <script src="pdf.js"></script>
 <!-- Gebäude im Profil: 3D-Gebäudemodell LoD2 der BVV über denselben Worker -->
 <script src="gebaeude.js"></script>
+<!-- Kilometrierung nach DB InfraGO: erste Quelle für km ↔ Lage, die OSM-Steine sind der Rückfall -->
+<script src="infrago.js"></script>
 <script src="app.js"></script>
 <script src="tour.js"></script>
 </body>

@@ -203,6 +203,35 @@ längs: rund 200 Lagen als Linienzug, `g.kms` gehört zu `profDgm.ecken`.
   (`pdfGenauigkeit`) stammen aus Produktseiten und Metadaten der BVV — keine erfundenen Zahlen
   nachtragen; für das DOM20 nennt die BVV ausdrücklich keine.
 
+## Kilometrierung nach DB InfraGO (Oktober 2026)
+
+`infrago.js` ist die **erste** Quelle für km ↔ Lage; die OSM-Steine (alles darunter) sind nur noch
+der Rückfall für Strecken und Kilometer, die InfraGO nicht kennt. Eingehängt an genau fünf Stellen:
+`resolvePoint` und `gleisLage` (km → Lage), `kmAnStelle` und `liveKmRechnen` (Lage → km),
+`ortSuchen` (Betriebsstellen). Dazu zeichnet `ifgZeichnen` statt der Steine Linie und Kilometer.
+
+- Daten unter `infrago/`, erzeugt mit `python werkzeug/infrago-bauen.py <GeoPackage>` aus den
+  Infrastrukturdaten der Mobilithek (CC BY 4.0, Quellenvermerk „DB InfraGO" — steht in ©-Kasten,
+  Hinweisen und Kartenattribution). Liegen im Repo, kein Abruf bei DB. Nach jedem Neubau
+  `node werkzeug/infrago-pruefen.mjs` (alles „ok") und `VERSION` in `sw.js` hochzählen.
+- **Beide Richtungen rechnen mit denselben Längen** (`ifgLaengen`, `ifgAbstand`) und am selben Gleis
+  (Achse/Richtungsgleis vor Gegengleis, `IFG_GLEIS_M`). Wer daran dreht, prüft den Rundlauf —
+  gemessen schlechtester Fall 0,5 mm. Das Gegengleis ist an einigen Stellen anders kilometriert
+  (1902 km 5,8: 1153 m), deshalb nicht „das nächste Gleis" nehmen.
+- Index in 0,1-Grad-Zellen, je Kante jede Zelle ihres Rechtecks. Stichproben entlang der Kante ließen
+  Zellen aus, und zwei Rundläufe fanden ihre Strecke nicht mehr.
+- `IFG_ERR` (2,5 / 6,3 m) stammt aus der Messung an 6271 OSM-Bahnübergängen — keine Zahlen erfinden;
+  bei neuem Datenstand die Messung wiederholen, nicht die Konstante raten.
+- Fehlgeschlagene Abrufe pausieren `IFG_PAUSE_MS`: Die Live-Anzeige ruft im Sekundentakt.
+- **Auflage DB-Netz** (`ifgAuflage…` in `app.js`, Daten `infrago/o/`): Knopf `#ifgBtn` wie `#parzBtn` —
+  Tippen schaltet, lang/Rechtsklick öffnet `#ifgWahl` (Inhalt aus `IFG_INHALT`, gespeichert in
+  `prefs.ifgInhalt`, fehlender Schlüssel = an). Beide Auswahlen klappen **unter** der Reihe
+  Straßen/Ortsnamen auf, nicht dazwischen. Linien auf Canvas in `ifgPane` (z 390, unter Steinen und
+  Pin). Streckenlinien nicht antippbar (kurzer Tipp liest nichts ab), Anlagen schon. Schilder ohne
+  Überlappung (`gesetzt`, `frei`) — nachgemessen mit `getBoundingClientRect`, 0 an fünf Stellen.
+- Der Pin zeigt mit `rotate(-45deg)` nach unten, Anker (13, 31) = Spitze. Mit +45° lag sie 18 px
+  links und 11 px über der Stelle.
+
 ## Steinliste und Gleisweg (Oktober 2026)
 
 - **`e.alle` für die Karte, `e.sorted` für jede Rechnung.** `e.sorted` = `inselnWeg(steineVereinen(e.alle))`:

@@ -87,7 +87,7 @@ const TOUR_SCHRITTE = [
     titel: 'Das Ergebnis',
     text: 'Unten steht, wo der Kilometer liegt — mit der Genauigkeit und der Geländehöhe. Daneben ' +
       'Google Maps, das i für Koordinate und Herkunft der Rechnung und Teilen. Der orange Knopf zeichnet ' +
-      'das Profil am Gleis. Die Kilometersteine der Strecke stehen beschriftet auf der Karte.',
+      'das Profil am Gleis. Die Kilometer der Strecke stehen beschriftet auf der Karte.',
     ziel: () => tourSichtbar('#bottom'),
     vorher: async lauf => {
       if ($('#q').value.trim() !== TOUR_BEISPIEL) await tourTippen(TOUR_BEISPIEL, lauf);

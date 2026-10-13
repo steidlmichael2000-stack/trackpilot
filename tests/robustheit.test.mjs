@@ -56,6 +56,19 @@ test('Teilantworten werden nicht in Cache Storage geschrieben', async () => {
   let writes=0;const {context:c}=worker({cache:{put:async()=>writes++}});
   await c.cacheSchreiben('tiles',request,new Response('teil',{status:206}),10);assert.equal(writes,0);
 });
+test('InfraGO-Strecken kommen aus dem eigenen Vorrat zuerst, ohne zweite Netzabfrage', async () => {
+  let calls=0;const geoeffnet=[];
+  const {events,context:c}=worker({fetcher:async()=>{calls++;return new Response('{"g":[]}');},
+    cache:{match:async()=>calls?new Response('{"g":[]}'):undefined}});
+  const open=c.caches.open;c.caches.open=async n=>{geoeffnet.push(n);return open(n);};
+  let antwort;
+  events.fetch({request:new Request('https://example.org/trackpilot/infrago/s/5100.json'),respondWith:p=>antwort=p});
+  assert.equal(await (await antwort).text(),'{"g":[]}');
+  events.fetch({request:new Request('https://example.org/trackpilot/infrago/s/5100.json'),respondWith:p=>antwort=p});
+  await antwort;
+  assert.equal(calls,1);
+  assert.ok(geoeffnet.every(n=>n.startsWith('trackpilot-infrago-')),geoeffnet.join());
+});
 test('Geschwister-App, Range und Authorization werden nicht abgefangen', () => {
   const {events}=worker();let handled=0;
   for(const req of [new Request('https://example.org/andere-app/index.html'),new Request(request,{headers:{Range:'bytes=0-99'}}),new Request(request,{headers:{Authorization:'Bearer test'}})]) {

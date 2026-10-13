@@ -417,6 +417,13 @@ async function coverage(ref, km) {
 /* ============================ Auflösung ============================ */
 
 async function resolvePoint(ref, km) {
+  /* Zuerst die Kilometrierung der DB InfraGO (infrago.js): an Bahnübergängen
+   * nachgemessen 2,5 m im Median gegen 9,9 m zwischen zwei OSM-Steinen, und
+   * ohne Netz, sobald die Strecke einmal geladen war. Die Steine bleiben für
+   * alles, was InfraGO nicht kennt. */
+  const ifg = await ifgLage(ref, km).catch(() => null);
+  if (ifg) return ifg;
+
   const e = await coverage(ref, km);
   if (!e.sorted.length) {
     throw new Error(`Für Strecke ${ref} sind keine Kilometersteine erfasst — Nummer prüfen.`);
@@ -1865,6 +1872,8 @@ let prefs = {
   abKompass: false,                      // Abstecken: Pfeil nach dem Handy statt nach der Karte
   parzFarbe: 'auto',                     // 'auto' (nach Grundkarte) oder '#rrggbb'
   parzPunkte: true,                      // Punktraster der Nutzung (Grünland …) in den Parzellen zeigen
+  ifg: false,                            // Auflage DB-Netz (InfraGO)
+  ifgInhalt: null,                       // was sie zeigt: { strecken, km, bs, bue, bruecken, tunnel } — fehlt = an
   profUeber: 1,                          // Querprofil: Überhöhung, 1 bis 20
   gpArt: 'quer', gpBreite: 50, gpLaenge: 250,   // Profil am Gleis: Quer/Längs, je Seite bzw. Richtung in m
   gpUeberLaengs: 10,                     // Profil am Gleis, längs: eigene Überhöhung
@@ -2396,7 +2405,7 @@ function initMap() {
   $('#quellenMass').appendChild(massstab.getContainer());
   quellenEinrichten();
 
-  overlayLayers = { orm: ormLayer, parz: parzLayer };
+  overlayLayers = { orm: ormLayer, parz: parzLayer, ifg: ifgAuflageAnlegen() };
   for (const k of Object.keys(overlayLayers)) auflageSetzen(k);
   auflageSetzen('radar');
   setBase(prefs.base || 'osm', true);     // setzt auch Straßen und Ortsnamen (grundAnwenden)
@@ -2410,6 +2419,8 @@ function initMap() {
   map.on('move zoom rotate', messLiveZeichnen);
   map.on('rotate rotateend', abNachziehen);      // die Pfeile beim Abstecken zeigen auf den Bildschirm
   map.on('zoomend', drawMilestones);
+  // Die InfraGO-Kilometer werden nur für den Ausschnitt gerechnet — nach dem Schieben neu
+  map.on('moveend', () => { if (view.ref && ifgStreckeJetzt(view.ref)) drawMilestones(); });
   map.on('rotate rotateend', syncNorth);
 
   /* leaflet-rotate lädt die Kacheln für die gedrehten Ecken erst am Ende einer
@@ -2797,6 +2808,7 @@ function setBase(which, still = false) {
   applyBaseOpacity();
   ordneAuflagen();
   radarZeichnen();      // die Konturen des Radars hängen am Grund (RADAR_LINIE_TON)
+  ifgAuflageZeichnen(); // die Linien des DB-Netzes auch
   saveStore();
   syncButtons();
 }
@@ -2821,7 +2833,7 @@ function applyBaseOpacity() {
  * OSM-Karte stecken sie schon drin: Dort bleiben sie eingeschaltet, werden aber
  * nicht gezeichnet, und beim Wechsel erscheinen sie. */
 const NUR_UEBER_BILD = new Set(['str', 'ort']);
-const AUFLAGEN = ['orm', 'parz', 'str', 'ort', 'radar'];
+const AUFLAGEN = ['orm', 'parz', 'ifg', 'str', 'ort', 'radar'];
 
 /** Ist die Auflage gewählt? Der Bahn-Layer ist von Haus aus an, die übrigen aus. */
 function auflageGewaehlt(kennung) {
@@ -2847,6 +2859,9 @@ function toggleOverlay(kennung) {
   if (an && kennung === 'parz') {
     if (ausserhalbBayerns()) toast('Die Parzellarkarte deckt nur Bayern ab.');
     else if (map.getZoom() < 17) toast('Parzellen zeichnet der Dienst erst ab Zoomstufe 17 (1:5000).');
+  }
+  if (an && kennung === 'ifg' && map.getZoom() < IFG_AB_ZOOM.strecken) {
+    toast(`Das DB-Netz erscheint ab Zoomstufe ${IFG_AB_ZOOM.strecken} — näher heranzoomen.`);
   }
   if (an && NUR_UEBER_BILD.has(kennung) && (prefs.base || 'osm') === 'osm') {
     toast('In der Karte schon enthalten — erscheint über Dunkel, Luftbild, DOP20 und Relief.');
@@ -4825,8 +4840,340 @@ function labelStep(z) {
   return 10;
 }
 
+/* Kennt InfraGO die Strecke, steht ihre Linie auf der Karte und darauf die
+ * Kilometer, gerechnet wie die Suche — nicht die OSM-Steine, die bis 44 m
+ * daneben stehen können. Der Tipp auf einen Punkt setzt genau diesen Kilometer.
+ * false: InfraGO kennt die Strecke nicht (oder sie ist noch nicht geladen). */
+function ifgZeichnen() {
+  const ref = String(view.ref || '').trim();
+  const st = ref && ifgStreckeJetzt(ref);
+  if (!st) {
+    if (ref) ifgStrecke(ref).then(s => { if (s && String(view.ref).trim() === s.nr) drawMilestones(); }).catch(() => { });
+    return false;
+  }
+  const z = map.getZoom();
+  if (z < 9) return true;
+
+  const b = map.getBounds().pad(0.3);
+  const [s, w, n, o] = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
+  if (prefs.steinLinie !== false) {
+    const linien = st.abschnitte
+      .filter(g => !(g.bb[0] > n || g.bb[2] < s || g.bb[1] > o || g.bb[3] < w))
+      .map(g => g.pts.map(p => [p.lat, p.lon]));
+    if (linien.length) {
+      L.polyline(linien, { color: '#4b93e6', weight: 3, opacity: 0.45, interactive: false, attribution: IFG_QUELLE })
+        .addTo(msLayer);
+    }
+  }
+
+  /* Beschriftet wie bisher die Steine (labelStep); dazwischen kleine Punkte je
+   * Hektometer, solange es nicht zu dicht wird. */
+  const schritt = labelStep(z) || 0.1;
+  const fein = z >= 14 ? 0.1 : schritt;
+  for (const p of ifgKmPunkte(st, fein, s, w, n, o)) {
+    const label = Math.abs(p.km / schritt - Math.round(p.km / schritt)) < 1e-6;
+    L.circleMarker([p.lat, p.lon], {
+      radius: label ? 4.5 : 3,
+      color: '#fff', weight: label ? 1.6 : 1,
+      fillColor: '#4b93e6', fillOpacity: 1,
+      bubblingMouseEvents: false, attribution: IFG_QUELLE      // Leaflet zählt mit, steht einmal da
+    }).on('click', ev => {
+      L.DomEvent.stopPropagation(ev);
+      const ziel = tippZiel();
+      if (ziel) { ziel(ev.latlng || L.latLng(p.lat, p.lon)); return; }
+      ifgLage(st.nr, p.km).then(r => { if (r) applyPoint(st.nr, p.km, r); }).catch(() => { });
+    }).addTo(msLayer);
+    if (label) {
+      L.marker([p.lat, p.lon], {
+        interactive: false, keyboard: false,
+        icon: L.divIcon({ className: '', html: `<span class="ms">${fmtKm(p.km)}</span>`, iconSize: null, iconAnchor: [-7, 7] })
+      }).addTo(msLayer);
+    }
+  }
+  return true;
+}
+
+/* ============================ Auflage DB-Netz (InfraGO) ============================ */
+
+/* Das ganze InfraGO-Netz im Ausschnitt, nicht nur die gesuchte Strecke. Was sie
+ * zeigt, wählt man einzeln (prefs.ifgInhalt) — lange drücken oder Rechtsklick
+ * auf den Knopf DB-Netz, wie die Farbe bei den Parzellen. Jede Art erst ab
+ * ihrer Zoomstufe: Ganz Deutschland wären 1548 Dateien, und Brücken von 14 m
+ * Länge sind unter Zoom 15 keinen Bildpunkt breit. */
+const IFG_INHALT = [
+  ['strecken', 'Strecken', 10], ['km', 'Kilometer', 15], ['bs', 'Betriebsstellen', 12],
+  ['bue', 'Bahnübergänge', 14], ['bruecken', 'Brücken', 15], ['tunnel', 'Tunnel', 12]
+];
+const IFG_AB_ZOOM = Object.fromEntries(IFG_INHALT.map(([k, , z]) => [k, z]));
+const ifgInhaltAn = k => !prefs.ifgInhalt || prefs.ifgInhalt[k] !== false;
+
+let ifgLayer = null;
+let ifgRenderer = null;
+let ifgStand = 0;        // jede neue Zeichnung verwirft, was eine ältere noch nachliefert
+
+/* Linien auf Canvas, in einer eigenen Ebene unter den Steinen und dem Pin:
+ * Hunderte SVG-Pfade machen das Schieben auf dem Handy zäh. */
+function ifgAuflageAnlegen() {
+  map.createPane('ifgPane');
+  map.getPane('ifgPane').style.zIndex = 390;          // über den Kacheln, unter overlayPane (400)
+  ifgRenderer = L.canvas({ pane: 'ifgPane', padding: 0.3, tolerance: 6 });
+  ifgLayer = L.layerGroup([], { attribution: IFG_QUELLE });
+  ifgLayer.on('add', () => ifgAuflageZeichnen());
+  map.on('moveend', () => { if (map.hasLayer(ifgLayer)) ifgAuflageZeichnen(); });
+  return ifgLayer;
+}
+
+/** Ein Tipp auf eine Anlage oder einen Kilometer wird ein Ergebnis wie jedes andere —
+ *  mit Profil, Google Maps und Teilen. Beim Messen ist er nur ein Fangpunkt. */
+function ifgAnlageTipp(ev, tun) {
+  L.DomEvent.stopPropagation(ev);
+  const ziel = tippZiel();
+  if (ziel) { ziel(ev.latlng); return; }
+  tun().catch(() => toast('Für diese Stelle ließ sich kein Kilometer rechnen.'));
+}
+
+async function ifgAuflageZeichnen() {
+  if (!ifgLayer || !map.hasLayer(ifgLayer)) return;
+  const stand = ++ifgStand;
+  const z = map.getZoom();
+  const b = map.getBounds().pad(0.2);
+  const [s, w, n, o] = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
+  const im = (lat, lon) => lat >= s && lat <= n && lon >= w && lon <= o;
+  const imBB = bb => !(bb[0] > n || bb[2] < s || bb[1] > o || bb[3] < w);
+  const ab = k => ifgInhaltAn(k) && z >= IFG_AB_ZOOM[k];
+
+  const nummern = z >= Math.min(...IFG_INHALT.filter(([k]) => ifgInhaltAn(k) && k !== 'bs').map(([, , zz]) => zz), 99)
+    ? await ifgNummernImRechteck(s, w, n, o) : new Set();
+  const strecken = nummern ? (await Promise.all([...nummern].map(nr => ifgStrecke(nr).catch(() => null)))).filter(Boolean) : [];
+  const mitAnlagen = ab('bue') || ab('bruecken') || ab('tunnel');
+  const anlagen = mitAnlagen && nummern
+    ? (await Promise.all([...nummern].map(nr => ifgAnlagen(nr).catch(() => null)))).filter(Boolean) : [];
+  const stellen = ab('bs') ? (await ifgStellen()).filter(x => im(x.lat, x.lon)) : [];
+  if (stand !== ifgStand) return;              // inzwischen weitergeschoben
+
+  const neu = [];
+  const r = ifgRenderer;
+
+  /* Tunnel und Brücken unter den Gleisen: als breites Band, über dem die Linie liegt */
+  if (ab('tunnel')) {
+    for (const a of anlagen) for (const t of a.tunnel) {
+      if (!imBB(t.bb)) continue;
+      neu.push(L.polyline(t.pts.map(p => [p.lat, p.lon]), {
+        renderer: r, color: '#4a5260', weight: 9, opacity: 0.45, dashArray: '10 7', lineCap: 'butt',
+        bubblingMouseEvents: false
+      }).on('click', ev => ifgAnlageTipp(ev, () => ifgAnlageWaehlen(a.nr, ev.latlng, {
+        art: 'Tunnel', bez: t.bez, von: t.von, bis: t.bis, laenge: t.laenge
+      }))));
+    }
+  }
+  if (ab('bruecken')) {
+    for (const a of anlagen) for (const br of a.bruecken) {
+      if (!imBB(br.bb)) continue;
+      neu.push(L.polyline(br.pts.map(p => [p.lat, p.lon]), {
+        renderer: r, color: '#1d2733', weight: 11, opacity: 0.5, lineCap: 'butt', bubblingMouseEvents: false
+      }).on('click', ev => ifgAnlageTipp(ev, () => ifgAnlageWaehlen(a.nr, ev.latlng, {
+        art: 'Brücke', bez: br.bez, von: br.von, bis: br.bis, laenge: br.laenge, kreuzung: br.kreuzung
+      }))));
+    }
+  }
+
+  /* Die Strecken: dunkle Linie auf hellem Saum, damit sie auf Karte und Luftbild
+   * gleich gut steht. Nicht antippbar — ein kurzer Tipp liest bewusst nichts ab. */
+  const nrMarken = [];
+  const gesetzt = [];            // Streckenschilder, auch für die Kilometer unten
+  if (ab('strecken')) {
+    const linien = [];
+    for (const st of strecken) for (const g of st.abschnitte) {
+      if (imBB(g.bb)) linien.push(g.pts.map(p => [p.lat, p.lon]));
+    }
+    if (linien.length) {
+      /* Schlank: An Bahnhöfen liegen Richtungs- und Gegengleis mehrerer Strecken
+       * dicht an dicht, mit 2 px auf 5 px Saum wurde daraus ein schwarzer Balken.
+       * Auf der dunklen Karte umgekehrt, dort ging die dunkle Linie unter. */
+      const dunkel = prefs.base === 'dark';
+      neu.push(L.polyline(linien, { renderer: r, color: dunkel ? '#06070b' : '#ffffff', weight: 3.5, opacity: 0.7, interactive: false }));
+      neu.push(L.polyline(linien, { renderer: r, color: dunkel ? '#e6ebf1' : '#1d2733', weight: 1.5, opacity: 0.9, interactive: false }));
+    }
+    /* Streckennummer je Abschnittsmitte, aber nicht dichter als 160 Bildpunkte
+     * für dieselbe Nummer, kein Schild über einem anderen (im Ruhrgebiet lagen
+     * bei Zoom 11 drei Nummern übereinander) und höchstens 80 auf einmal. Die
+     * Schildgröße geschätzt: 7 px je Ziffer plus Rand, 16 px hoch, 4 px Luft. */
+    for (const st of strecken) for (const g of st.abschnitte) {
+      if (g.ri === 2 || !imBB(g.bb) || nrMarken.length >= 80) continue;
+      const m = ifgAufAbschnitt(g, (g.a + g.b) / 2);
+      if (!map.getBounds().contains([m.lat, m.lon])) continue;
+      const px = map.latLngToContainerPoint([m.lat, m.lon]);
+      const breit = st.nr.length * 7 + 14;
+      if (gesetzt.some(q => (q.nr === st.nr && Math.hypot(q.px.x - px.x, q.px.y - px.y) < 160) ||
+        (Math.abs(q.px.x - px.x) < (q.breit + breit) / 2 && Math.abs(q.px.y - px.y) < 20))) continue;
+      gesetzt.push({ nr: st.nr, px, breit });
+      nrMarken.push(L.marker([m.lat, m.lon], {
+        interactive: false, keyboard: false,
+        icon: L.divIcon({ className: '', iconSize: null, iconAnchor: [0, 0], html: `<span class="ifg-nr">${esc(st.nr)}</span>` })
+      }));
+    }
+  }
+
+  /* Kilometer auf allen Strecken außer der gesuchten — die zeichnet ifgZeichnen schon */
+  const kmMarken = [];
+  if (ab('km')) {
+    const schritt = labelStep(z) || 0.1;
+    /* Parallele Strecken (5100 und 5919 bei Zapfendorf) schrieben ihre Kilometer
+     * ineinander. Der Punkt bleibt, das Schild entfällt, wenn es ein schon
+     * gesetztes träfe: rechts vom Punkt, 6 px je Zeichen, 12 px hoch. */
+    const schilder = gesetzt.map(q => ({ l: q.px.x - q.breit / 2, r: q.px.x + q.breit / 2, o: q.px.y - 9, u: q.px.y + 9 }));
+    const frei = (px, text) => {
+      const b = { l: px.x + 6, r: px.x + 6 + text.length * 6 + 2, o: px.y - 6, u: px.y + 6 };
+      if (schilder.some(q => !(b.r <= q.l || q.r <= b.l || b.u <= q.o || q.u <= b.o))) return false;
+      schilder.push(b);
+      return true;
+    };
+    for (const st of strecken) {
+      if (st.nr === String(view.ref || '').trim()) continue;
+      for (const p of ifgKmPunkte(st, schritt, s, w, n, o)) {
+        if (kmMarken.length >= 600) break;
+        const text = fmtKm(p.km);
+        const mitSchild = frei(map.latLngToContainerPoint([p.lat, p.lon]), text);
+        kmMarken.push(L.circleMarker([p.lat, p.lon], {
+          renderer: r, radius: 3, color: '#ffffff', weight: 1, fillColor: '#1d2733', fillOpacity: 1,
+          bubblingMouseEvents: false
+        }).on('click', ev => ifgAnlageTipp(ev, async () => {
+          const res = await ifgLage(st.nr, p.km);
+          if (res) applyPoint(st.nr, p.km, res);
+        })));
+        if (mitSchild) kmMarken.push(L.marker([p.lat, p.lon], {
+          interactive: false, keyboard: false,
+          icon: L.divIcon({ className: '', iconSize: null, iconAnchor: [-6, 6], html: `<span class="ms ifg-km">${text}</span>` })
+        }));
+      }
+    }
+  }
+
+  /* Bahnübergänge als Andreaskreuz, antippbar */
+  if (ab('bue')) {
+    for (const a of anlagen) for (const u of a.bue) {
+      if (!im(u.lat, u.lon)) continue;
+      neu.push(L.marker([u.lat, u.lon], {
+        keyboard: false, bubblingMouseEvents: false,
+        icon: L.divIcon({ className: '', iconSize: [16, 16], iconAnchor: [8, 8], html: IFG_BUE_ZEICHEN })
+      }).on('click', ev => ifgAnlageTipp(ev, async () => {
+        const res = await ifgLage(a.nr, u.km);
+        if (!res) throw new Error('kein Abschnitt');
+        applyPoint(a.nr, u.km, { ...res, anlage: {
+          art: 'Bahnübergang', bez: u.bez, details: [u.sicherung, u.strasse].filter(Boolean) } });
+      })));
+    }
+  }
+
+  /* Betriebsstellen: ein Quadrat, ab Zoom 13 mit DS100, ab 15 mit Namen */
+  for (const st of stellen) {
+    const text = z >= 15 ? `${esc(st.name)} <b>${esc(st.ds100)}</b>` : z >= 13 ? `<b>${esc(st.ds100)}</b>` : '';
+    neu.push(L.marker([st.lat, st.lon], {
+      keyboard: false, bubblingMouseEvents: false,
+      icon: L.divIcon({ className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+        html: `<span class="ifg-bs"></span>${text ? `<span class="ifg-bs-text">${text}</span>` : ''}` })
+    }).on('click', ev => ifgAnlageTipp(ev, async () => ifgStelleZeigen(ifgStelleTreffer(st)))));
+  }
+
+  ifgLayer.clearLayers();
+  for (const l of [...neu, ...kmMarken, ...nrMarken]) l.addTo(ifgLayer);
+}
+
+/* Andreaskreuz, 16 px: zwei weiße Balken unter zwei roten — liest sich auf Karte
+ * und Luftbild. Rechnerisch mittig: Die Balken kreuzen sich bei (8, 8). */
+const IFG_BUE_ZEICHEN = '<svg class="ifg-bue" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">' +
+  '<path d="M2.5 2.5l11 11M13.5 2.5l-11 11" stroke="#fff" stroke-width="5" stroke-linecap="square"/>' +
+  '<path d="M2.5 2.5l11 11M13.5 2.5l-11 11" stroke="#d50000" stroke-width="2.6" stroke-linecap="square"/></svg>';
+
+/** Brücke oder Tunnel angetippt: der Kilometer an der getippten Stelle, auf der
+ *  Strecke, zu der die Anlage gehört — sonst die Mitte der Anlage. */
+async function ifgAnlageWaehlen(nr, latlng, anlage) {
+  const r = await ifgKmAn(latlng.lat, latlng.lng, 40, [nr], Infinity);
+  // Nur wenn der Kilometer auch zur Anlage passt — sonst lag der Tipp auf einem anderen Gleis
+  const lo = Math.min(anlage.von, anlage.bis) - 0.05, hi = Math.max(anlage.von, anlage.bis) + 0.05;
+  if (r && r.ref === nr && r.punkt.km >= lo && r.punkt.km <= hi) {
+    applyPoint(nr, r.punkt.km, { ...r.punkt, anlage });
+    return;
+  }
+  const km = (anlage.von + anlage.bis) / 2;
+  const res = await ifgLage(nr, km);
+  if (!res) throw new Error('kein Abschnitt');
+  applyPoint(nr, km, { ...res, anlage });
+}
+
+/** Eine Betriebsstelle aus der Auflage — dieselbe Leiste wie aus der Suche. */
+function ifgStelleZeigen(t) {
+  reihe = []; reiheAktiv = 0; reiheFehler = [];
+  neuerPunktInfoZu();
+  view.km = null;
+  view.point = { ...t, quality: 'betriebsstelle' };
+  gleiswegZuletzt = null;
+  if (trackLayer) trackLayer.clearLayers();
+  drawPoint();
+  renderBottom();
+}
+
+/* Die Auswahl, was die Auflage zeigt: eine Zeile Knöpfe je drei, wie
+ * „Punktraster der Nutzung" bei den Parzellen. */
+function ifgWahlBauen() {
+  const box = $('#ifgInhalt');
+  if (!box) return;
+  const reihen = [IFG_INHALT.slice(0, 3), IFG_INHALT.slice(3)];
+  box.innerHTML = reihen.map((reihe, i) =>
+    `<div class="seg" role="group" aria-label="Inhalt DB-Netz"${i ? ' style="margin-top:7px"' : ''}>` +
+    reihe.map(([k, name, zz]) =>
+      `<button class="seg-btn" type="button" data-ifg="${k}" title="ab Zoomstufe ${zz}">${name}</button>`).join('') +
+    `</div>`).join('');
+  box.querySelectorAll('[data-ifg]').forEach(btn => btn.addEventListener('click', () => {
+    const k = btn.dataset.ifg;
+    prefs.ifgInhalt = { ...(prefs.ifgInhalt || {}), [k]: !ifgInhaltAn(k) };
+    saveStore();
+    syncButtons();
+    // Wer etwas einschaltet, will es sehen
+    if (!auflageGewaehlt('ifg')) toggleOverlay('ifg');
+    else ifgAuflageZeichnen();
+    if (ifgInhaltAn(k) && map.getZoom() < IFG_AB_ZOOM[k]) {
+      toast(`${btn.textContent} erscheinen ab Zoomstufe ${IFG_AB_ZOOM[k]}.`);
+    }
+  }));
+}
+
+function ifgWahlZeigen(an) {
+  const box = $('#ifgWahl'), btn = $('#ifgBtn');
+  if (box) box.hidden = !an;
+  if (btn) btn.setAttribute('aria-expanded', an ? 'true' : 'false');
+}
+
+/** Tippen schaltet, lange drücken oder Rechtsklick öffnet die Auswahl — genau wie parzKnopfBinden. */
+function ifgKnopfBinden() {
+  const btn = $('#ifgBtn');
+  if (!btn) return;
+  let timer = 0, lang = false, zuletzt = 0;
+  const wahl = () => {
+    clearTimeout(timer);
+    if (Date.now() - zuletzt < 700) return;
+    zuletzt = Date.now();
+    lang = true;
+    ifgWahlZeigen($('#ifgWahl').hidden);
+  };
+  btn.addEventListener('pointerdown', ev => {
+    lang = false;
+    clearTimeout(timer);
+    if (ev.button === 0) timer = setTimeout(wahl, MERK_DAUER);
+  });
+  for (const t of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(t, () => clearTimeout(timer));
+  btn.addEventListener('contextmenu', ev => { ev.preventDefault(); wahl(); });
+  btn.addEventListener('click', () => {
+    if (lang) { lang = false; return; }
+    toggleOverlay('ifg');
+  });
+}
+
 function drawMilestones() {
   msLayer.clearLayers();
+  // Die Auflage lässt die Kilometer der gesuchten Strecke aus — nach einem Wechsel neu
+  if (ifgLayer && map.hasLayer(ifgLayer) && ifgInhaltAn('km') && map.getZoom() >= IFG_AB_ZOOM.km) ifgAuflageZeichnen();
+  if (ifgZeichnen()) return;
   const e = view.ref && lineCache.get(view.ref);
   if (!e || !e.sorted.length) return;
 
@@ -4904,7 +5251,8 @@ function pinZeichnen(p, km, aktiv, idx) {
     : (q === 'karte' || q === 'extrapoliert' || q === 'karte-gleis') ? 'warn' : '';
   const m = L.marker([p.lat, p.lon], {
     icon: L.divIcon({
-      className: '', iconSize: [26, 26], iconAnchor: [13, 24],
+      // Spitze: Mitte (13, 13) plus die halbe Diagonale 13·√2 nach unten, abzüglich der Rundung
+      className: '', iconSize: [26, 26], iconAnchor: [13, 31],
       html: `<div class="pin ${cls}${aktiv ? '' : ' neben'}"></div>`
     }),
     interactive: idx >= 0, keyboard: false,
@@ -6203,6 +6551,10 @@ function profTaste(ev) {
  * Overpass, den die Suche dort meist schon geholt hat. Hinter dem letzten
  * Stein läuft es wie bei der Suche am Gleis hinaus. null: kein Gleis zu finden. */
 async function gleisLage(ref, km) {
+  // Dieselbe Rechnung wie resolvePoint, sonst läge das Profil neben dem Ergebnis
+  const ifg = await ifgLage(ref, km).catch(() => null);
+  if (ifg) return { lat: ifg.lat, lon: ifg.lon };
+
   const e = await coverage(ref, km);
   let A = null, B = null;
   for (const p of e.sorted) {
@@ -7498,6 +7850,16 @@ async function kartePunkt(ref, hit, lat, lon, operator, steine = null) {
 async function kmAnStelle(lat, lng, tol) {
   if (view.busy) return;
 
+  /* Zuerst InfraGO. Die oben eingegebene Strecke gewinnt, solange sie
+   * höchstens 10 m weiter weg liegt als die nächste — an einem Bahnhof soll ein
+   * Tipp nicht auf die Nachbarnummer springen, ein Tipp auf das andere Gleis
+   * aber schon. */
+  const ifg = await ifgKmAn(lat, lng, tol, [view.ref], 10).catch(() => null);
+  if (ifg) {
+    applyPoint(ifg.ref, ifg.punkt.km, ifg.punkt);
+    return;
+  }
+
   const e = view.ref && lineCache.get(view.ref);
 
   if (e && e.sorted.length > 1) {
@@ -7904,6 +8266,7 @@ const ortAnteil = p => (p.standort ? Math.round(p.standort.genau) : 0);
 const plusMinus = m => `±${nfM.format(m)} m`;
 
 function qualityTag(p) {
+  if (p.quality === 'infrago') return { cls: 'ok', text: plusMinus(Math.round(IFG_ERR.worst) + ortAnteil(p)) };
   if (p.quality === 'exakt') return { cls: 'ok', text: 'Kilometerstein' };
   if (p.quality === 'gleis') return { cls: 'ok', text: 'auf dem Gleis' };
   /* Orange trotz der besseren Rechnung: Über so weite Steinabstände bleiben
@@ -7946,9 +8309,11 @@ function renderBottom() {
     : '';
 
   if (p.quality === 'betriebsstelle') {
-    const kindDe = { station: 'Bahnhof', halt: 'Haltepunkt', yard: 'Bahnhofsteil', junction: 'Abzweigstelle', service_station: 'Betriebsbahnhof', crossover: 'Überleitstelle' }[p.kind] || 'Betriebsstelle';
+    // InfraGO bringt die Art schon ausgeschrieben mit („Bahnhof", „Abzweigstelle" …)
+    const kindDe = STELLE_ART[p.kind] || p.kind || 'Betriebsstelle';
     title = p.name;
-    sub = [kindDe, p.ds100 && 'DS100 ' + p.ds100, p.uic && 'UIC ' + p.uic, p.operator].filter(Boolean).join(' · ');
+    sub = [kindDe, p.ds100 && 'DS100 ' + p.ds100, p.uic && 'UIC ' + p.uic, p.operator,
+      p.zustand && p.zustand !== 'in Betrieb' && p.zustand].filter(Boolean).join(' · ');
   } else if (p.quality === 'ort') {
     title = p.name;
     sub = p.sub || 'Ort aus OpenStreetMap';
@@ -7961,7 +8326,56 @@ function renderBottom() {
   // Leiste den halben Bildschirm
   let warn = '', detail = '';
 
-  if (p.quality === 'exakt') {
+  if (p.quality === 'betriebsstelle' && p.strecken && p.strecken.length) {
+    detail = 'Liegt an ' + p.strecken.map(s =>
+      `Strecke ${s.nr}${s.km != null ? ' km ' + fmtKm(s.km) : ''}`).join(', ') +
+      ` — nach den Infrastrukturdaten der DB InfraGO, Stand ${IFG_STAND}.`;
+  } else if (p.quality === 'infrago') {
+    const [a, b] = p.abschnitt;
+    detail = (p.tipp
+        ? (p.standort
+          ? `Aus dem verfolgten Standort abgeleitet, gemeldet auf ±${nfM.format(p.standort.genau)} m genau — ` +
+            `das ist in der Zahl oben dazugerechnet. `
+          : `Aus der angetippten Stelle abgeleitet. `) +
+          `Gelesen wird der Kilometer an der Stelle, an der das Lot auf das Gleis trifft` +
+          (p.offset > 1 ? `, ${nfM.format(p.offset)} m querab` : '') + `. `
+        : '') +
+      `In den Infrastrukturdaten ist die Strecke in Abschnitte mit Kilometer von/bis geteilt, hier ` +
+      `km ${fmtKm(Math.min(a, b))} bis ${fmtKm(Math.max(a, b))} ` +
+      ({ Streckenachse: 'an der Streckenachse', Richtungsgleis: 'am Richtungsgleis',
+        Gegenrichtungsgleis: 'am Gegenrichtungsgleis' }[p.gleis] || 'am Gleis') +
+      `. Die Linie ist auf die Kilometrierung abgestimmt, der Kilometer wird ` +
+      `anteilig darauf abgetragen. An ${nfM.format(IFG_ERR.faelle)} Bahnübergängen nachgemessen, deren Lage ` +
+      `in OpenStreetMap unabhängig von jeder Kilometrierung ist, lag das typisch ` +
+      `${String(IFG_ERR.typical).replace('.', ',')} m neben dem wahren Ort, im ungünstigen Zehntel ` +
+      `${String(IFG_ERR.worst).replace('.', ',')} m — zwischen zwei OSM-Kilometersteinen waren es an ` +
+      `denselben Stellen ${String(IFG_ERR.osmTypical).replace('.', ',')} m und ${nfM.format(IFG_ERR.osmWorst)} m.`;
+    if (p.weitere && p.weitere.length) {
+      warn = `<p class="bb-note">km ${fmtKm(view.km)} kommt auf Strecke ${esc(p.lineRef)} ` +
+        `${p.weitere.length === 1 ? 'zweimal' : p.weitere.length + 1 + '-mal'} vor (Kilometersprung). ` +
+        `Angezeigt ist die erste Stelle; die ${p.weitere.length === 1 ? 'zweite liegt' : 'nächste liegt'} ` +
+        `${fmtKm(p.weitere[0].abstand / 1000)} km entfernt.</p>`;
+    }
+    if (p.anlage) {
+      const a = p.anlage;
+      /* „Länge" ist die des Bauwerks, nicht die Spanne entlang des Gleises — ein
+       * Überwerfungsbauwerk an 5100 kreuzt auf 104 m Gleis und ist 430 m lang.
+       * Ohne das Wort davor läse sich das als Widerspruch. */
+      const bereich = a.von != null
+        ? `km ${fmtKm(Math.min(a.von, a.bis))}–${fmtKm(Math.max(a.von, a.bis))}` +
+          (a.laenge ? ` · Bauwerk ${nfM.format(a.laenge)} m lang` : '')
+        : '';
+      // Manche Bahnübergänge heißen nur nach ihrem Kilometer („42.184", „km 173,113") — der steht schon im Titel
+      const bez = /^(km\s*)?[\d.,+\s]+$/i.test(a.bez || '') ? '' : a.bez;
+      warn = `<p class="bb-note"><strong>${esc(a.art)}</strong>` +
+        [bez, bereich, a.kreuzung, ...(a.details || [])].filter(Boolean).map(t => ' · ' + esc(t)).join('') +
+        `</p>` + warn;
+    }
+    if (p.tipp && p.daneben && p.daneben.length && p.daneben[0].dist - p.offset < 15) {
+      warn += `<p class="bb-note">Gleich daneben liegt Strecke ${esc(p.daneben[0].ref)} ` +
+        `(${nfM.format(p.daneben[0].dist)} m). Ist die gemeint, oben deren Nummer eingeben und noch einmal tippen.</p>`;
+    }
+  } else if (p.quality === 'exakt') {
     detail = `Direkt die Lage des erfassten Steins. Wie genau der in OpenStreetMap sitzt, ` +
       `lässt sich nicht nachprüfen — aus dem Vergleich benachbarter Steine auf geraden Abschnitten ` +
       `ergibt sich eine Streuung in der Größenordnung von 10 m.`;
@@ -8310,6 +8724,21 @@ async function search() {
       // Nur Strecke: Anfang der Strecke zeigen, damit man sich orientieren kann
       reihe = []; reiheAktiv = 0; reiheFehler = [];
       view.ref = ref;
+      const st = await ifgStrecke(ref).catch(() => null);
+      if (st) {
+        view.point = null;
+        drawPoint();
+        let s = 90, w = 180, n = -90, o = -180;
+        for (const g of st.abschnitte) {
+          s = Math.min(s, g.bb[0]); w = Math.min(w, g.bb[1]); n = Math.max(n, g.bb[2]); o = Math.max(o, g.bb[3]);
+        }
+        map.fitBounds([[s, w], [n, o]], { paddingTopLeft: [30, 90], paddingBottomRight: [30, 130] });
+        drawMilestones();
+        const [von, bis] = ifgBereich(st);
+        showStatus(`Strecke ${ref}: km ${fmtKm(von)} bis ${fmtKm(bis)} nach DB InfraGO. ` +
+          `Auf die Linie tippen setzt einen Punkt.`);
+        return;
+      }
       await coverage(ref, 0);
       const e = lineCache.get(ref);
       if (!e.sorted.length) { showError(`Für Strecke ${ref} sind keine Kilometersteine erfasst — Nummer prüfen.`); return; }
@@ -8736,8 +9165,13 @@ async function liveKmRechnen() {
     const versucht = new Set();
     let punkt = null, ref = '';
 
-    // Erst die klebende Strecke, dann die oben eingegebene
-    for (const kandidat of [liveRef, view.ref]) {
+    /* Zuerst InfraGO, ohne Netz, sobald die Strecken in Reichweite einmal
+     * geladen waren. Die klebende Strecke bleibt, solange sie in Reichweite ist. */
+    const ifg = await ifgKmAn(lat, lon, tol, [liveRef, view.ref], Infinity).catch(() => null);
+    if (ifg) { punkt = ifg.punkt; ref = ifg.ref; }
+
+    // Sonst die Steine: erst die klebende Strecke, dann die oben eingegebene
+    for (const kandidat of punkt ? [] : [liveRef, view.ref]) {
       if (!kandidat || versucht.has(kandidat)) continue;
       versucht.add(kandidat);
       punkt = await liveTreffer(kandidat, lat, lon, tol);
@@ -8842,8 +9276,9 @@ function liveKmFest() {
   applyPoint(liveKm.ref, liveKm.km, { ...liveKm.punkt });
   /* Und die Steine dazu holen, wie nach einem Tipp: Gerechnet wurde womöglich
    * auf Kachelpunkten, und die zeichnet drawMilestones nicht. Ein bewusster
-   * Griff darf das kosten — die laufende Anzeige dürfte es nicht. */
-  coverage(liveKm.ref, liveKm.km).then(drawMilestones).catch(() => { });
+   * Griff darf das kosten — die laufende Anzeige dürfte es nicht. Bei InfraGO
+   * zeichnet drawMilestones die Strecke selbst. */
+  if (liveKm.punkt.quality !== 'infrago') coverage(liveKm.ref, liveKm.km).then(drawMilestones).catch(() => { });
   toast(`km ${fmtKm(liveKm.km)} festgehalten — die Anzeige unten bleibt stehen.`);
 }
 
@@ -9716,18 +10151,35 @@ async function ortSuchen(text) {
 
   /* Beides zugleich: Die Betriebsstelle ist in dieser App meist das Gemeinte,
    * der Ort die Antwort darauf, wenn es keine gibt. */
-  const [stellen, orte] = await Promise.all([
+  const [ifgStellen, ormStellen, orte] = await Promise.all([
+    ifgStellenSuchen(text).catch(() => []),
     searchFacility(text).catch(() => []),
     searchOrt(text, sig).catch(() => [])
   ]);
   if (mein !== ortZaehler) return;   // inzwischen weitergetippt
 
+  /* Die Betriebsstellen der DB InfraGO zuerst: Sie liegen auf dem Gerät, tragen
+   * die Strecken mit Kilometer und kennen auch Abzweige und Blockstellen. Von
+   * der OpenRailwayMap kommt nur, was InfraGO nicht hat — gleiche DS100 oder
+   * derselbe Name in der Nähe ist dasselbe — und die UIC-Nummer dazu. */
+  const stellen = ifgStellen.map(s => {
+    const orm = ormStellen.find(f => (f.ds100 && f.ds100 === s.ds100) ||
+      (f.name === s.name && haversine(f.lat, f.lon, s.lat, s.lon) < 1000));
+    return orm && orm.uic ? { ...s, uic: orm.uic } : s;
+  });
+  for (const f of ormStellen) {
+    if (!stellen.some(s => (f.ds100 && f.ds100 === s.ds100) ||
+      (f.name === s.name && haversine(f.lat, f.lon, s.lat, s.lon) < 1000))) stellen.push(f);
+  }
+
   const treffer = [
     ...stellen.slice(0, 4).map(f => ({
       art: 'stelle', name: f.name, lat: f.lat, lon: f.lon, roh: f,
-      sub: [STELLE_ART[f.kind] || 'Betriebsstelle',
+      sub: [STELLE_ART[f.kind] || f.kind || 'Betriebsstelle',
             f.ds100 && 'DS100 ' + f.ds100,
-            f.uic && 'UIC ' + f.uic].filter(Boolean).join(' · ')
+            f.uic && 'UIC ' + f.uic,
+            f.strecken && f.strecken.length && 'Strecke ' + f.strecken.map(s => s.nr).join(', ')
+           ].filter(Boolean).join(' · ')
     })),
     ...orte
   ];
@@ -9880,6 +10332,11 @@ function syncButtons() {
     eigen.style.setProperty('--parz', istEigen ? parz : '');
     if (istEigen) $('#parzEigen').value = parz;
   }
+  document.querySelectorAll('[data-ifg]').forEach(b => {
+    const an = ifgInhaltAn(b.dataset.ifg);
+    b.classList.toggle('is-on', an);
+    b.setAttribute('aria-pressed', String(an));
+  });
   // Das Feld im Knopf: die Farbe, in der gerade gezeichnet wird — bei Auto je nach Grund
   const jetzt = $('.parz-jetzt');
   if (jetzt) jetzt.style.setProperty('--parz', parzFarbe());
@@ -10086,7 +10543,10 @@ function bind() {
     suchTextMerken();
     suchAuf();
     $('#q').focus();
-    openSuggest();
+    /* Leeren heißt leeren — nicht den Verlauf aufklappen. Der focus-Handler
+     * öffnet ihn, wenn das Feld den Fokus erst jetzt bekommt; deshalb danach
+     * schließen. Wer den Verlauf will, tippt ins leere Feld. */
+    closeSuggest();
   });
 
   /* Aufgeklappter Teil: bleibt offen, solange darin gearbeitet wird, und
@@ -10131,6 +10591,8 @@ function bind() {
   });
   parzKnopfBinden();
   buildParzRow();
+  ifgKnopfBinden();
+  ifgWahlBauen();
   on('#strBtn', 'click', () => toggleOverlay('str'));
   on('#ortBtn', 'click', () => toggleOverlay('ort'));
   on('#radarBtn', 'click', () => toggleOverlay('radar'));

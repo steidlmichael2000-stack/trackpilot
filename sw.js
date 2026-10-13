@@ -5,12 +5,13 @@
  * neue Version sofort ankommt statt hinter einem alten Cache zu hängen.
  */
 
-const VERSION = 'v47';
+const VERSION = 'v48';
 const SHELL = `trackpilot-shell-${VERSION}`;
 const TILES = `trackpilot-tiles-${VERSION}`;
 const DATA = `trackpilot-data-${VERSION}`;
 const NETZ = `trackpilot-netz-${VERSION}`;
-const KEEP = [SHELL, TILES, DATA, NETZ];
+const IFG = `trackpilot-infrago-${VERSION}`;
+const KEEP = [SHELL, TILES, DATA, NETZ, IFG];
 
 /* Die App hiess bis zur Umbenennung "Railnav" und lag unter /railnav/. Die
  * Caches von damals liegen auf derselben Herkunft und wuerden sonst ewig
@@ -19,6 +20,7 @@ const ALT_PRAEFIX = 'railnav-';
 
 const SHELL_FILES = [
   './', 'index.html', 'style.css', 'app.js', 'hoehen.js', 'pdf.js', 'gebaeude.js', 'tour.js', 'radar-werk.js',
+  'infrago.js',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/leaflet-rotate.js',
   // Mit ?v=lapis, genau wie index.html und das Manifest es anfordern: Der Cache
   // vergleicht die volle Adresse, ohne den Zusatz fände er offline nichts.
@@ -34,6 +36,12 @@ const MAX_TILES = 600;
  * Für die übrigen eigenen Dateien gilt bewusst das Gegenteil, aber bei 300
  * Kacheln wäre eine Netzabfrage je Kachel nur Wartezeit ohne Gewinn. */
 const MAX_NETZ = 500;
+
+/* Dasselbe für die InfraGO-Daten unter infrago/ (werkzeug/infrago-bauen.py):
+ * Index, Betriebsstellen, je Strecke eine Datei und für die Auflage je Strecke
+ * die Anlagen, zusammen rund 2900. Eigener Vorrat, damit sie nicht die
+ * Netzkacheln verdrängen. */
+const MAX_IFG = 3000;
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -157,6 +165,8 @@ self.addEventListener('fetch', event => {
     if (!url.pathname.startsWith(new URL(self.registration.scope).pathname)) return;
     event.respondWith(url.pathname.includes('/netz/')
       ? cacheFirst(request, NETZ, MAX_NETZ)
+      : url.pathname.includes('/infrago/')
+      ? cacheFirst(request, IFG, MAX_IFG)
       : networkFirst(request, SHELL, true));
   } else if (url.hostname === 'tiles.openfreemap.org') {
     /* Die dunkle Karte. Stil (/styles/dark) und Kachelbeschreibung (/planet)

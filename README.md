@@ -21,9 +21,17 @@ am Rechner und lässt sich als App auf den Startbildschirm legen.
   welchem Kilometer welcher Strecke man gerade steht — ohne Netz und ohne weiteres Zutun. Wer an
   der Strecke läuft, schaut also nur hin. Ein Tipp auf die Zahl oder ein zweiter auf den Punkt
   hält sie fest. Der Standortknopf allein rechnet nichts: Er zeigt, wo man steht, mehr nicht.
-- **Kilometersteine sind sichtbar.** Alle erfassten Steine der Strecke stehen beschriftet auf der
-  Karte, verbunden zu einer Linie. Man sieht also, worauf sich die Angabe stützt — und kann einen
-  Stein direkt antippen, statt zu interpolieren. Am gefundenen Punkt selbst steht der Kilometer
+- **Kilometrierung der DB InfraGO.** Für das Netz der DB InfraGO rechnet die App mit deren offenen
+  Infrastrukturdaten statt mit den OSM-Steinen — an Bahnübergängen nachgemessen typisch 2,5 m
+  statt 10 m daneben, und ohne Netz, sobald eine Strecke einmal geladen war (siehe unten). Die
+  Steine bleiben für alles, was InfraGO nicht kennt. Die Betriebsstellensuche kennt damit auch
+  Abzweige, Blockstellen und Überleitstellen und nennt die Strecken mit Kilometer. Als Auflage
+  **DB-Netz** zeigt sie das ganze Netz mit Nummern, Kilometern, Betriebsstellen, Bahnübergängen,
+  Brücken und Tunneln — was davon, wählt ein langer Druck auf den Knopf.
+- **Kilometer sind sichtbar.** Die Strecke steht als Linie mit beschrifteten Kilometern auf der
+  Karte — bei InfraGO-Strecken genau dort, wo die Suche sie hinlegt, sonst die erfassten Steine.
+  Man sieht also, worauf sich die Angabe stützt, und kann einen Punkt direkt antippen. Am
+  gefundenen Punkt selbst steht der Kilometer
   neben dem Pin, damit er auch ohne die untere Leiste und auf einem Bildschirmfoto ablesbar ist.
   Die beiden Linien, die die Rechnung belegen — der grüne Gleisweg und die blaue Verbindung durch
   die Steine —, lassen sich unter *Karte* abschalten, wenn sie im Weg sind; die Steine bleiben.
@@ -220,8 +228,95 @@ Fall ist eine einzelne Zahl. Der kennt aber weder `&` noch Leertaste. Für eine 
 Eingabe deshalb in die Suchzeile oben, die eine vollständige Tastatur hat:
 `5100 1,304 & 2,5 & 14+250`. Sie zerlegt das genauso in Strecke und Kilometer.
 
+## Kilometrierung nach DB InfraGO
+
+Seit Oktober 2026 rechnet die App zuerst mit den **Infrastrukturdaten der DB InfraGO** aus der
+[Mobilithek](https://mobilithek.info/) (Datenstand Mai 2026,
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de), Quellenvermerk „DB InfraGO"). Darin ist jede Strecke in Abschnitte mit Kilometer von/bis zerlegt, im Median
+0,86 km lang, mit einer Linie, die auf die Kilometrierung abgestimmt ist: Ihre Länge weicht im
+Median 0,1 m von der Kilometerdifferenz ab, Kilometersprünge sind Abschnittsgrenzen. Ein Kilometer
+wird deshalb einfach anteilig auf der Linie abgetragen, und umgekehrt wird der Anteil des
+Lotfußpunkts als Kilometer gelesen (`infrago.js`).
+
+**Gemessen, nicht geglaubt.** Wie genau das ist, wurde an Bahnübergängen geprüft: In OpenStreetMap
+liegt ein Bahnübergang dort, wo Straße und Gleis sich kreuzen — unabhängig von jeder
+Kilometrierung. InfraGO nennt für dieselben Übergänge den Kilometer. An 6271 eindeutig
+zuzuordnenden Übergängen:
+
+| km → Lage über … | Median | 90. Perzentil | ≤ 5 m | ≤ 10 m |
+| --- | --- | --- | --- | --- |
+| die InfraGO-Linie | 2,5 m | 6,3 m | 84 % | 96 % |
+| zwei OSM-Steine (≤ 400 m auseinander, 1438 Fälle) | 9,9 m | 44 m | 37 % | 50 % |
+
+Im direkten Vergleich lag InfraGO in drei von vier Fällen näher. Die Marke am Ergebnis zeigt
+deshalb ±6 m, beim Live-Kilometer kommt die Ortungsgenauigkeit dazu.
+
+**Welches Gleis.** Eingleisige Abschnitte sind als Streckenachse erfasst, zweigleisige als
+Richtungs- und Gegenrichtungsgleis, beide je für sich kilometriert. Meist lesen sie sich am selben
+Querschnitt auf Zentimeter gleich — aber nicht überall: Auf Strecke 1902 bei km 5,8 liegen beide
+auf derselben Linie und unterscheiden sich um 1153 m, im Rundlauf über alle Strecken traf das 15
+von 64 053 Stellen. An Bahnübergängen gemessen liegt das Richtungsgleis besser (ungünstiges
+Hundertstel 28 m gegen 38 m). Gerechnet wird deshalb in beiden Richtungen an Achse bzw.
+Richtungsgleis; das Gegengleis zählt nur, wo es mehr als 8 m daneben allein verläuft.
+
+**Ein Kilometer an zwei Stellen.** An Kilometersprüngen mit Überlänge kommt derselbe Wert auf
+einer Strecke zweimal vor. Dann zeigt die App die erste Stelle und sagt in der Leiste, wie weit
+die zweite entfernt ist.
+
+**Ohne Netz.** Die Daten liegen unter `infrago/`: ein Index (welche Strecken in welcher
+0,1-Grad-Zelle liegen, 64 kB), je Strecke eine Datei (zusammen 3 MB) und die Betriebsstellen
+(0,9 MB). Geladen wird nur, was gebraucht wird; der Service Worker legt es in einen eigenen Vorrat
+(`trackpilot-infrago-…`). Eine Strecke, die einmal gesucht oder angetippt war, geht danach ohne
+Netz. Scheitert ein Abruf, fragt die App dieselbe Datei erst nach einer Minute wieder — die
+Live-Anzeige rechnet im Sekundentakt.
+
+**Was bleibt bei den Steinen.** Strecken, die InfraGO nicht führt (andere Betreiber, Werks- und
+Straßenbahnen, Ausland), und Kilometer außerhalb der InfraGO-Abschnitte. Dort gilt alles, was in
+den folgenden Abschnitten über die OSM-Steine steht.
+
+**Als Kartenauflage.** Unter *Karte → Auflagen* schaltet **DB-Netz** das ganze InfraGO-Netz im
+Ausschnitt ein. Lange drücken oder Rechtsklick auf den Knopf öffnet die Auswahl, was gezeigt wird —
+jedes einzeln:
+
+| Inhalt | ab Zoom | Antippen |
+| --- | --- | --- |
+| Strecken mit Nummer | 10 | — (ein kurzer Tipp liest bewusst nichts ab) |
+| Betriebsstellen, ab 13 mit DS100, ab 15 mit Namen | 12 | Betriebsstelle mit Strecken und km |
+| Tunnel (gestricheltes Band) | 12 | km an der Stelle, mit Name und Bereich |
+| Bahnübergänge (Andreaskreuz) | 14 | km des Übergangs, Sicherung, Straßenart |
+| Kilometer auf allen Strecken | 15 | genau dieser km |
+| Brücken (dunkles Band) | 15 | km an der Stelle, mit Bauwerk und Kreuzungsart |
+
+Ein Tipp auf eine Anlage ist ein Ergebnis wie jedes andere — mit Profil am Gleis, Google Maps und
+Teilen. Beim Messen und im Profil ist sie nur ein Fangpunkt. Bei Brücke und Tunnel gilt der
+Kilometer an der getippten Stelle, sofern er im Bereich der Anlage liegt; sonst ihre Mitte (an 15
+von 240 geprüften Brücken lag die Linienmitte auf einem Nachbargleis mit anderem km). „Bauwerk …
+m lang" ist die Länge des Bauwerks aus den Daten, nicht die Spanne am Gleis — ein
+Überwerfungsbauwerk an 5100 kreuzt auf 104 m Gleis und ist 430 m lang.
+
+Die Anlagen liegen je Strecke unter `infrago/o/` (zusammen 4,4 MB: 12 193 Bahnübergänge, 27 367
+Brücken, 694 Tunnel) und werden nur geladen, wo die Auflage sie zeigt. Gezeichnet wird auf Canvas;
+Streckennummern und Kilometer, deren Schild ein anderes träfe, lässt die Auflage weg (der Punkt
+bleibt). Auf der dunklen Karte ist die Linie hell. Gemessen beim ersten Laden ohne Vorrat:
+Ruhrgebiet bei Zoom 10 rund 1,7 s, danach unter 50 ms je Verschieben.
+
+**Neu erzeugen**, wenn ein neuer Datenstand erscheint: das GeoPackage aus der Mobilithek laden und
+
+```bash
+python werkzeug/infrago-bauen.py Pfad/zu/Infrastrukturdaten.gpkg
+node werkzeug/infrago-pruefen.mjs
+```
+
+Das Werkzeug prüft vorab die Umrechnung UTM → Grad gegen die Gradspalten der Datei (schlechtester
+Punkt 1 mm) und schreibt jeden achten Bahnübergang als Prüffall nach
+`werkzeug/infrago-probe.json`. Die Prüfung rechnet auf allen Strecken km → Lage → km (schlechtester
+Fall 0,5 mm), legt die Bahnübergänge auf die Linie (Median 0,3 m gegen den Punkt, den InfraGO selbst
+angibt) und probiert Ränder und die Betriebsstellensuche. Danach `VERSION` in `sw.js` hochzählen,
+sonst behalten installierte Apps den alten Stand.
+
 ## Wie genau ist das?
 
+Für die Strecken der DB InfraGO steht es im Abschnitt darüber. Für alle anderen gilt:
 Die Positionen stammen aus den in [OpenStreetMap](https://www.openstreetmap.org/) erfassten
 Kilometersteinen (`railway=milestone`), abgefragt über die
 [OpenRailwayMap-API v2](https://wiki.openstreetmap.org/wiki/OpenRailwayMap/API). Liegt für den
@@ -1394,8 +1489,9 @@ außerhalb des erzeugten Gebiets muss [Overpass](https://overpass-api.de/) ran �
 Sekunden und ist aus manchen Netzen gesperrt. An Knotenbahnhöfen liegen mehrere Strecken
 nebeneinander; dann fragt die App nach, sortiert nach Abstand zum Tippen.
 
-Die Kilometrierung selbst kommt weiter von der OpenRailwayMap-API — ohne Netz lässt sich zu einer
-neuen Strecke also kein Kilometer bestimmen, auch wenn ihr Verlauf mitgeliefert ist.
+Auf Strecken der DB InfraGO geht beides ohne Netz, sobald die Strecke einmal geladen war. Für
+alle anderen kommt die Kilometrierung weiter von der OpenRailwayMap-API — ohne Netz lässt sich zu
+einer neuen Strecke dort also kein Kilometer bestimmen, auch wenn ihr Verlauf mitgeliefert ist.
 
 ## Selbst betreiben
 
@@ -1420,6 +1516,11 @@ drehen —, und das steht unter GPL-3.0. Weil GPL Copyleft ist, lässt sich ein 
 enthält, nicht unter MIT weitergeben; das ganze Projekt folgt deshalb der GPL-3.0. Praktisch heißt
 das: Nutzen, ändern und weitergeben ist frei, wer es weitergibt muss den Quellcode ebenfalls unter
 GPL-3.0 offenhalten.
+
+Kilometrierung und Betriebsstellen unter `infrago/`: DB InfraGO, Infrastrukturdaten aus der
+[Mobilithek](https://mobilithek.info/),
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de) — für die App umgerechnet,
+vereinfacht (0,5 m) und je Strecke aufgeteilt.
 
 Karten- und Bahndaten: © OpenStreetMap-Mitwirkende
 ([ODbL](https://www.openstreetmap.org/copyright)) — das schließt die mitgelieferten Netzkacheln

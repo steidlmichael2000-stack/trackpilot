@@ -806,6 +806,11 @@ body {
   border: 1px solid var(--muted-2); background: var(--parz, #000);
 }
 .parz-pal { gap: 6px; }
+/* DB-Netz: drei Striche vor dem Wort, gleich groß wie das Farbfeld der Parzellen */
+.ifg-wahl-zeichen {
+  display: inline-block; width: 10px; height: 9px; margin-right: 7px;
+  stroke: currentColor; stroke-width: 1.4; fill: none;
+}
 /* Zwischen zwei Knopfreihen oben und unten je 10 px. Unten fällt der Rand mit
    den 7 px der nächsten Reihe zusammen — es gilt der größere, nicht die Summe. */
 .parz-wahl { margin-bottom: 10px; }
@@ -1544,11 +1549,38 @@ body {
   pointer-events: none;
 }
 
+/* Auflage DB-Netz. Streckennummer als kleines Schild mit harter Kante, dunkel
+   auf hell wie die Linie; Kilometer etwas kleiner als die der gesuchten Strecke. */
+.ifg-nr {
+  display: block; transform: translate(-50%, -50%);
+  padding: 1px 4px; border: 1px solid #1d2733; border-radius: 2px;
+  background: #ffffff; color: #1d2733;
+  font-size: .66rem; font-weight: 700; line-height: 1.25;
+  font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none;
+}
+.ifg-km { font-size: .62rem; font-weight: 600; }
+/* Betriebsstelle: 12 px Quadrat, die Schrift rechts daneben mittig auf seiner Höhe */
+.ifg-bs {
+  display: block; width: 12px; height: 12px;
+  background: #ffffff; border: 2.5px solid #1d2733; cursor: pointer;
+}
+.ifg-bs-text {
+  position: absolute; left: 16px; top: 6px; transform: translateY(-50%);
+  font-size: .68rem; font-weight: 600; line-height: 1; color: var(--text); white-space: nowrap;
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
+  pointer-events: none;
+}
+.ifg-bs-text b { font-weight: 750; }
+.ifg-bue { display: block; cursor: pointer; }
+
 .pin {
   width: 26px; height: 26px;
   display: grid; place-items: center;
+  /* Die Spitze ist die spitze Ecke unten links; −45° dreht sie nach unten.
+     Mit +45° zeigte sie nach links und saß 18 px links, 11 px über der Stelle.
+     Der Anker in pinZeichnen (13, 31) liegt genau auf ihr. */
   border-radius: 50% 50% 50% 2px;
-  transform: rotate(45deg);
+  transform: rotate(-45deg);
   background: var(--accent);
   border: 2.5px solid #fff;
   box-shadow: 0 3px 8px rgba(0, 0, 0, .5);
