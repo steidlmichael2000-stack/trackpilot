@@ -124,6 +124,10 @@ ist, steht die dunkle Karte unverändert.
     Dienstes weicht vom angefragten Rahmen ab — **immer die Lage aus dem TIFF nehmen**.
   - Bewegungsschätzung **ohne Strafe für weite Wege**: schon 0,0002 je Zelle und d² verfälschte eine
     Verschiebung von (4, −3) zu (3,74, −2,64). Nach Änderungen `node werkzeug/radar-pruefen.mjs`.
+  - **Aussehen gewählt am 13.10.2026:** DWD-Farben, Fläche 45 % (`RADAR_FLAECHE`), an **jeder**
+    der 15 Stufengrenzen eine Linie (Farbe der höheren Stufe, × `RADAR_LINIE_TON`, auf
+    `RADAR_GRUND_DUNKEL` unverdunkelt). Verworfen: eigene Blaupalette, Linien nur an Hauptstufen.
+    `setBase` zeichnet das Radar neu, weil der Linienton am Grund hängt.
   - Braucht WebGL2 (wie MapLibre). `maps.dwd.de` bleibt aus dem Service Worker draußen,
     `radar-werk.js` steht in `SHELL_FILES`.
   - Beim Prüfen im Testbrowser: Ist das Fenster verdeckt, läuft kein `requestAnimationFrame` —

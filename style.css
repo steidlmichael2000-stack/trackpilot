@@ -589,8 +589,10 @@ body {
 /* Farbskala in mm/h — die Stufen des Dienstes, je ein gleich breites Feld */
 .radar-legende { display: flex; align-items: flex-end; gap: 6px; margin-top: 5px; }
 .radar-skala { flex: 1; min-width: 0; }
+/* Volle Farben, obwohl die Fläche auf der Karte nur 45 % deckt: Auf dem dunklen
+   Grund der Leiste wurden die Stufen mit 45 % trüb und kaum unterscheidbar. */
 .radar-stufen { display: flex; height: 6px; }
-.radar-stufen i { flex: 1; }
+.radar-stufen i { flex: 1; background: var(--f); }
 .radar-werte { position: relative; height: 12px; margin-top: 2px; }
 .radar-werte span, .radar-einheit {
   font-size: .6rem; line-height: 12px; color: var(--muted); font-variant-numeric: tabular-nums;

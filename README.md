@@ -1067,7 +1067,12 @@ geschätzten Bewegung von 24,3 auf 15,6.
 Anteil der Bewegung vorgeschoben, B um den Rest zurück, beide gemischt und **erst danach**
 eingefärbt — so bleiben die Stufen scharf abgesetzt, statt zu verschwimmen. Zwischen den Zellen
 bilinear, wie zuvor `INTERPOLATIONS=bilinear` beim WMS; *bicubic* schwingt über und erfindet kleine
-Inseln. Die Kanten der Stufen sind einen Bildpunkt breit geglättet. Gemessen 2,6 ms je Bild bei
+Inseln. Die Flächen decken nur zu 45 %, dafür trägt **jede Stufengrenze eine Linie**, einen
+Bildschirmpixel breit, in der Farbe der höheren Stufe — abgedunkelt auf Karte und Relief,
+unverdunkelt auf Dunkel und den Luftbildern, wo dunkle Linien im Wald untergingen. So bleiben die
+gewohnten DWD-Farben, und das Radar bekommt trotzdem harte Kanten; Luftbild und Gleise scheinen
+besser durch als bei den früheren 70 %. Die Legende in der Leiste zeigt die vollen Farben: mit 45 %
+wurden die Stufen auf dem dunklen Leistengrund trüb. Gemessen 2,6 ms je Bild bei
 1920 × 1200 Bildpunkten; die Fläche ist auf 4 Millionen Bildpunkte begrenzt.
 
 Weitere Punkte, die nicht offensichtlich sind:

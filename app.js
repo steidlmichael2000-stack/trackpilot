@@ -2796,6 +2796,7 @@ function setBase(which, still = false) {
   parzFarbeAnpassen();
   applyBaseOpacity();
   ordneAuflagen();
+  radarZeichnen();      // die Konturen des Radars hängen am Grund (RADAR_LINIE_TON)
   saveStore();
   syncButtons();
 }
@@ -3073,7 +3074,14 @@ const RADAR_VOR = 120;         // Minuten Vorhersage — so weit rechnet der DWD
 const RADAR_SCHRITT = 5 * 60000;
 const RADAR_TEMPO = 20;        // Minuten je Sekunde beim Abspielen
 const RADAR_HALT = 1500;       // ms am Ende stehen, dann von vorn
-const RADAR_DECKUNG = 0.7;
+/* Flächen leise, jede Stufengrenze als Linie (gewählt 13.10.2026, statt 70 %
+ * deckend ohne Linien): Die DWD-Farben bleiben wie in WarnWetter, die Linien
+ * geben der Fläche die Kanten. Die Linie trägt die Farbe der höheren Stufe,
+ * abgedunkelt — auf dunklem Grund unverändert: Auf Dunkel und auf den Luftbildern
+ * gingen abgedunkelte Linien im Wald unter. */
+const RADAR_FLAECHE = 0.45;
+const RADAR_LINIE_TON = 0.62;
+const RADAR_GRUND_DUNKEL = new Set(['dark', 'sat', 'dop']);
 const RADAR_FRISCH = 5 * 60000;
 const RADAR_RASTER = 400;      // Zellen je Richtung höchstens
 const RADAR_ZELLE = 1464;      // Mercator-Meter je Zelle in voller Auflösung (im Süden; im Norden mehr)
@@ -3120,9 +3128,10 @@ function radarSicht() {
 }
 
 /* Shader: Bildpunkt → Rasterzelle (uGs, uGo), Bewegung an dieser Stelle holen,
- * A ein Stück vor, B ein Stück zurück, mischen, in mm/h einfärben. Die Kanten
- * der Stufen über fwidth geglättet: einen Bildpunkt breit, nicht treppig. Die
- * Ausgabe ist vormultipliert — eine leere Stufe ist vec4(0). */
+ * A ein Stück vor, B ein Stück zurück, mischen, in mm/h einfärben. Abstand zur
+ * nächsten Stufengrenze in Bildpunkten über fwidth: daraus die geglättete
+ * Kante der Fläche und die Kontur, uBreite Bildpunkte breit (ein CSS-Pixel)
+ * mittig auf der Grenze. Die Ausgabe ist vormultipliert — keine Stufe ist vec4(0). */
 const RADAR_VS = `#version 300 es
 in vec2 aPos;
 out vec2 vUv;
@@ -3137,7 +3146,7 @@ precision highp float;
 in vec2 vUv;
 uniform sampler2D uA, uB, uFluss;
 uniform vec2 uGs, uGo, uN, uFn;
-uniform float uS, uT, uMitFluss;
+uniform float uS, uT, uMitFluss, uFlaeche, uLinieTon, uBreite;
 uniform float uStufe[N];
 uniform vec3 uFarbe[N];
 out vec4 farbe;
@@ -3146,7 +3155,8 @@ float wert(sampler2D t, vec2 g) {
   if (g.x < 0.0 || g.y < 0.0 || g.x > uN.x || g.y > uN.y) return 0.0;
   return texture(t, g / uN).r;
 }
-vec4 stufe(int k) { return k <= 0 ? vec4(0.0) : vec4(uFarbe[k - 1], 1.0); }
+vec4 flaeche(int k) { return k <= 0 ? vec4(0.0) : vec4(uFarbe[k - 1], 1.0) * uFlaeche; }
+vec4 linie(int k) { return vec4(uFarbe[k - 1] * uLinieTon, 1.0); }
 
 void main() {
   vec2 g = vUv * uGs + uGo;
@@ -3159,9 +3169,12 @@ void main() {
   for (int i = 0; i < N; i++) if (w >= uStufe[i]) k = i + 1;
   float unten = k > 0 ? (w - uStufe[k - 1]) / d : 1e9;
   float oben = k < N ? (uStufe[k] - w) / d : 1e9;
-  vec4 c = stufe(k);
-  if (unten < oben) c = mix(stufe(k - 1), c, clamp(0.5 + unten, 0.0, 1.0));
-  else c = mix(stufe(k + 1), c, clamp(0.5 + oben, 0.0, 1.0));
+  vec4 c = flaeche(k);
+  float abstand;
+  int hoeher;
+  if (unten < oben) { c = mix(flaeche(k - 1), c, clamp(0.5 + unten, 0.0, 1.0)); abstand = unten; hoeher = k; }
+  else { c = mix(flaeche(k + 1), c, clamp(0.5 + oben, 0.0, 1.0)); abstand = oben; hoeher = k + 1; }
+  if (hoeher >= 1 && hoeher <= N) c = mix(c, linie(hoeher), clamp(0.5 * uBreite + 0.5 - abstand, 0.0, 1.0));
   farbe = c;
 }`;
 
@@ -3189,7 +3202,8 @@ function radarGlAnlegen(el) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   const ort = {};
-  for (const n of ['uA', 'uB', 'uFluss', 'uGs', 'uGo', 'uN', 'uFn', 'uS', 'uT', 'uMitFluss', 'uStufe', 'uFarbe']) {
+  for (const n of ['uA', 'uB', 'uFluss', 'uGs', 'uGo', 'uN', 'uFn', 'uS', 'uT', 'uMitFluss', 'uStufe', 'uFarbe',
+    'uFlaeche', 'uLinieTon', 'uBreite']) {
     ort[n] = gl.getUniformLocation(prog, n);
   }
   gl.uniform1i(ort.uA, 0);
@@ -3197,6 +3211,7 @@ function radarGlAnlegen(el) {
   gl.uniform1i(ort.uFluss, 2);
   gl.uniform1fv(ort.uStufe, RADAR_STUFEN.map(([, v]) => v));
   gl.uniform3fv(ort.uFarbe, RADAR_STUFEN.flatMap(([f]) => hexRgb(f).map(c => c / 255)));
+  gl.uniform1f(ort.uFlaeche, RADAR_FLAECHE);
   const g = { gl, ort, max: Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), ...gl.getParameter(gl.MAX_VIEWPORT_DIMS)) };
   radarGl = g;
   g.ohneFluss = radarTextur(1, 1, true, new Float32Array(2));
@@ -3242,7 +3257,6 @@ const RadarSchicht = L.Layer.extend({
     if (!this._el) {
       const el = this._el = L.DomUtil.create('canvas', 'leaflet-layer radar-flaeche');
       if (m._zoomAnimated) el.classList.add('leaflet-zoom-animated');
-      el.style.opacity = RADAR_DECKUNG;
       el.style.zIndex = 1;
       el.addEventListener('webglcontextlost', e => { e.preventDefault(); radarGlVerloren(); });
       el.addEventListener('webglcontextrestored', radarGlWieder);
@@ -3319,7 +3333,7 @@ const RadarSchicht = L.Layer.extend({
     el.height = Math.max(1, Math.round(hoehe * pr));
     el.style.width = breite + 'px';
     el.style.height = hoehe + 'px';
-    this._rahmen = { z, m: mm, nwPx };
+    this._rahmen = { z, m: mm, nwPx, pr: el.width / breite };
     this._lage();
     radarZeichnenJetzt();      // gleich, sonst steht die frisch geleerte Fläche ein Bild lang leer
   }
@@ -3536,6 +3550,8 @@ function radarZeichnenJetzt() {
   gl.uniform2f(o.uN, geo.w, geo.h);
   gl.uniform1f(o.uT, f);
   gl.uniform1f(o.uMitFluss, fl ? 1 : 0);
+  gl.uniform1f(o.uBreite, r.pr);
+  gl.uniform1f(o.uLinieTon, RADAR_GRUND_DUNKEL.has(prefs.base) ? 1 : RADAR_LINIE_TON);
   if (fl) { gl.uniform2f(o.uFn, fl.fw, fl.fh); gl.uniform1f(o.uS, fl.s); }
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, a);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, b);
@@ -3716,7 +3732,7 @@ function radarLegende() {
   // Beschriftet nur jede zweite bis dritte Stufe, linksbündig an ihrem Anfang: „ab 0,1"
   const zeigen = new Set([0.1, 1, 5, 15, 45, 150]);
   box.innerHTML = `<div class="radar-skala">` +
-    `<div class="radar-stufen">${RADAR_STUFEN.map(([f]) => `<i style="background:${f}"></i>`).join('')}</div>` +
+    `<div class="radar-stufen">${RADAR_STUFEN.map(([f]) => `<i style="--f:${f}"></i>`).join('')}</div>` +
     `<div class="radar-werte">${RADAR_STUFEN.map(([, v], i) => zeigen.has(v)
       ? `<span style="left:${(i / n * 100).toFixed(3)}%">${String(v).replace('.', ',')}</span>` : '').join('')}</div>` +
     `</div><span class="radar-einheit">mm/h</span>`;
