@@ -17,12 +17,13 @@ async function referenz() {
   return Date.parse(m[1]);
 }
 
-async function bild(t, [x0, y0, x1, y1]) {
-  const iso = new Date(t).toISOString().replace('.000Z', 'Z');
+const iso = t => new Date(t).toISOString().replace('.000Z', 'Z');
+async function bild(t, [x0, y0, x1, y1], gr = null, lauf = null) {
   const url = `${WCS}?service=WCS&version=2.0.1&request=GetCoverage&coverageId=dwd__Niederschlagsradar` +
     `&format=image/tiff&geotiff:compression=Deflate&subsettingCrs=${CRS}&outputCrs=${CRS}` +
-    `&subset=X(${x0},${x1})&subset=Y(${y0},${y1})&subset=time("${iso}")`;
-  const r = await fetch(url);
+    `&subset=X(${x0},${x1})&subset=Y(${y0},${y1})&subset=time("${iso(t)}")` +
+    (lauf ? `&subset=REFERENCE_TIME("${iso(lauf)}")` : '') + (gr ? `&scalesize=i(${gr[0]}),j(${gr[1]})` : '');
+  const r = await fetch(url, { cache: 'no-store' });
   if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 300));
   return tiffLesen(await r.arrayBuffer());
 }
@@ -107,6 +108,35 @@ const [mvx, mvy] = [median(Array.from({ length: g.fw * g.fh }, (_, k) => g.fluss
 console.log(`        Zug im Mittel (${mvx.toFixed(2)}, ${mvy.toFixed(2)}) Zellen je 5 min, ` +
   `rund ${(Math.hypot(mvx, mvy) * a.dx * Math.cos(Math.atan(Math.sinh(my / 6378137))) / 1000 * 12).toFixed(0)} km/h`);
 ok(mit <= ohne * 1.001, `Abweichung zu B: verschoben ${mit.toFixed(1)}, unverschoben ${ohne.toFixed(1)} (${ms2.toFixed(0)} ms)`);
+
+// 4. Vorhersage mit Lauf: zwei verschiedene Ausschnitte, derselbe Regen an derselben Stelle.
+//    Ohne REFERENCE_TIME kam am 13.10.2026 je nach Ausschnitt ein anderer Lauf.
+const vt = ref + 20 * 60000;
+const gross = [Math.round(mx - 2.5 * halb), Math.round(my - 2.5 * halb), Math.round(mx + 2.5 * halb), Math.round(my + 2.5 * halb)];
+const v1 = await bild(vt, bereich, null, ref), v2 = await bild(vt, gross, [400, 400], ref);
+const schwer = g => {
+  let s = 0, sx = 0, sy = 0;
+  for (let j = 0; j < g.h; j++) for (let i = 0; i < g.w; i++) {
+    const x = g.x0 + (i + 0.5) * g.dx, y = g.yOben - (j + 0.5) * g.dy;
+    if (x < bereich[0] || x > bereich[2] || y < bereich[1] || y > bereich[3]) continue;
+    const v = g.werte[j * g.w + i] * g.dx * g.dy; s += v; sx += v * x; sy += v * y;
+  }
+  return s > 0 ? [sx / s, sy / s, s] : null;
+};
+const s1 = schwer(v1), s2 = schwer(v2);
+// Zum Vergleich die Messung in denselben Ausschnitten: so weit liegen die Schwerpunkte
+// allein wegen der Verkleinerung auseinander
+const m1 = schwer(b), m2 = schwer(await bild(ref, gross, [400, 400]));
+const dMess = m1 && m2 ? Math.hypot(m1[0] - m2[0], m1[1] - m2[1]) : 0;
+if (s1 && s2) {
+  const d = Math.hypot(s1[0] - s2[0], s1[1] - s2[1]);
+  // Mit dem falschen Lauf waren es 22 km
+  ok(d < dMess + v2.dx && Math.abs(s1[2] / s2[2] - 1) < 0.1,
+    `Vorhersage +20 min, voll gegen verkleinert: Schwerpunkt ${(d / 1000).toFixed(1)} km auseinander ` +
+    `(Messung ${(dMess / 1000).toFixed(1)} km), Menge ${(s1[2] / s2[2] * 100).toFixed(0)} %`);
+} else {
+  console.log('—       Vorhersage ohne Regen im Ausschnitt, Lagevergleich übersprungen');
+}
 
 console.log(fehler ? `\n${fehler} Fehler` : '\nalles ok');
 process.exit(fehler ? 1 : 0);

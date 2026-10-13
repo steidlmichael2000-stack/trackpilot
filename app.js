@@ -3087,7 +3087,7 @@ const RADAR_CRS = 'http://www.opengis.net/def/crs/EPSG/0/3857';
 const RADAR_ZURUECK = 60;      // Minuten Messung vor der letzten
 const RADAR_VOR = 120;         // Minuten Vorhersage — so weit rechnet der DWD
 const RADAR_SCHRITT = 5 * 60000;
-const RADAR_TEMPO = 20;        // Minuten je Sekunde beim Abspielen
+const RADAR_TEMPO = 12;        // Minuten je Sekunde beim Abspielen: 3 Stunden in 15 s (mit 20 zu schnell)
 const RADAR_HALT = 1500;       // ms am Ende stehen, dann von vorn
 /* Flächen leise, jede Stufengrenze als Linie (gewählt 13.10.2026, statt 70 %
  * deckend ohne Linien): Die DWD-Farben bleiben wie in WarnWetter, die Linien
@@ -3446,11 +3446,17 @@ function radarLaden() {
   while (satz.offen.size < RADAR_GLEICHZEITIG && fehlt.length) radarBildHolen(satz, fehlt.shift());
 }
 
-function radarUrl(satz, t) {
+/* Vorhersagen immer mit ihrem Lauf (REFERENCE_TIME). Ohne ihn wählt der WCS
+ * unter den Läufen, die den Zeitpunkt abdecken, je nach Ausschnitt einen
+ * anderen: Am 13.10.2026 kam für 13:20 bei einem Ausschnitt der neueste Lauf,
+ * beim nächsten einer von vor einer Stunde — das Regenband sprang nach dem
+ * Verschieben 22 km nach Osten. Messungen sind eindeutig, dort ohne. */
+function radarUrl(satz, t, ref) {
   const b = satz.bereich;
   return `${RADAR_WCS}?service=WCS&version=2.0.1&request=GetCoverage&coverageId=dwd__Niederschlagsradar` +
     `&format=image/tiff&geotiff:compression=Deflate&subsettingCrs=${RADAR_CRS}&outputCrs=${RADAR_CRS}` +
     `&subset=X(${b.x0},${b.x1})&subset=Y(${b.y0},${b.y1})&subset=time("${radarIso(t)}")` +
+    (t > ref ? `&subset=REFERENCE_TIME("${radarIso(ref)}")` : '') +
     (satz.groesse ? `&scalesize=i(${satz.groesse[0]}),j(${satz.groesse[1]})` : '');
 }
 
@@ -3460,7 +3466,7 @@ async function radarBildHolen(satz, t) {
   satz.offen.add(t);
   const ref = radarRef;
   try {
-    const r = await fetch(radarUrl(satz, t), { cache: t > ref ? 'no-store' : 'default' });
+    const r = await fetch(radarUrl(satz, t, ref), { cache: t > ref ? 'no-store' : 'default' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     if (!/tiff/.test(r.headers.get('content-type') || '')) throw new Error('keine TIFF-Antwort');
     const puffer = await r.arrayBuffer();

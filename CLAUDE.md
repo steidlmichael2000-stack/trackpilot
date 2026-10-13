@@ -117,6 +117,9 @@ ist, steht die dunkle Karte unverändert.
   zurückbauen — WarnWetter verschiebt (Video vom 11.10.2026, scharfe Kanten, keine Doppelkontur).
   - Zeitachse zuerst, dann die Ebene; Zeitpunkte immer mit `TIME`. Vorhersagen ohne Cache holen und
     nach einer neuen Messung verwerfen (`radarAchseNeu`, im Worker `stand`).
+  - **Vorhersagen immer mit `subset=REFERENCE_TIME(…)`** (`radarUrl`). Ohne nimmt der WCS je nach
+    Ausschnitt einen anderen Lauf — am 13.10.2026 sprang das Band nach dem Verschieben 22 km.
+    Prüfung 4 in `radar-pruefen.mjs`.
   - Die Zeichenfläche (`RadarSchicht`) liegt in der **tilePane** und sortiert sich per z-index wie die
     Kachelebenen (`ordneAuflagen`); die Lage rechnet sie wie `GridLayer._setZoomTransform`. Gemessen
     0 px Versatz nach Schieben und Zoomen, < 0,6 px gedreht.
