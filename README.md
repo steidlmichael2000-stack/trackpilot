@@ -1128,8 +1128,14 @@ Das LGL bietet auch einen WCS mit offener CORS-Freigabe an; der lieferte am 13.1
 Die gibt es nur ohne CORS, also wie in Bayern über den Worker (`/bw/dgm1/{O}_{N}.zip`). Der Server
 nimmt Teilabfragen an: Die App holt erst das Verzeichnis am Ende des Archivs (64 kB), dann nur die
 Datei des einen Kilometers, entpackt sie im Browser (`DecompressionStream`) und liest den Text.
-Gemessen bei Stuttgart: 3,2 MB in 1,5 s, eingelesen in 0,26 s (Node), im Browser alles zusammen
-0,7 s. Im Gerätespeicher liegen danach die Werte (4 MB), nicht der Text.
+Im Gerätespeicher liegen danach die Werte (4 MB), nicht der Text.
+
+**Der Server des LGL drosselt jede einzelne Verbindung.** Am Stück kamen 3 MB über den Worker im
+Browser erst nach 6–9 s, einmal 18 s (rund 170–450 kB/s), über dieselbe Strecke aus Bayern in
+0,4–0,6 s. Die App holt den Kilometer deshalb in Stücken zu 384 kB, bis zu acht gleichzeitig. Über
+den echten Worker gemessen, je ein neuer Kilometer samt Verzeichnis, Entpacken und Lesen:
+Heidelberg 1,9 s, Karlsruhe 1,4 s, Reutlingen 1,8 s. Der allererste Abruf nach längerer Pause kann
+einige Sekunden länger dauern, bis der Worker wach ist.
 
 Ein Stück für die *Höhe am Punkt* geht aus einem gepackten Archiv nicht; dort kommt der ganze
 Kilometer. Oberfläche (DOM1) und Gebäude (LoD2) des LGL liegen nach demselben Muster bereit, der

@@ -374,16 +374,29 @@ function zipVerzeichnis(url) {
   return v;
 }
 
-/** Ein Eintrag, entpackt. Kopf und Daten in einer Abfrage: Das Zusatzfeld im
+/* Der Server des LGL drosselt jede einzelne Verbindung: Am 13.10.2026 kamen
+ * 3 MB über den Worker im Browser am Stück in 6–9 s, in 8 Stücken parallel in
+ * 2,2 s (aus PowerShell mal 0,8 s, mal 11 s). Deshalb in Stücken. */
+const LGL_STUECK = 384 * 1024, LGL_PARALLEL = 8;
+
+/** Ein Eintrag, entpackt. Kopf und Daten in einem Bereich: Das Zusatzfeld im
  *  lokalen Kopf kann länger sein als im Verzeichnis, 1 kB Luft reicht dafür. */
 async function zipEintrag(url, e) {
-  const roh = await hoehenHolen(url, e.ort, 30 + 1024 + e.gepackt);
-  if (!roh) throw new Error('Höhendaten: ZIP-Datei verschwunden');
+  const laenge = 30 + 1024 + e.gepackt;
+  const roh = new Uint8Array(laenge);
+  const stuecke = Array.from({ length: Math.ceil(laenge / LGL_STUECK) }, (_, i) => i * LGL_STUECK);
+  let ende = laenge;      // am Dateiende liefert der Server weniger als erbeten
+  await hoehenParallel(stuecke, LGL_PARALLEL, async von => {
+    const b = await hoehenHolen(url, e.ort + von, Math.min(LGL_STUECK, laenge - von));
+    if (!b) throw new Error('Höhendaten: ZIP-Datei verschwunden');
+    roh.set(b, von);
+    if (b.byteLength < Math.min(LGL_STUECK, laenge - von)) ende = Math.min(ende, von + b.byteLength);
+  });
   const dv = new DataView(roh.buffer, roh.byteOffset, roh.byteLength);
   if (dv.getUint32(0, true) !== 0x04034b50) throw new Error('Höhendaten: ZIP-Eintrag beschädigt');
   const start = 30 + dv.getUint16(26, true) + dv.getUint16(28, true);
+  if (start + e.gepackt > ende) throw new Error('Höhendaten: ZIP-Eintrag abgeschnitten');
   const daten = roh.subarray(start, start + e.gepackt);
-  if (daten.byteLength < e.gepackt) throw new Error('Höhendaten: ZIP-Eintrag abgeschnitten');
   if (e.methode === 0) return daten;
   if (e.methode !== 8) throw new Error(`Höhendaten: ZIP-Methode ${e.methode} wird nicht gelesen`);
   const strom = new Blob([daten]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
