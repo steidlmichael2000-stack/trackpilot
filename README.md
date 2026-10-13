@@ -1044,8 +1044,9 @@ die Geländehöhe aus dem DGM1 in m ü. NHN. Für eine einzelne Höhe holt `hoeh
 Kachel, sondern per Range-Abfrage nur Kopf und Streifen: gemessen 24 kB bzw. 37 kB beim ersten Punkt
 einer Kachel (das TIFF-Verzeichnis steht mal vorn, mal hinten), 5–13 kB für jeden weiteren. Liegt die
 Kachel schon auf dem Gerät, kostet es nichts. Die Zeile steht als Platzhalter da, bis der Wert kommt
-— die Leiste springt nicht. Klar außerhalb Bayerns gibt es sie nicht; liegt der Punkt im Rahmen um
-Bayern, aber außerhalb (Württemberg, Thüringen), oder fehlt das Netz, verschwindet sie wieder.
+— die Leiste springt nicht. Klar außerhalb von Bayern und Baden-Württemberg gibt es sie nicht; liegt
+der Punkt im Rahmen, aber außerhalb (Thüringen, Hessen), oder fehlt das Netz, verschwindet sie wieder.
+In Baden-Württemberg geht das Stück nicht — dort kommt der ganze Kilometer, siehe unten.
 
 ### Woher die Höhen kommen
 
@@ -1076,7 +1077,7 @@ Der Server der Vermessungsverwaltung gibt kein CORS frei: Der Browser lädt die 
 Bytes aber nicht an die App weiter. Der WMS liefert nur gerenderte Bilder, und der Höhendienst der
 BVV (REST, bis 3000 Punkte je Anfrage) lässt im Browser nur die eigenen Portale und `localhost` zu.
 Die App holt die Kacheln deshalb über einen kleinen Cloudflare Worker
-(`werkzeug/proxy/worker.js`), der genau zwei Pfade durchreicht und nur dieser App die Freigabe
+(`werkzeug/proxy/worker.js`), der nur feste Kachelpfade durchreicht und nur dieser App die Freigabe
 gibt — kein offener Proxy. Den Höhendienst reicht er absichtlich nicht durch: Wem er sich im Browser
 öffnet, entscheidet der Betreiber.
 
@@ -1102,6 +1103,42 @@ zu. Am Hang macht das bis 1,7 m aus. Die App hält sich an GeoTIFF und XYZ.
 
 **Die DGM1-Dateien sind nicht einheitlich gebaut:** Bei 636_5528 beginnt das TIFF-Verzeichnis bei
 Byte 8, bei 778_5292 erst kurz vor dem Dateiende. Der Leser sucht es dort, wo es steht.
+
+**An der Landesgrenze sind die bayerischen Kacheln beschnitten:** 573_5361 bei Neu-Ulm ist nur
+875 px breit und beginnt 125 m weiter östlich. Bis Oktober 2026 brach das Profil dort mit „anderes
+Raster" ab; seit BW dazukam, liest der Leser solche Kacheln mit ihrem Versatz.
+
+### Baden-Württemberg
+
+Seit 13.10.2026 kommt das Gelände auch aus dem DGM1 des Landesamts für Geoinformation und
+Landentwicklung (LGL), [Datenlizenz Deutschland – Namensnennung 2.0](https://www.govdata.de/dl-de/by-2-0).
+Es springt ein, wo Bayern keinen Wert hat — außerhalb Bayerns, aber auch auf dem Streifen an der
+Grenze, wo die bayerische Kachel schon liegt, aber nur NoData trägt. Wo beide Länder Werte haben,
+gilt Bayern. Profilleiste und PDF nennen, wessen Höhen im Schnitt stecken.
+
+| | DGM1 BW |
+| --- | --- |
+| Adresse | `opengeodata.lgl-bw.de/data/dgm/dgm1_32_513_5402_2_bw.zip` |
+| Archiv | 2 × 2 km, Südwestecke Ost ungerade, Nord gerade; darin vier Kilometer |
+| Datei je km | XYZ-Text, 1000 × 1000 Werte von Nord nach Süd, Pixelmitte bei ,50 wie in Bayern |
+| Größe je km | 29 MB entpackt, rund 3,2–3,4 MB gepackt |
+
+Das LGL bietet auch einen WCS mit offener CORS-Freigabe an; der lieferte am 13.10.2026 aber
+16-Bit-Ganzzahlen statt Metern, die nicht zu den Höhen aus dem XYZ passten — deshalb die Archive.
+Die gibt es nur ohne CORS, also wie in Bayern über den Worker (`/bw/dgm1/{O}_{N}.zip`). Der Server
+nimmt Teilabfragen an: Die App holt erst das Verzeichnis am Ende des Archivs (64 kB), dann nur die
+Datei des einen Kilometers, entpackt sie im Browser (`DecompressionStream`) und liest den Text.
+Gemessen bei Stuttgart: 3,2 MB in 1,5 s, eingelesen in 0,26 s (Node), im Browser alles zusammen
+0,7 s. Im Gerätespeicher liegen danach die Werte (4 MB), nicht der Text.
+
+Ein Stück für die *Höhe am Punkt* geht aus einem gepackten Archiv nicht; dort kommt der ganze
+Kilometer. Oberfläche (DOM1) und Gebäude (LoD2) des LGL liegen nach demselben Muster bereit, der
+Worker kennt die Pfade schon (`/bw/dom1/…`, `/bw/lod2/…`); eingebaut sind sie noch nicht.
+
+`hoehen-pruefen.mjs` prüft BW gegen den Text derselben Datei, unabhängig gelesen (2000 Stellen,
+exakt), und die Grenze an der Donau zwischen Ulm und Neu-Ulm: 300 Punkte über 2,3 km alle mit Wert;
+im Überlappungsstreifen weichen beide Länder im Median 6 cm voneinander ab, 90 % unter 16 cm, an
+zwei kurzen Stellen bis 4,3 m — Geländeänderungen zwischen den Befliegungen.
 
 ## Wetter: Luftdruck und Temperatur
 
@@ -1531,7 +1568,8 @@ dunkle Karte, Straßen und Ortsnamen von [OpenFreeMap](https://openfreemap.org/)
 Daten © OpenStreetMap). Regenradar: Quelle [Deutscher Wetterdienst](https://www.dwd.de/).
 DOP20, Geländerelief, Parzellarkarte und die Höhen in Profil und Höhenangabe (DGM1, DOM20): Bayerische
 Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de/) (CC BY 4.0); das
-Profil ist daraus berechnet.
+Profil ist daraus berechnet. DGM1 in Baden-Württemberg: LGL-BW (2026), Datenlizenz Deutschland –
+Namensnennung – Version 2.0, [www.lgl-bw.de](https://www.lgl-bw.de/), bearbeitet.
 Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause),
 [leaflet-rotate](https://github.com/Raruto/leaflet-rotate) (GPL-3.0) und
 [MapLibre GL JS](https://maplibre.org/) 6.10.0 (BSD-3-Clause, `vendor/maplibre/`) bei, damit die

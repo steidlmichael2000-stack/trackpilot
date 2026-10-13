@@ -5901,11 +5901,12 @@ function messMenueTaste(ev) {
  *
  * Geländehöhe aus dem DGM1 unter dem Ergebnis, in den Sprechblasen (langer
  * Druck, KML-Punkte) und beim Abstecken. hoehenPunkt holt dafür nur Kopf und
- * Streifen der Kachel, rund 25 kB. Die Zeile steht sofort als Platzhalter da
- * und füllt sich, sobald der Wert kommt — so springt die Leiste nicht. Klar
- * außerhalb Bayerns gibt es sie gar nicht; liegt der Punkt zwar im Rahmen, aber
- * außerhalb (Thüringen, Württemberg) oder fehlt das Netz, verschwindet sie
- * wieder, statt eine Fehlermeldung in jede Sprechblase zu schreiben. */
+ * Streifen der Kachel, rund 25 kB (in BW die ganze Datei des Kilometers, rund
+ * 3,4 MB). Die Zeile steht sofort als Platzhalter da und füllt sich, sobald der
+ * Wert kommt — so springt die Leiste nicht. Klar außerhalb von Bayern und BW
+ * gibt es sie gar nicht; liegt der Punkt zwar im Rahmen, aber außerhalb
+ * (Thüringen, Hessen) oder fehlt das Netz, verschwindet sie wieder, statt eine
+ * Fehlermeldung in jede Sprechblase zu schreiben. */
 const HOEHE_MERK_MAX = 200;
 const hoeheMerk = new Map();             // "lat,lon" → Versprechen der Höhe
 
@@ -5923,9 +5924,10 @@ function hoeheHolen(lat, lon) {
 
 /** Platzhalter für die Höhe; leer, wo es keine geben kann. */
 function hoeheZeile(lat, lon) {
-  if (!inBayernRahmen(lat, lon)) return '';
+  if (!inHoehenRahmen(lat, lon)) return '';
   return `<span class="hoehe" data-hoehe="${lat},${lon}" title="Geländehöhe in Metern über Normalhöhennull ` +
-    `aus dem DGM1 der Bayerischen Vermessungsverwaltung, CC BY 4.0">Höhe … m ü. NHN</span>`;
+    `aus dem DGM1 — Bayern: Bayerische Vermessungsverwaltung, CC BY 4.0; Baden-Württemberg: LGL-BW, ` +
+    `Datenlizenz Deutschland – Namensnennung 2.0">Höhe … m ü. NHN</span>`;
 }
 
 /** Füllt die Platzhalter in el, sobald die Werte da sind. */
@@ -5976,11 +5978,22 @@ const PROF_PLOT_MAX = 160;
 const PROF_KACHELN_FRAGEN = 4;
 const PROF_KACHEL_MB = 3;              // DGM1, gemessen 1,5–3,9 MB je Kachel
 const PROF_DOM_BLOCK_KB = 110;         // DOM20: 13–64 MB je Kachel aus 400 Blöcken
-/* Quellenvermerk nach CC BY 4.0: Urheber mit Verweis auf die Quelle, Lizenz,
- * und dass bearbeitet wurde — „Profil aus …" sagt das. Eine Zeile, damit die
- * Leiste nicht wächst; der volle Wortlaut steht unter Hinweise. */
-const PROF_QUELLE = '<a href="https://www.geodaten.bayern.de/" target="_blank" rel="noopener">' +
-  'Bayerischen Vermessungsverwaltung</a>, CC BY 4.0';
+/* Quellenvermerk nach CC BY 4.0 bzw. dl-de/by-2-0: Urheber mit Verweis auf die
+ * Quelle, Lizenz, und dass bearbeitet wurde — „Profil aus …" sagt das. Eine
+ * Zeile, damit die Leiste nicht wächst; der volle Wortlaut steht unter
+ * Hinweise. Genannt wird, wessen Werte im Profil stecken (hoehenProfil →
+ * quellen). Das LGL will das Jahr des Datenbezugs in Klammern. */
+const PROF_QUELLEN = {
+  by: () => 'der <a href="https://www.geodaten.bayern.de/" target="_blank" rel="noopener">' +
+    'Bayerischen Vermessungsverwaltung</a>, CC BY 4.0',
+  bw: () => `des <a href="https://www.lgl-bw.de/" target="_blank" rel="noopener">LGL-BW</a> ` +
+    `(${new Date().getFullYear()}), dl-de/by-2-0`
+};
+
+function profQuelle(dgm) {
+  const q = dgm && dgm.quellen && dgm.quellen.length ? dgm.quellen : ['by'];
+  return q.map(l => PROF_QUELLEN[l]()).join(' und ');
+}
 
 /* Profil am Gleis (Knopf in der Ergebnisleiste): quer zum Gleis oder längs
  * daran entlang. Breite (je Seite) und Länge (je Richtung) sind Chips, die bei
@@ -6228,7 +6241,7 @@ async function profRechnen({ behalten = false } = {}) {
     profDgm = dgm;
     profDom = profDomDgm = profGeb = null; // gehörten zur vorigen Linie, kommen unten neu
     if (!dgm.hoehe.some(Number.isFinite)) {
-      profFehler = 'Hier gibt es keine Höhendaten — DGM1 und DOM20 decken nur Bayern ab.';
+      profFehler = 'Hier gibt es keine Höhendaten — das Gelände gibt es bisher für Bayern und Baden-Württemberg.';
       profNochmal = false;
     }
   } catch (err) {
@@ -6256,8 +6269,13 @@ async function profDomLaden() {
     const dom = await hoehenProfil(profLinie(), 'dom20', { maxPunkte: 6000 });
     const dgmDort = await hoehenWerte('dgm1', dom.ost, dom.nord);
     if (lauf !== profLauf) return;
-    profDom = dom;
-    profDomDgm = dgmDort;
+    if (!dom.hoehe.some(Number.isFinite)) {
+      profDomAn = false;
+      toast('Die Oberfläche (DOM) gibt es bisher nur in Bayern.');
+    } else {
+      profDom = dom;
+      profDomDgm = dgmDort;
+    }
   } catch (err) {
     if (lauf !== profLauf) return;
     profDomAn = false;
@@ -6400,7 +6418,7 @@ function profLeiste() {
       '<output class="prof-wert" id="profUeberWert" for="profUeber"></output>' +
       '</div>');
     if (profDgm.hoehe.some(z => !Number.isFinite(z))) {
-      teile.push('<p class="bb-note">Teilweise außerhalb Bayerns — dort fehlen die Höhen.</p>');
+      teile.push('<p class="bb-note">Teilweise außerhalb von Bayern und BW — dort fehlen die Höhen.</p>');
     }
   }
 
@@ -6440,7 +6458,7 @@ function profLeiste() {
       <button type="button" id="profZurueck"${n ? '' : ' disabled'}>Zurück</button>
       <button type="button" id="profLeer"${n ? '' : ' disabled'}>Leeren</button>
     </div>`) +
-    (profDgm ? `<p class="prof-quelle">Profil aus Daten der ${PROF_QUELLE}</p>` : '');
+    (profDgm ? `<p class="prof-quelle">Profil aus Daten ${profQuelle(profDgm)}</p>` : '');
 
   const rahmen = $('#profRahmen');
   if (rahmen && rahmen.dataset.ansicht === ansicht) {
@@ -6962,7 +6980,8 @@ function pdfGenauigkeit(s, x, y, quellen) {
   const zeilen = [
     ['Gleislage, km', 'OSM, typisch ±10–30 m, vereinzelt mehr'],
     ['Koordinaten', 'so genau wie die Lage, aus der sie stammen'],
-    ['Gelände DGM1', 'Höhe ±0,2 m, Lage ±0,5 m (freies Gelände)'],
+    quellen.by !== false && [quellen.bw ? 'DGM1 Bayern' : 'Gelände DGM1', 'Höhe ±0,2 m, Lage ±0,5 m (freies Gelände)'],
+    quellen.bw && ['DGM1 BW', 'Genauigkeit 0,15 m laut Kachelangaben des LGL'],
     quellen.dom && ['Oberfläche DOM20', 'regional verschieden, ohne feste Angabe'],
     quellen.geb && ['Gebäude LoD2', 'Dachhöhe typ. ±0,2–0,3 m, bis über 1 m'],
     quellen.dop && ['Luftbild DOP20', 'Lage ±0,4–0,6 m'],
@@ -7060,21 +7079,32 @@ async function pdfSchnittSeite(dok, z, { titel, nr = 1, gesamt = 1, serie = null
     if (erkl) { ay += 9; s.text(kbox.x, ay, erkl, { groesse: 6.5, farbe: F.fein }); }
     ay += 12.5;
   }
-  const quellen = { dom: !!z.dom, geb: !!z.geb, dop: mitBild, osm: !!g };
+  const quellen = { dom: !!z.dom, geb: !!z.geb, dop: mitBild, osm: !!g, ...pdfLaender([z.dgm, ...(serie || []).map(q => q.dgm)]) };
   pdfGenauigkeit(s, kbox.x, ay + 6, quellen);
   pdfFuss(s, nr, gesamt, quellen);
   return quellen;
 }
 
-/** quellen: was im PDF vorkommt — { dom, geb, dop, osm } */
+/** Aus welchen Ländern die Geländehöhen stammen: { by, bw }. Ohne Angabe
+ *  (ältere Schnitte) Bayern. Die Serie kann an der Grenze beide berühren. */
+function pdfLaender(dgms) {
+  const l = new Set(dgms.flatMap(d => (d && d.quellen) || []));
+  if (!l.size) l.add('by');
+  return { by: l.has('by'), bw: l.has('bw') };
+}
+
+/** quellen: was im PDF vorkommt — { dom, geb, dop, osm, by, bw } */
 function pdfFuss(s, nr, gesamt, quellen) {
   const F = PDF_FARBEN, y = s.hoehe - 26;
-  const bvv = ['Gelände DGM1', quellen.dom && 'Oberfläche DOM20', quellen.geb && 'Gebäude LoD2', quellen.dop && 'Luftbild DOP20']
+  const bvv = [quellen.by && 'Gelände DGM1', quellen.dom && 'Oberfläche DOM20', quellen.geb && 'Gebäude LoD2', quellen.dop && 'Luftbild DOP20']
     .filter(Boolean).join(', ');
+  const teile = [
+    bvv && `${bvv}: Bayerische Vermessungsverwaltung – www.geodaten.bayern.de, CC BY 4.0, bearbeitet.`,
+    quellen.bw && `Gelände DGM1 in BW: LGL-BW (${new Date().getFullYear()}), dl-de/by-2-0, www.lgl-bw.de, bearbeitet.`,
+    quellen.osm && 'Kilometrierung und Gleislage: © OpenStreetMap-Mitwirkende (ODbL).'
+  ].filter(Boolean);
   s.linie([[PDF_RAND, y - 10], [s.breite - PDF_RAND, y - 10]], { farbe: F.rahmen, breite: 0.5 });
-  s.text(PDF_RAND, y, `${bvv}: Bayerische Vermessungsverwaltung – www.geodaten.bayern.de, CC BY 4.0, bearbeitet.` +
-    (quellen.osm ? ' Kilometrierung und Gleislage: © OpenStreetMap-Mitwirkende (ODbL).' : ''),
-  { groesse: 6.5, farbe: F.fein });
+  s.text(PDF_RAND, y, teile.join(' '), { groesse: 6.5, farbe: F.fein });
   s.text(PDF_RAND, y + 9, 'Keine amtliche Quelle — zur Übersicht, nicht für Vermessung oder sicherheitsrelevante ' +
     'Entscheidungen. Erstellt mit TrackPilot.', { groesse: 6.5, farbe: F.fein });
   if (gesamt > 1) s.text(s.breite - PDF_RAND, y + 9, `Seite ${nr} von ${gesamt}`, { groesse: 7, farbe: F.fein, anker: 'end' });
@@ -7394,7 +7424,7 @@ async function mappePdf() {
         const q = await gpQuerPunkte(ref, km, W);
         if (!q) { fehlt.push(`${name} (kein Gleisverlauf)`); continue; }
         const dgm = await hoehenProfil(q.punkte, 'dgm1');
-        if (!dgm.hoehe.some(Number.isFinite)) { fehlt.push(`${name} (keine Höhen, außerhalb Bayerns?)`); continue; }
+        if (!dgm.hoehe.some(Number.isFinite)) { fehlt.push(`${name} (keine Höhen, außerhalb von Bayern und BW?)`); continue; }
         let dom = null, domDgm = null;
         if (mitDom) {
           dom = await hoehenProfil(q.punkte, 'dom20', { maxPunkte: 6000 });

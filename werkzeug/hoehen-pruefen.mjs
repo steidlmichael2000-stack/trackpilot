@@ -16,6 +16,8 @@
  *    400 Stellen, ohne nur 308 bzw. 120.
  * 6. Über eine Kachelgrenze hinweg
  * 7. DOM20: Datenmenge, Dauer und DOM − DGM
+ * 8. DGM1 Baden-Württemberg: ZIP-Eintrag und XYZ, unabhängig gelesen
+ * 9. Landesgrenze Ulm/Neu-Ulm: keine Lücke, beide Länder stimmen überein
  *
  * Der Höhendienst dient hier allein als Prüfwert; aus der App heraus wird er
  * nicht benutzt (im Browser lässt er nur die Portale der BVV und localhost zu).
@@ -126,8 +128,8 @@ for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 529
   const vorher = H.HOEHEN.geladen;
   const berlin = await H.hoehenPunkt(52.52, 13.40);
   pruefe(Number.isNaN(berlin) && H.HOEHEN.geladen === vorher, 'Höhe am Punkt außerhalb des Rahmens (Berlin): kein Wert, nichts geladen');
-  const stuttgart = await H.hoehenPunkt(48.78, 9.18);
-  pruefe(Number.isNaN(stuttgart), 'Höhe am Punkt im Rahmen, aber außerhalb Bayerns (Stuttgart): kein Wert');
+  const erfurt = await H.hoehenPunkt(50.98, 11.03);
+  pruefe(Number.isNaN(erfurt), 'Höhe am Punkt im Rahmen, aber außerhalb Bayerns und BW (Erfurt): kein Wert');
 }
 
 /** Die ersten Zeilen der XYZ-Fassung einer DGM1-Kachel, aus den ersten 64 kB
@@ -232,6 +234,59 @@ for (const [name, ke, kn] of [['Bamberg', 636, 5528], ['Berchtesgaden', 778, 529
     `95 % ${zahl(quantil(diff, 0.95))} m · höchstens ${zahl(diff[maxI])} m bei Station ${zahl(dom.station[maxI], 1)} m`);
   pruefe(vorhanden > 0.99, `DOM20: ${zahl(vorhanden * 100, 1)} % der Stützpunkte mit Wert`);
   pruefe(quantil(diff, 0.05) > -0.5, 'DOM20 liegt nicht unter dem Gelände (5-%-Wert über −0,5 m) — Lage und Höhenbezug passen');
+}
+
+/* ---- 8. Baden-Württemberg (DGM1 des LGL) ---- */
+{
+  // Die Datei eines Kilometers aus dem Archiv, und ihr Text unabhängig gelesen
+  const vorher = H.HOEHEN.geladen;
+  let t0 = performance.now();
+  const text = await H.lglDatei('dgm1', 513, 5402);
+  const tLaden = performance.now() - t0, mb = (H.HOEHEN.geladen - vorher) / 2 ** 20;
+  t0 = performance.now();
+  const raster = H.xyzLesen(text, 513, 5402);
+  const tLesen = performance.now() - t0;
+  const zeilen = Buffer.from(text).toString('latin1').split(/\r?\n/).filter(Boolean).map(z => z.trim().split(/\s+/).map(Number));
+  pruefe(zeilen.length === 1e6 && raster.every(Number.isFinite),
+    `BW-Kachel 513_5402 (Stuttgart): ${zeilen.length} Zeilen, ${zahl(mb)} MB geladen in ${zahl(tLaden, 0)} ms, gelesen in ${zahl(tLesen, 0)} ms`);
+
+  const r = zufall(5135402), probe = Array.from({ length: 2000 }, () => zeilen[Math.floor(r() * zeilen.length)]);
+  const ost = Float64Array.from(probe, z => z[0]), nord = Float64Array.from(probe, z => z[1]);
+  const quellen = new Set();
+  const nn = await H.hoehenWerte('dgm1', ost, nord, 'nachbar', { quellen });
+  const bl = await H.hoehenWerte('dgm1', ost, nord);
+  let groesste = 0, fehlt = 0;
+  probe.forEach((z, i) => {
+    if (!Number.isFinite(nn[i]) || !Number.isFinite(bl[i])) { fehlt++; return; }
+    groesste = Math.max(groesste, Math.abs(nn[i] - z[2]), Math.abs(bl[i] - z[2]));
+  });
+  pruefe(!fehlt && groesste < 0.006 && [...quellen].join() === 'bw',
+    `DGM1 BW gegen XYZ: ${probe.length} Stellen, ${fehlt} ohne Wert, größte Abweichung ${zahl(groesste * 100, 2)} cm, Quelle ${[...quellen]}`);
+
+  const stuttgart = await H.hoehenPunkt(48.78, 9.18);
+  pruefe(Number.isFinite(stuttgart) && stuttgart > 200 && stuttgart < 300, `Höhe am Punkt Stuttgart: ${zahl(stuttgart)} m aus BW`);
+}
+
+/* ---- 9. Landesgrenze an der Donau (Ulm/Neu-Ulm) ----
+ * Die bayerischen Kacheln am Rand sind beschnitten (573_5361: 875 px breit,
+ * beginnt 125 m weiter östlich), und beide Länder überlappen auf einem
+ * Streifen. Am 13.10.2026 dort: Median 6 cm, 90 % unter 16 cm, an zwei
+ * Stellen bis 4,3 m — Geländeänderungen zwischen den Befliegungen. */
+{
+  const [e0, n0] = H.utm32Hin(48.405, 9.995), [e1, n1] = H.utm32Hin(48.385, 10.005);
+  const N = 300, ost = new Float64Array(N), nord = new Float64Array(N);
+  for (let i = 0; i < N; i++) { ost[i] = e0 + (e1 - e0) * i / (N - 1); nord[i] = n0 + (n1 - n0) * i / (N - 1); }
+  const by = await H.hoehenWerteArt('dgm1', ost, nord, 'nachbar', false);
+  const bw = await H.hoehenWerteArt('dgm1-bw', ost, nord, 'nachbar', false);
+  const quellen = new Set();
+  const alle = await H.hoehenWerte('dgm1', ost, nord, 'bilinear', { quellen });
+  const d = [];
+  for (let i = 0; i < N; i++) if (Number.isFinite(by[i]) && Number.isFinite(bw[i])) d.push(Math.abs(by[i] - bw[i]));
+  const nurBy = by.filter(Number.isFinite).length, nurBw = bw.filter(Number.isFinite).length;
+  pruefe(alle.every(Number.isFinite) && quellen.size === 2,
+    `Grenze Ulm/Neu-Ulm: ${N} Punkte über ${zahl(Math.hypot(e1 - e0, n1 - n0), 0)} m alle mit Wert (BY ${nurBy}, BW ${nurBw}, beide ${d.length})`);
+  pruefe(d.length > 20 && quantil(d, 0.5) < 0.1,
+    `Grenze Ulm/Neu-Ulm: BY und BW im Überlappungsstreifen Median ${zahl(quantil(d, 0.5) * 100, 1)} cm, 90 % ${zahl(quantil(d, 0.9) * 100, 1)} cm`);
 }
 
 console.log(fehler ? `\n${fehler} Prüfung(en) fehlgeschlagen` : '\nAlle Prüfungen bestanden.');

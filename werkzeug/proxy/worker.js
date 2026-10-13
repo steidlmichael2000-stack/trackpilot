@@ -11,15 +11,24 @@
  * Datei). Das XML packt sich auf ein Sechzehntel; der Worker liefert es deshalb
  * gzip-gepackt aus (16,7 MB → rund 1 MB).
  *
- * Bewusst eng gefasst, damit kein offener Proxy daraus wird: genau drei Pfade,
+ * Seit 13.10.2026 auch Baden-Württemberg: DGM1, DOM1 und LoD2 des LGL als
+ * ZIP-Archive zu 2 × 2 km (Datenlizenz Deutschland – Namensnennung 2.0), auf
+ * opengeodata.lgl-bw.de ebenfalls ohne CORS für fremde Seiten. Die App holt
+ * daraus per Bytebereich nur Verzeichnis und einen Eintrag; entpackt wird im
+ * Browser.
+ *
+ * Bewusst eng gefasst, damit kein offener Proxy daraus wird: feste Pfade,
  * Kachelnamen nur als Ziffernmuster, nur GET und HEAD, höchstens ein
  * Bytebereich. Den Höhendienst der BVV reicht er absichtlich nicht durch — der
  * lässt im Browser nur die eigenen Portale zu, und das ist eine Entscheidung
  * des Betreibers.
  *
- *   GET /dgm1/636_5528.tif    →  …/a/dgm/dgm1/636_5528.tif
- *   GET /dom20/638_5526.tif   →  …/a/dom20/DOM/32638_5526_20_DOM.tif
- *   GET /lod2/638_5532.gml    →  …/a/lod2/citygml/638_5532.gml
+ *   GET /dgm1/636_5528.tif       →  …bayernwolke.de/a/dgm/dgm1/636_5528.tif
+ *   GET /dom20/638_5526.tif      →  …bayernwolke.de/a/dom20/DOM/32638_5526_20_DOM.tif
+ *   GET /lod2/638_5532.gml       →  …bayernwolke.de/a/lod2/citygml/638_5532.gml
+ *   GET /bw/dgm1/513_5402.zip    →  …lgl-bw.de/data/dgm/dgm1_32_513_5402_2_bw.zip
+ *   GET /bw/dom1/513_5402.zip    →  …lgl-bw.de/data/dom1/dom1_32_513_5402_2_bw.zip
+ *   GET /bw/lod2/513_5402.zip    →  …lgl-bw.de/data/lod2/LoD2_32_513_5402_2_bw.zip
  *
  * Einrichten über das Dashboard: Worker öffnen → „Edit code" → diese Datei
  * hineinkopieren → „Deploy". Die Adresse (…workers.dev) gehört danach in
@@ -30,12 +39,16 @@
  */
 
 const QUELLE = 'https://download1.bayernwolke.de/a';
+const LGL = 'https://opengeodata.lgl-bw.de/data';
 const ZIELE = {
   dgm1: (e, n) => `${QUELLE}/dgm/dgm1/${e}_${n}.tif`,
   dom20: (e, n) => `${QUELLE}/dom20/DOM/32${e}_${n}_20_DOM.tif`,
-  lod2: (e, n) => `${QUELLE}/lod2/citygml/${e}_${n}.gml`
+  lod2: (e, n) => `${QUELLE}/lod2/citygml/${e}_${n}.gml`,
+  'bw-dgm1': (e, n) => `${LGL}/dgm/dgm1_32_${e}_${n}_2_bw.zip`,
+  'bw-dom1': (e, n) => `${LGL}/dom1/dom1_32_${e}_${n}_2_bw.zip`,
+  'bw-lod2': (e, n) => `${LGL}/lod2/LoD2_32_${e}_${n}_2_bw.zip`
 };
-const PFAD = /^\/(?:(dgm1|dom20)\/(\d{3})_(\d{4})\.tif|(lod2)\/(\d{3})_(\d{4})\.gml)$/;
+const PFAD = /^\/(?:(dgm1|dom20)\/(\d{3})_(\d{4})\.tif|(lod2)\/(\d{3})_(\d{4})\.gml|bw\/(dgm1|dom1|lod2)\/(\d{3})_(\d{4})\.zip)$/;
 const BEREICH = /^bytes=(\d+-\d*|-\d+)$/;
 
 const HERKUNFT = ['https://steidlmichael2000-stack.github.io'];
@@ -72,7 +85,8 @@ export default {
 
     const t = PFAD.exec(new URL(request.url).pathname);
     if (!t) return new Response('Unbekannter Pfad', { status: 404, headers: cors });
-    const treffer = t[4] ? [t[0], t[4], t[5], t[6]] : t;   // [Pfad, Art, Ost, Nord]
+    // [Pfad, Art, Ost, Nord]
+    const treffer = t[1] ? t : t[4] ? [t[0], t[4], t[5], t[6]] : [t[0], `bw-${t[7]}`, t[8], t[9]];
     const lod2 = treffer[1] === 'lod2';
 
     const kopf = new Headers();

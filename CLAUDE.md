@@ -166,6 +166,14 @@ Messwerte stehen in der README, hier nur, was beim Weiterbauen nicht übersehen 
   gegen die XYZ-Fassung, Höhendienst, Kachelgrenze, DOM. Alles muss „ok" melden.
 - Die DGM1-Dateien sind nicht einheitlich gebaut (TIFF-Verzeichnis mal am Anfang, mal am Ende).
   Wer den Leser vereinfacht, prüft mindestens 636_5528 und 778_5292.
+- **Baden-Württemberg** (seit 13.10.2026): Art `dgm1-bw` springt über `HOEHEN_ARTEN.dgm1.weiter` ein,
+  wo Bayern NaN liefert; Bayern hat Vorrang. Daten als ZIP des LGL über den Worker (`/bw/…`), App liest
+  Verzeichnis + einen Eintrag per Range und entpackt mit `DecompressionStream`. Wer neue Länder anhängt:
+  eigene Art mit `land`, Rahmen in `HOEHEN_RAHMEN`, Quellenvermerk in `PROF_QUELLEN` und `pdfFuss`.
+  `hoehenProfil` liefert `quellen` (`['by']`, `['bw']` oder beide) — Leiste und PDF richten den Vermerk
+  danach. Das LGL verlangt das Jahr des Datenbezugs in Klammern.
+- **Bayerische Randkacheln sind beschnitten** (573_5361: 875 px, 125 m eingerückt). Der Leser rechnet mit
+  `kopf.dl`/`kopf.dr`; die Raster-Lage ist für DGM1 und DOM20 fest (links 0, oben npx − 1).
 - **Höhe am Punkt** (`hoehenPunkt`, in der App `hoeheZeile`/`hoeheFuellen`): vom DGM nur Kopf und
   Streifen per Range (`teil`), rund 25 kB. Die Teilkachel liegt im Speicher unter `dgm1-teil/…`, nicht
   im Vorrat; liegt die ganze Datei schon da, wird die genommen. Die Prüfung dafür läuft in

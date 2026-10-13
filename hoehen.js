@@ -21,6 +21,11 @@
  * holt auch das DGM nur Kopf und Streifen: am 10.10.2026 24 kB bzw. 37 kB
  * beim ersten Punkt einer Kachel, 5–13 kB für jeden weiteren.
  *
+ * Seit 13.10.2026 auch Baden-Württemberg: das DGM1 des LGL springt ein, wo
+ * Bayern keinen Wert hat (HOEHEN_ARTEN → weiter, Einzelheiten bei
+ * LGL_PRODUKTE). Es liegt auf demselben Raster; wo beide Länder Werte haben,
+ * gilt Bayern. Welche Länder in einem Profil stecken, steht in quellen.
+ *
  * Bewusst ohne geotiff.js und proj4: Der Aufbau ist bekannt und eng. Weicht
  * eine Datei davon ab, bricht das Lesen mit einer klaren Meldung ab, statt
  * still falsche Höhen zu liefern. Geprüft wird mit werkzeug/hoehen-pruefen.mjs.
@@ -40,11 +45,34 @@ const HOEHEN = {
 
 const BVV_DOWNLOAD = 'https://download1.bayernwolke.de/a';
 
+/* land: wessen Daten, für Rahmen und Quellenvermerk. weiter: die Art, die
+ * einspringt, wo diese keinen Wert hat — außerhalb Bayerns, aber auch auf dem
+ * Streifen an der Grenze, wo die bayerische Kachel NoData trägt. */
 const HOEHEN_ARTEN = {
-  dgm1: { aufloesung: 1, pixel: 1000, ganz: true,
+  dgm1: { aufloesung: 1, pixel: 1000, ganz: true, land: 'by', weiter: 'dgm1-bw',
     direkt: (e, n) => `${BVV_DOWNLOAD}/dgm/dgm1/${e}_${n}.tif` },
-  dom20: { aufloesung: 0.2, pixel: 5000, ganz: false,
-    direkt: (e, n) => `${BVV_DOWNLOAD}/dom20/DOM/32${e}_${n}_20_DOM.tif` }
+  dom20: { aufloesung: 0.2, pixel: 5000, ganz: false, land: 'by',
+    direkt: (e, n) => `${BVV_DOWNLOAD}/dom20/DOM/32${e}_${n}_20_DOM.tif` },
+  'dgm1-bw': { aufloesung: 1, pixel: 1000, ganz: true, land: 'bw', lgl: 'dgm1' }
+};
+
+/* Baden-Württemberg: Landesamt für Geoinformation und Landentwicklung (LGL),
+ * Datenlizenz Deutschland – Namensnennung 2.0. Am 13.10.2026 nachgemessen:
+ *
+ *   ZIP je 2 × 2 km, Südwestecke Ost ungerade, Nord gerade (513_5402, 413_5316,
+ *   461_5482, 573_5360); darin je Kilometer eine Datei, deren Name das Jahr
+ *   trägt (dgm1_32_513_5402_1_bw_2023.xyz) — gesucht wird deshalb im Verzeichnis.
+ *   DGM1   XYZ-Text, 1000 × 1000 Werte von Nord nach Süd, Pixelmitte bei ,50
+ *          wie in Bayern; 29 MB entpackt, rund 3,4 MB gepackt je Kilometer
+ *
+ * Kein CORS für fremde Seiten, also auch hier über den Worker. Der Server nimmt
+ * Teilabfragen an: Erst das Verzeichnis am Dateiende (64 kB), dann nur die eine
+ * Datei, die gebraucht wird. Entpackt wird im Browser (DecompressionStream). */
+const LGL_DOWNLOAD = 'https://opengeodata.lgl-bw.de/data';
+const LGL_PRODUKTE = {
+  dgm1: { ordner: 'dgm', datei: 'dgm1', endung: 'xyz' },
+  dom1: { ordner: 'dom1', datei: 'dom1', endung: 'tif' },
+  lod2: { ordner: 'lod2', datei: 'LoD2', endung: 'gml' }
 };
 
 /* ============================ UTM Zone 32 ============================
@@ -278,20 +306,143 @@ const HOEHEN_BLOECKE_MAX = 48 * 2 ** 20; // entpackte Blöcke, in Byte
 const hoehenKacheln = new Map();          // "dgm1/636_5528" → Promise<Kachel|null>
 const hoehenBloecke = new Map();          // "dgm1/636_5528#17" → Float32Array
 let hoehenBloeckeByte = 0;
+/* Kacheln, die es nicht gibt (404). In Württemberg liegt jeder Punkt auch im
+ * Rahmen um Bayern; ohne dieses Merken fragte jedes Profil dort erst wieder
+ * den Server der BVV. */
+const hoehenFehlen = new Set();
 
 function hoehenAdresse(art, e, n) {
   return HOEHEN.direkt ? HOEHEN_ARTEN[art].direkt(e, n) : `${HOEHEN.proxy}/${art}/${e}_${n}.tif`;
 }
 
-/** Holt eine Datei oder einen Bytebereich daraus; null, wenn es sie nicht gibt. */
+/** Holt eine Datei oder einen Bytebereich daraus; null, wenn es sie nicht gibt.
+ *  Negatives von: die letzten −von Byte (für das Verzeichnis einer ZIP-Datei). */
 async function hoehenHolen(url, von, laenge) {
-  const r = await fetch(url, laenge ? { headers: { Range: `bytes=${von}-${von + laenge - 1}` } } : {});
+  const bereich = von < 0 ? `bytes=${von}` : laenge ? `bytes=${von}-${von + laenge - 1}` : '';
+  const r = await fetch(url, bereich ? { headers: { Range: bereich } } : {});
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`Höhendaten: HTTP ${r.status}`);
   const b = new Uint8Array(await r.arrayBuffer());
   HOEHEN.geladen += b.byteLength;
   // Hat der Server den Bereich übergangen, kam die ganze Datei
-  return laenge && r.status !== 206 ? b.subarray(von, von + laenge) : b;
+  if (!bereich || r.status === 206) return b;
+  return von < 0 ? b.subarray(Math.max(0, b.byteLength + von)) : b.subarray(von, von + laenge);
+}
+
+/* ---- ZIP-Dateien des LGL ----
+ * Nur, was die Archive tatsächlich enthalten: kein ZIP64, Einträge gespeichert
+ * oder mit Deflate gepackt. */
+const lglVerzeichnisse = new Map();       // Adresse → Promise<Einträge|null>
+
+function lglAdresse(produkt, e, n) {
+  const p = LGL_PRODUKTE[produkt];
+  const ze = e % 2 ? e : e - 1, zn = n % 2 ? n - 1 : n;
+  return HOEHEN.direkt ? `${LGL_DOWNLOAD}/${p.ordner}/${p.datei}_32_${ze}_${zn}_2_bw.zip`
+    : `${HOEHEN.proxy}/bw/${produkt}/${ze}_${zn}.zip`;
+}
+
+/** Das zentrale Verzeichnis vom Ende der Datei; null, wenn es sie nicht gibt. */
+function zipVerzeichnis(url) {
+  let v = lglVerzeichnisse.get(url);
+  if (v) return v;
+  v = (async () => {
+    const ende = await hoehenHolen(url, -65536);
+    if (!ende) return null;
+    const dv = new DataView(ende.buffer, ende.byteOffset, ende.byteLength);
+    let p = ende.byteLength - 22;
+    while (p >= 0 && dv.getUint32(p, true) !== 0x06054b50) p--;
+    if (p < 0) throw new Error('Höhendaten: ZIP ohne Verzeichnis');
+    const anzahl = dv.getUint16(p + 10, true);
+    let q = p - dv.getUint32(p + 12, true);
+    if (q < 0) throw new Error('Höhendaten: ZIP-Verzeichnis zu groß');
+    const eintraege = [];
+    for (let i = 0; i < anzahl; i++) {
+      if (dv.getUint32(q, true) !== 0x02014b50) throw new Error('Höhendaten: ZIP-Verzeichnis beschädigt');
+      const nl = dv.getUint16(q + 28, true);
+      let name = '';
+      for (let k = 0; k < nl; k++) name += String.fromCharCode(ende[q + 46 + k]);
+      eintraege.push({ name, methode: dv.getUint16(q + 10, true), gepackt: dv.getUint32(q + 20, true),
+        roh: dv.getUint32(q + 24, true), ort: dv.getUint32(q + 42, true) });
+      q += 46 + nl + dv.getUint16(q + 30, true) + dv.getUint16(q + 32, true);
+    }
+    if (eintraege.some(x => x.gepackt === 0xFFFFFFFF || x.ort === 0xFFFFFFFF)) throw new Error('Höhendaten: ZIP64 wird nicht gelesen');
+    return eintraege;
+  })();
+  lglVerzeichnisse.set(url, v);
+  v.catch(() => lglVerzeichnisse.delete(url));
+  while (lglVerzeichnisse.size > 64) lglVerzeichnisse.delete(lglVerzeichnisse.keys().next().value);
+  return v;
+}
+
+/** Ein Eintrag, entpackt. Kopf und Daten in einer Abfrage: Das Zusatzfeld im
+ *  lokalen Kopf kann länger sein als im Verzeichnis, 1 kB Luft reicht dafür. */
+async function zipEintrag(url, e) {
+  const roh = await hoehenHolen(url, e.ort, 30 + 1024 + e.gepackt);
+  if (!roh) throw new Error('Höhendaten: ZIP-Datei verschwunden');
+  const dv = new DataView(roh.buffer, roh.byteOffset, roh.byteLength);
+  if (dv.getUint32(0, true) !== 0x04034b50) throw new Error('Höhendaten: ZIP-Eintrag beschädigt');
+  const start = 30 + dv.getUint16(26, true) + dv.getUint16(28, true);
+  const daten = roh.subarray(start, start + e.gepackt);
+  if (daten.byteLength < e.gepackt) throw new Error('Höhendaten: ZIP-Eintrag abgeschnitten');
+  if (e.methode === 0) return daten;
+  if (e.methode !== 8) throw new Error(`Höhendaten: ZIP-Methode ${e.methode} wird nicht gelesen`);
+  const strom = new Blob([daten]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  const aus = new Uint8Array(await new Response(strom).arrayBuffer());
+  if (aus.byteLength !== e.roh) throw new Error('Höhendaten: ZIP-Eintrag unvollständig entpackt');
+  return aus;
+}
+
+/** Die Datei eines Kilometers aus dem LGL-Archiv; null, wo es keine gibt. */
+async function lglDatei(produkt, e, n) {
+  const url = lglAdresse(produkt, e, n), p = LGL_PRODUKTE[produkt];
+  const liste = await zipVerzeichnis(url);
+  if (!liste) return null;
+  const muster = new RegExp(`(^|/)${p.datei}_32_${e}_${n}_1_bw[^/]*\\.${p.endung}$`, 'i');
+  const eintrag = liste.find(x => muster.test(x.name));
+  return eintrag ? zipEintrag(url, eintrag) : null;
+}
+
+/** XYZ-Text eines Kilometers → Float32Array, Zeile 0 im Norden wie im GeoTIFF.
+ *  Jeder Wert kommt an die Stelle, die seine Koordinate nennt — fehlt eine
+ *  Zeile, bleibt dort NaN, statt dass alles danach verrutscht. Von Hand statt
+ *  mit split: 1 Mio. Zeilen, 29 MB. */
+function xyzLesen(text, e, n, npx = 1000) {
+  const werte = new Float32Array(npx * npx).fill(NaN);
+  const x0 = e * npx, y0 = n * npx + npx - 1;
+  const f = [0, 0, 0];
+  let feld = 0, wert = 0, teiler = 0, minus = false, ziffern = false;
+  for (let i = 0, l = text.length; i <= l; i++) {
+    const c = i < l ? text[i] : 10;
+    if (c >= 48 && c <= 57) { wert = wert * 10 + c - 48; if (teiler) teiler *= 10; ziffern = true; continue; }
+    if (c === 46) { teiler = 1; continue; }
+    if (c === 45) { minus = true; continue; }
+    if (ziffern) {
+      if (feld < 3) f[feld] = (minus ? -wert : wert) / (teiler || 1);
+      feld++;
+    }
+    wert = 0; teiler = 0; minus = false; ziffern = false;
+    if (c === 10) {
+      if (feld === 3 && f[2] > -1000) {
+        const C = Math.floor(f[0]) - x0, R = y0 - Math.floor(f[1]);
+        if (C >= 0 && C < npx && R >= 0 && R < npx) werte[R * npx + C] = f[2];
+      }
+      feld = 0;
+    }
+  }
+  return werte;
+}
+
+/** Ein Kilometer DGM1 aus BW als Raster; null, wo es keinen gibt. Im Vorrat
+ *  liegen die Werte (4 MB), nicht der Text. */
+async function lglRaster(art, e, n) {
+  const def = HOEHEN_ARTEN[art], schluessel = `${art}/${e}_${n}`;
+  const imVorrat = await vorratLesen(schluessel);
+  if (imVorrat) return new Float32Array(imVorrat.buffer, imVorrat.byteOffset, imVorrat.byteLength / 4);
+  const text = await lglDatei(def.lgl, e, n);
+  if (!text) return null;
+  const werte = xyzLesen(text, e, n, def.pixel);
+  vorratSchreiben(schluessel, new Uint8Array(werte.buffer));
+  return werte;
 }
 
 /* ---- Vorrat auf dem Gerät ----
@@ -372,9 +523,12 @@ async function vorratSchreiben(schluessel, bytes) {
  *  für einzelne Höhen, wo eine ganze Kachel von 2–4 MB unverhältnismäßig wäre.
  *  Liegt die ganze Datei schon im Speicher oder im Vorrat, wird die genommen. */
 function hoehenKachel(art, e, n, teil = false) {
+  const def = HOEHEN_ARTEN[art];
   const voll = `${art}/${e}_${n}`;
-  if (teil && hoehenKacheln.has(voll)) teil = false;
+  // Aus einem gepackten Archiv geht kein Stück, nur die ganze Datei
+  if (def.lgl || (teil && hoehenKacheln.has(voll))) teil = false;
   const schluessel = teil ? `${art}-teil/${e}_${n}` : voll;
+  if (hoehenFehlen.has(voll)) return Promise.resolve(null);
   const bekannt = hoehenKacheln.get(schluessel);
   if (bekannt) {
     hoehenKacheln.delete(schluessel);        // nach hinten: zuletzt benutzt
@@ -382,8 +536,15 @@ function hoehenKachel(art, e, n, teil = false) {
     return bekannt;
   }
 
-  const laden = (async () => {
-    const def = HOEHEN_ARTEN[art], url = hoehenAdresse(art, e, n);
+  const laden = def.lgl ? (async () => {
+    const werte = await lglRaster(art, e, n);
+    if (!werte) { hoehenFehlen.add(voll); return null; }
+    // Pixelmitte bei ,50 und Zeile 0 im Norden — wie die bayerischen Kacheln
+    if (!def.schema) def.schema = { versatz: 0.5, links: 0, oben: def.pixel - 1 };
+    const npx = def.pixel;
+    return { schluessel, art, e, n, kopf: { breite: npx, hoehe: npx, bw: npx, bh: npx, quer: 1, dl: 0, dr: 0 }, werte };
+  })() : (async () => {
+    const url = hoehenAdresse(art, e, n);
     let lies, anfang;
     // Beim teilweisen Lesen zuerst nachsehen, ob die ganze Datei im Vorrat liegt
     const imVorrat = def.ganz ? await vorratLesen(voll) : null;
@@ -391,12 +552,12 @@ function hoehenKachel(art, e, n, teil = false) {
       lies = async (von, laenge) => imVorrat.subarray(von, Math.min(von + laenge, imVorrat.byteLength));
     } else if (def.ganz && !teil) {
       const datei = await hoehenHolen(url);
-      if (!datei) return null;               // keine Kachel: außerhalb Bayerns
+      if (!datei) { hoehenFehlen.add(voll); return null; }   // keine Kachel: außerhalb Bayerns
       vorratSchreiben(voll, datei);          // im Hintergrund
       lies = async (von, laenge) => datei.subarray(von, Math.min(von + laenge, datei.byteLength));
     } else {
       anfang = await hoehenHolen(url, 0, 16384);
-      if (!anfang) return null;
+      if (!anfang) { hoehenFehlen.add(voll); return null; }
       lies = async (von, laenge) => {
         const b = await hoehenHolen(url, von, laenge);
         if (!b) throw new Error(`Höhendaten: ${schluessel} verschwunden`);
@@ -408,17 +569,22 @@ function hoehenKachel(art, e, n, teil = false) {
     /* Wo liegt die Kachel im durchgehenden Pixelraster? Spalte C und Zeile R
      * (von Süden gezählt) haben ihre Mitte bei ((C + v)·Auflösung, (R + v)·Auflösung). */
     const res = def.aufloesung, npx = def.pixel;
-    if (kopf.breite !== npx || kopf.hoehe !== npx || Math.abs(kopf.skala[0] - res) > 1e-9 || Math.abs(kopf.skala[1] - res) > 1e-9) {
+    if (kopf.breite > npx || kopf.hoehe > npx || Math.abs(kopf.skala[0] - res) > 1e-9 || Math.abs(kopf.skala[1] - res) > 1e-9) {
       throw new Error(`Höhendaten: ${schluessel} hat ein anderes Raster (${kopf.breite} px, ${kopf.skala[0]} m)`);
     }
+    /* Alle bisher gesehenen Kacheln (DGM1 und DOM20) haben ihre linke obere
+     * Pixelmitte bei (e·1000 + ½ Pixel, n·1000 + 1000 − ½ Pixel). An der
+     * Landesgrenze sind sie beschnitten — 573_5361 bei Neu-Ulm ist nur 875 px
+     * breit und beginnt 125 m weiter östlich. dl und dr sagen, um wie viele
+     * Pixel sie gegenüber einer vollen Kachel versetzt beginnt. */
     const v = kopf.versatz;
-    const links = Math.round(kopf.tie[3] / res - kopf.tie[0]) - e * npx;
-    const oben = Math.round(kopf.tie[4] / res + kopf.tie[1] - 2 * v) - n * npx;
-    const schema = { versatz: v, links, oben };
-    if (!def.schema) def.schema = schema;
-    else if (def.schema.versatz !== v || def.schema.links !== links || def.schema.oben !== oben) {
+    if (v !== 0.5) throw new Error(`Höhendaten: ${schluessel} ist als Punktraster ausgezeichnet`);
+    kopf.dl = Math.round(kopf.tie[3] / res - kopf.tie[0]) - e * npx;
+    kopf.dr = (npx - 1) - (Math.round(kopf.tie[4] / res + kopf.tie[1] - 2 * v) - n * npx);
+    if (kopf.dl < 0 || kopf.dr < 0 || kopf.dl + kopf.breite > npx || kopf.dr + kopf.hoehe > npx) {
       throw new Error(`Höhendaten: ${schluessel} liegt anders im Raster als die übrigen Kacheln`);
     }
+    if (!def.schema) def.schema = { versatz: v, links: 0, oben: npx - 1 };
     return { schluessel, art, e, n, kopf, lies };
   })();
 
@@ -467,6 +633,7 @@ async function hoehenParallel(liste, n, aufgabe) {
  *  Map hält sie fest, auch wenn der Zwischenspeicher sie für ein langes Profil
  *  schon wieder verwerfen muss. */
 async function hoehenBloeckeLaden(kachel, indizes) {
+  if (kachel.werte) return new Map([[0, kachel.werte]]);   // BW: die Kachel ist ein Block
   const k = kachel.kopf, raus = new Map(), fehlen = [];
   for (const i of indizes) {
     const da = hoehenBloecke.get(`${kachel.schluessel}#${i}`);
@@ -498,9 +665,31 @@ async function hoehenBloeckeLaden(kachel, indizes) {
 /* ============================ Abgreifen ============================ */
 
 /** Höhen an UTM-Koordinaten (Float64Array ost, nord). Verfahren „bilinear"
- *  oder „nachbar". Wo es keine Daten gibt (außerhalb Bayerns, Lücke), NaN.
- *  teil: vom DGM nur die nötigen Streifen holen (siehe hoehenKachel). */
-async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = false } = {}) {
+ *  oder „nachbar". Wo es keine Daten gibt (außerhalb der Länder, Lücke), NaN.
+ *  teil: vom DGM nur die nötigen Streifen holen (siehe hoehenKachel).
+ *  quellen: ein Set, in das die Länder kommen, deren Werte verwendet wurden.
+ *
+ *  Erst die Art selbst, dann für die Punkte ohne Wert die nächste (weiter) —
+ *  so füllt BW auch den Streifen an der Grenze, auf dem die bayerische Kachel
+ *  schon liegt, aber nur NoData trägt. Gefragt wird ein Land nur im Rahmen
+ *  um sein Gebiet. */
+async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = false, quellen = null } = {}) {
+  const aus = new Float32Array(ost.length).fill(NaN);
+  let offen = Array.from({ length: ost.length }, (_, i) => i);
+  for (let a = art; a && offen.length; a = HOEHEN_ARTEN[a].weiter) {
+    const land = HOEHEN_ARTEN[a].land;
+    const drin = offen.filter(i => inLandRahmen(land, ...utm32Zurueck(ost[i], nord[i])));
+    if (!drin.length) continue;
+    const w = await hoehenWerteArt(a, Float64Array.from(drin, i => ost[i]), Float64Array.from(drin, i => nord[i]), verfahren, teil);
+    let treffer = false;
+    drin.forEach((i, j) => { if (Number.isFinite(w[j])) { aus[i] = w[j]; treffer = true; } });
+    if (treffer && quellen) quellen.add(land);
+    offen = offen.filter(i => !Number.isFinite(aus[i]));
+  }
+  return aus;
+}
+
+async function hoehenWerteArt(art, ost, nord, verfahren, teil) {
   const def = HOEHEN_ARTEN[art], res = def.aufloesung, npx = def.pixel;
   const anzahl = ost.length;
   const aus = new Float32Array(anzahl).fill(NaN);
@@ -552,7 +741,8 @@ async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = fals
     if (!kachel) return;
     const k = kachel.kopf, noetig = new Set();
     for (let j = 0; j < b.pixel.length; j += 2) {
-      noetig.add(Math.floor(b.pixel[j + 1] / k.bh) * k.quer + Math.floor(b.pixel[j] / k.bw));
+      const c = b.pixel[j] - k.dl, r = b.pixel[j + 1] - k.dr;
+      if (c >= 0 && r >= 0 && c < k.breite && r < k.hoehe) noetig.add(Math.floor(r / k.bh) * k.quer + Math.floor(c / k.bw));
     }
     geladen.set(`${b.e}_${b.n}`, { kopf: k, bloecke: await hoehenBloeckeLaden(kachel, noetig) });
   });
@@ -561,9 +751,10 @@ async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = fals
     const o = ort(C, R);
     const g = geladen.get(`${o.e}_${o.n}`);
     if (!g) return NaN;
-    const k = g.kopf;
-    const block = g.bloecke.get(Math.floor(o.r / k.bh) * k.quer + Math.floor(o.c / k.bw));
-    return block ? block[(o.r % k.bh) * k.bw + (o.c % k.bw)] : NaN;
+    const k = g.kopf, c = o.c - k.dl, r = o.r - k.dr;   // in der (womöglich beschnittenen) Datei
+    if (c < 0 || r < 0 || c >= k.breite || r >= k.hoehe) return NaN;
+    const block = g.bloecke.get(Math.floor(r / k.bh) * k.quer + Math.floor(c / k.bw));
+    return block ? block[(r % k.bh) * k.bw + (c % k.bw)] : NaN;
   };
 
   for (let i = 0; i < anzahl; i++) {
@@ -586,18 +777,33 @@ async function hoehenWerte(art, ost, nord, verfahren = 'bilinear', { teil = fals
 /* Geländehöhe an einem einzelnen Punkt — für das Ergebnis, die Sprechblasen und
  * das Abstecken. Vom DGM kommt nur der Streifen, in dem der Punkt liegt, samt
  * Kopf der Datei: rund 25 kB statt 2–4 MB. Liegt die Kachel schon im Vorrat,
- * kostet es nichts. Klar außerhalb Bayerns wird gar nicht erst gefragt. */
-const BAYERN_RAHMEN = { s: 47.26, n: 50.57, w: 8.97, o: 13.84 };
+ * kostet es nichts. In BW geht das nicht — aus dem gepackten Archiv kommt nur
+ * die ganze Datei des Kilometers, rund 3,4 MB, danach liegt sie im Vorrat.
+ * Klar außerhalb beider Länder wird gar nicht erst gefragt. */
+const HOEHEN_RAHMEN = {
+  by: { s: 47.26, n: 50.57, w: 8.97, o: 13.84 },
+  bw: { s: 47.52, n: 49.80, w: 7.50, o: 10.50 }
+};
 
-function inBayernRahmen(lat, lon) {
-  const r = BAYERN_RAHMEN;
+function inLandRahmen(land, lat, lon) {
+  const r = HOEHEN_RAHMEN[land];
   return lat >= r.s && lat <= r.n && lon >= r.w && lon <= r.o;
 }
 
-async function hoehenPunkt(lat, lon) {
-  if (!inBayernRahmen(lat, lon)) return NaN;
+function inBayernRahmen(lat, lon) {
+  return inLandRahmen('by', lat, lon);
+}
+
+/** Gibt es hier überhaupt ein Land mit Höhendaten? */
+function inHoehenRahmen(lat, lon) {
+  return Object.keys(HOEHEN_RAHMEN).some(land => inLandRahmen(land, lat, lon));
+}
+
+/** Höhe am Punkt; mit quellen wie bei hoehenWerte. */
+async function hoehenPunkt(lat, lon, quellen = null) {
+  if (!inHoehenRahmen(lat, lon)) return NaN;
   const [e, n] = utm32Hin(lat, lon);
-  return (await hoehenWerte('dgm1', Float64Array.of(e), Float64Array.of(n), 'bilinear', { teil: true }))[0];
+  return (await hoehenWerte('dgm1', Float64Array.of(e), Float64Array.of(n), 'bilinear', { teil: true, quellen }))[0];
 }
 
 /** Profil entlang eines Linienzugs [[lat, lon], …].
@@ -631,13 +837,15 @@ async function hoehenProfil(punkte, art, { abstand, maxPunkte = 8000 } = {}) {
 
   const vorher = HOEHEN.geladen;
   const ostF = Float64Array.from(ost), nordF = Float64Array.from(nord);
-  const hoehe = await hoehenWerte(art, ostF, nordF);
+  const quellen = new Set();
+  const hoehe = await hoehenWerte(art, ostF, nordF, 'bilinear', { quellen });
   return { art, station: Float64Array.from(station), ost: ostF, nord: nordF, hoehe, ecken,
-    laenge: gesamt, schritt, geladen: HOEHEN.geladen - vorher };
+    laenge: gesamt, schritt, geladen: HOEHEN.geladen - vorher, quellen: [...quellen] };
 }
 
 // Für die Prüfung unter Node (werkzeug/hoehen-pruefen.mjs); im Browser ohne Wirkung
 if (typeof module === 'object' && module.exports) {
   module.exports = { HOEHEN, HOEHEN_ARTEN, utm32Hin, utm32Zurueck, ellipsoidAbstand,
-    lzwEntpacken, tiffKopf, hoehenKachel, hoehenWerte, hoehenPunkt, hoehenProfil };
+    lzwEntpacken, tiffKopf, hoehenKachel, hoehenWerte, hoehenWerteArt, hoehenPunkt, hoehenProfil,
+    lglAdresse, zipVerzeichnis, lglDatei, xyzLesen, inHoehenRahmen };
 }

@@ -132,7 +132,7 @@ const TOUR_SCHRITTE = [
     text: 'Der Querschnitt am Gleis aus dem amtlichen Geländemodell DGM1. Ein Finger auf dem Bild zeigt ' +
       'Höhe und Stelle auf der Karte. Darunter: Gebäude und Oberfläche dazuladen, Breite und Überhöhung ' +
       'einstellen, meterweise die Strecke entlangspringen. „Längs" zeigt das Gelände am Gleis entlang, ' +
-      'das Teilen-Zeichen macht ein PDF. Nur in Bayern.',
+      'das Teilen-Zeichen macht ein PDF. In Bayern und Baden-Württemberg.',
     ziel: () => tourSichtbar('#bottom'),
     vorher: async lauf => {
       /* Am Gleis, wenn das Ergebnis aus Schritt 2 noch dasteht — sonst frei,
@@ -147,7 +147,7 @@ const TOUR_SCHRITTE = [
       }
       await tourBis(() => lauf !== tourLauf || (!profLaedt && (profDgm || profFehler)));
       if (lauf === tourLauf && !profDgm) {
-        return 'Hier kam kein Profil zustande — es braucht Netz und geht nur in Bayern. Sonst steht unten ' +
+        return 'Hier kam kein Profil zustande — es braucht Netz und geht nur in Bayern und Baden-Württemberg. Sonst steht unten ' +
           'der Geländeschnitt am Gleis oder zwischen getippten Punkten, auf Wunsch mit Gebäuden und Bewuchs.';
       }
     },
@@ -330,7 +330,7 @@ const HILFE = {
     {
       titel: 'PDF erstellen',
       text: 'Rechnet die Schnitte nacheinander, eine Seite je Kilometer; das braucht Netz für Kacheln, die ' +
-        'noch nicht auf dem Gerät liegen. Was nicht zustande kommt, etwa außerhalb Bayerns, steht danach ' +
+        'noch nicht auf dem Gerät liegen. Was nicht zustande kommt, etwa außerhalb von Bayern und BW, steht danach ' +
         'unter „Ohne Seite". Zum Schluss Teilen oder Speichern.',
       ziel: () => tourSichtbar('#mappeLos')
     }
