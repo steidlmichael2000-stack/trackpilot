@@ -80,7 +80,8 @@ das Protokoll `land://{art}/{z}/{x}/{y}` (`addProtocol` in `glLaden`). Je Kachel
 an `bw-grenze.json`; im 300-m-Saum je Bildpunkt per `dopMaske`, weiße Bildpunkte vom anderen Land.
 Nicht auf „LGL als PNG obendrauf" zurückbauen: Das LGL-Relief reicht deckend über die Grenze und hat
 Löcher (Ulm-Wiblingen). Grenze neu: `node werkzeug/bw-grenze-bauen.mjs`.
-Parzellen sind eine `ParzGruppe` aus zwei `ParzWms` (BVV und LGL-INSPIRE), je mit `bounds` des Landes.
+Parzellen sind eine `ParzGruppe` aus drei `ParzWms` (BVV; LGL-Flurstücke; LGL-Gebäude mit
+`fuellungWeg` und 1024er-Kacheln, weil der Dienst je Abfrage ~2,3 s braucht), je mit `bounds` des Landes.
 Straßen und Ortsnamen kamen bis 30.09.2026 als Rasterkacheln von Esri: auf dem Land ab
 Zoomstufe 16 leer und auf dem Handy unscharf. Nicht zurückbauen.
 Über der dunklen Karte ersetzen unsere Straßen und Namen deren eigene (`glDunkelErsetzt`,

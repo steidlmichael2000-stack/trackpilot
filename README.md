@@ -820,6 +820,14 @@ Maßstab, auf Stufe 15 sind es 66 kB je Kachel und ein Gewirr). Die OGC API Feat
 Flurstücke auch als Vektoren (mit Fläche und Gemarkung, 87 kB gepackt für 400 × 400 m), ist aber
 eine Beta; der Bilddienst passt zur bayerischen Lösung.
 
+Die Gebäudeumringe stehen in Bayern in der Parzellarkarte; in BW hat der Flurstücksdienst nur
+Flurstücke und Fluren, die Gebäude sind ein eigener INSPIRE-WMS (`WMS_INSP_BW_Gebaeude_ALKIS`, Layer
+`BU.Building`). Er zeichnet graue Flächen (128, 128, 128) mit dunklem Rand und nimmt keine eigenen
+Stile (SLD) an; die App macht das Grau durchsichtig (`parzFuellungWeg`), übrig bleibt der Umring wie
+in Bayern. Der Dienst braucht je Abfrage rund 2,3 s, fast unabhängig von der Größe (256 px 2,0–3,3 s,
+1024 px 2,4–2,7 s) — die Ebene holt deshalb Kacheln zu 1024 px: ein Bildschirm in 2 Abfragen und
+3,9 s statt 20 Abfragen und bis 11 s.
+
 **Ganz nah weich statt blockig.** Geholt wird das DOP20 bis Zoomstufe 19 (in Bayern 0,20 m je
 Bildpunkt, so fein wie das Bild selbst), das Relief bis 18; darüber vergrößert Leaflet bzw. MapLibre
 die letzte Stufe weich. Bis Oktober 2026 ging es bis 22 — der MapServer der BVV rechnet so feine

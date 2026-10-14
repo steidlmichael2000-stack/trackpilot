@@ -2397,8 +2397,18 @@ function initMap() {
       layers: 'alkis:CP.CadastralParcel', format: 'image/png', transparent: true,
       // Der LGL zeichnet in jedem Maßstab (Stufe 15: 66 kB je Kachel, ein Gewirr) — wie in Bayern erst ab 17
       version: '1.3.0', maxZoom: 22, minZoom: 17, crossOrigin: 'anonymous', bounds: rahmen(HOEHEN_RAHMEN.bw),
-      attribution: `Flurstücke BW: <a href="https://www.lgl-bw.de/">LGL-BW</a> (${new Date().getFullYear()}, dl-de/by-2-0)`,
+      attribution: `Flurstücke und Gebäude BW: <a href="https://www.lgl-bw.de/">LGL-BW</a> (${new Date().getFullYear()}, dl-de/by-2-0)`,
       farbe: hexRgb(parzFarbe()), punkte: true, nurBayern: false
+    }),
+    /* Gebäudeumringe: In Bayern stehen sie in der Parzellarkarte; der Flurstücks-
+     * dienst des LGL hat nur Flurstücke und Fluren (INSPIRE trennt die Themen),
+     * die Gebäude sind ein eigener Dienst. Der braucht je Abfrage rund 2,3 s, fast
+     * gleich, ob 256 oder 1024 px (14.10.2026: 2,0–3,3 s gegen 2,4–2,7 s) — daher
+     * Kacheln zu 1024 px, ein Handybildschirm braucht dann 2–4 statt 20. */
+    new ParzWms('https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_INSP_BW_Gebaeude_ALKIS', {
+      layers: 'BU.Building', format: 'image/png', transparent: true, tileSize: 1024, zoomOffset: -2,
+      version: '1.3.0', maxZoom: 22, minZoom: 17, crossOrigin: 'anonymous', bounds: rahmen(HOEHEN_RAHMEN.bw),
+      farbe: hexRgb(parzFarbe()), punkte: true, nurBayern: false, fuellungWeg: true
     })
   ]);
 
@@ -2578,6 +2588,19 @@ function ausserhalbBayerns() {
  * an, ausdrücklich so gewünscht; aus über die Farbwahl). An der Kachelkante
  * geschnittene Linienenden dieser Größe sind unsichtbar klein. */
 const PARZ_PUNKT_MAX = 4;
+
+/* Die Gebäude des LGL (INSPIRE-WMS) kommen als graue Fläche (128, 128, 128)
+ * mit dunklem Rand; eigene Stile (SLD) nimmt der Dienst nicht an. Grau wird
+ * durchsichtig, je dunkler, desto deckender — übrig bleibt der Umring als
+ * schwarze Linie wie in der bayerischen Parzellarkarte, samt Kantenglättung.
+ * Gemessen auf einer Kachel bei Stuttgart: 21 903 Bildpunkte Fläche, 1055 Rand. */
+function parzFuellungWeg(d) {
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    d[i + 3] = Math.round(d[i + 3] * Math.max(0, 1 - d[i] / 128));
+    d[i] = d[i + 1] = d[i + 2] = 0;
+  }
+}
 
 function parzPunkteWeg(d, w, h) {
   const n = w * h, gesehen = new Uint8Array(n), stapel = new Int32Array(n), teil = new Int32Array(PARZ_PUNKT_MAX + 1);
@@ -2800,8 +2823,8 @@ const ParzGruppe = L.LayerGroup.extend({
 });
 
 const ParzWms = L.TileLayer.WMS.extend({
-  // Hier deklariert, sonst hängte Leaflet „farbe", „punkte" und „nurBayern" als WMS-Parameter an jede Abfrage
-  options: { farbe: [0, 0, 0], punkte: true, nurBayern: true },
+  // Hier deklariert, sonst hängte Leaflet diese als WMS-Parameter an jede Abfrage
+  options: { farbe: [0, 0, 0], punkte: true, nurBayern: true, fuellungWeg: false },
 
   createTile(coords, done) {
     const tile = document.createElement('canvas');
@@ -2827,6 +2850,7 @@ const ParzWms = L.TileLayer.WMS.extend({
     g.drawImage(tile._quelle, 0, 0);
     const bild = g.getImageData(0, 0, tile.width, tile.height);
     const d = bild.data;
+    if (this.options.fuellungWeg) parzFuellungWeg(d);
     if (!this.options.punkte) parzPunkteWeg(d, tile.width, tile.height);
     const [r, gr, b] = this.options.farbe;
     for (let i = 0; i < d.length; i += 4) {
