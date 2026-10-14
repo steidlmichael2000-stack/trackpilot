@@ -867,7 +867,23 @@ Element hatte 13 Pixel. Zusammenhängende Teile bis 4 sichtbare Pixel werden dur
 verschwanden auf einem Handyausschnitt 46 158 Punktpixel, Grenzen, Gebäude und Straßennamen blieben
 unverändert.
 
-## Festpunkte (Baden-Württemberg)
+## Festpunkte (Baden-Württemberg und Bayern)
+
+**Bayern** (seit 14.10.2026): WMS Festpunkte der BVV (`geoservices.bayern.de/od/wms/afis/v1/festpunkte`,
+CC BY 4.0, CORS frei) mit Höhenfestpunkten (`by_hoehenfestpunkte`, DHHN2016), TP
+(`by_lagefestpunkte`) und historischen TP (`by_lagefestpunkte_hist`, heute Katasterfestpunkte
+beim ADBV); „TP" in der Auswahl schaltet beide. Aufnahme-, Polygon- und Grenzpunkte gibt es in
+Bayern nicht offen — die Grenzpunktkoordinaten sind das Produkt „ALKIS-Punktkoordinaten". Gezeigt
+wird das Bild der BVV (rote Höhenfestpunkte, grüne TP, eng Beieinanderliegendes als Kreis mit
+Anzahl), ab Zoomstufe 13. Eigene Zeichen aus GetFeatureInfo über einen Ausschnitt waren nicht
+verlässlich: 5 × 5 km um Bamberg ergaben in 1-km-Zellen 79 Höhenfestpunkte, in 500-m-Zellen 74, in
+2-km-Zellen 71 und in einer 5-km-Zelle keinen. Ein Tipp auf die Karte fragt deshalb nur die Stelle
+ab (41 × 41 Abfragepunkte zu je vier Bildschirmpunkten, der nächste Punkt im Umkreis von 16
+Bildschirmpunkten, 0,14 s): Punktkennung, Koordinate in UTM 32 und der Festpunktnachweis als PDF
+(`geodaten.bayern.de/odd_data/festpunkte/pdf/…`); die Höhe steht nur dort. Beim Messen fängt der
+Tipp den Punkt (geprüft: 4 mm Rundungsrest).
+
+### Baden-Württemberg
 
 Eigene Auflage **Festpunkte** (Knopf unter den Auflagen, langer Druck wählt die Arten), aus der
 OGC API Features des LGL (`ogcapi.lgl-bw.de/beta/pygeoapi`, Beta, dl-de/by-2-0, CORS frei):
@@ -886,7 +902,7 @@ auf den Zentimeter, ohne Umweg über WGS84. Geholt wird je Zelle (Web-Mercator-K
 14 bzw. 16) und Art, nur im Rahmen um BW; die API blättert ab 5000 Punkten weiter („next").
 Gemessen am 14.10.2026, 1 km² Stuttgart-West: 16 TP, 189 Aufnahme-, 62 Polygon-, 227 Sicherungs-
 und über 2000 Grenzpunkte; ein Bildschirm auf Stufe 17 mit 73 Punkten in 0,5 s, auf Stufe 18 mit
-Grenzpunkten 375 in 0,4 s. Ob Bayern Festpunkte offen anbietet, ist noch nicht geprüft.
+Grenzpunkten 375 in 0,4 s.
 
 Die Zeichen liegen wie die KML-Symbole in der nicht mitdrehenden Ebene (`map._norotatePane`), sonst
 lagen sie über den Sprechblasen.

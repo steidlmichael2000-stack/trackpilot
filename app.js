@@ -3004,7 +3004,7 @@ function buildParzRow() {
  *  Grenzen und Gleise scharf, statt eingefärbt zu werden. */
 function ordneAuflagen() {
   if (wmsLayer) wmsLayer.bringToFront();
-  for (const layer of [radarSchicht, parzLayer, ormLayer]) {
+  for (const layer of [radarSchicht, parzLayer, fpByLayer, ormLayer]) {
     if (layer && map.hasLayer(layer)) layer.bringToFront();
   }
 }
@@ -3104,7 +3104,7 @@ function toggleOverlay(kennung) {
   }
   if (an && kennung === 'fp') {
     const c = map.getCenter(), ab = Math.min(...FP_ARTEN.filter(([k]) => fpArtAn(k)).map(([, , , z]) => z), 99);
-    if (!inLandRahmen('bw', c.lat, c.lng)) toast('Festpunkte gibt es bisher für Baden-Württemberg.');
+    if (ausserhalbBayerns() && !inLandRahmen('bw', c.lat, c.lng)) toast('Festpunkte gibt es für Bayern und Baden-Württemberg.');
     else if (map.getZoom() < ab) toast(`Festpunkte erscheinen ab Zoomstufe ${ab} — näher heranzoomen.`);
   }
   if (an && NUR_UEBER_BILD.has(kennung) && (prefs.base || 'osm') === 'osm') {
@@ -5433,8 +5433,7 @@ function ifgKnopfBinden() { auswahlKnopfBinden('ifg', '#ifgWahl', ifgWahlZeigen)
  *
  * Geholt wird je Zelle (Web-Mercator-Kachel der Stufe zell) und Art, nur was an
  * und ab seiner Zoomstufe sichtbar ist, nur im Rahmen um BW. Höhen hat nur der
- * Höhenfestpunkt (NHN), mit Ordnung und Lagebeschreibung. Ob Bayern Festpunkte
- * offen anbietet, ist noch nicht geprüft. */
+ * Höhenfestpunkt (NHN), mit Ordnung und Lagebeschreibung. Bayern siehe FP_BY_WMS. */
 const FP_API = 'https://ogcapi.lgl-bw.de/beta/pygeoapi/collections';
 const FP_QUELLE = `Festpunkte: <a href="https://www.lgl-bw.de/">LGL-BW</a> (${new Date().getFullYear()}, dl-de/by-2-0)`;
 // [Schlüssel, Name, Sammlung, ab Zoom, Zellen-Zoom, Vorgabe an]
@@ -5446,8 +5445,81 @@ const FP_ARTEN = [
   ['sp', 'Sicherungspunkte', 'versicherungspunkte', 17, 14, false],
   ['gp', 'Grenzpunkte', 'grenzpunkt', 18, 16, false]
 ];
-const FP_NAME = { hfp: 'Höhenfestpunkt', tp: 'Trigonometrischer Punkt', ap: 'Aufnahmepunkt', pl: 'Polygonpunkt',
-  sp: 'Sicherungspunkt', gp: 'Grenzpunkt' };
+const FP_NAME = { hfp: 'Höhenfestpunkt', tp: 'Trigonometrischer Punkt', tph: 'Historischer TP', ap: 'Aufnahmepunkt',
+  pl: 'Polygonpunkt', sp: 'Sicherungspunkt', gp: 'Grenzpunkt' };
+
+/* Bayern (seit 14.10.2026): WMS Festpunkte der BVV, CC BY 4.0, CORS frei —
+ * Höhenfestpunkte, TP (Lagefestpunkte) und historische TP (heute
+ * Katasterfestpunkte beim ADBV). Aufnahme-, Polygon- und Grenzpunkte gibt es
+ * dort nicht offen. Gezeichnet wird das Bild der BVV, nicht eigene Zeichen:
+ * Punkte per GetFeatureInfo für einen Ausschnitt zu sammeln war nicht
+ * verlässlich (5 × 5 km um Bamberg: 1-km-Zellen 79 Höhenfestpunkte,
+ * 500-m-Zellen 74, 2-km-Zellen 71, eine 5-km-Zelle keinen). Beim Antippen
+ * fragt die App die Stelle ab: Punktkennung, Koordinate (UTM 32) und der
+ * Festpunktnachweis als PDF. Die Höhe steht nur im PDF. */
+const FP_BY_WMS = 'https://geoservices.bayern.de/od/wms/afis/v1/festpunkte';
+const FP_BY_EBENEN = { hfp: ['by_hoehenfestpunkte'], tp: ['by_lagefestpunkte', 'by_lagefestpunkte_hist'] };
+const FP_BY_ART = { by_hoehenfestpunkte: 'hfp', by_lagefestpunkte: 'tp', by_lagefestpunkte_hist: 'tph' };
+const FP_BY_PDF = 'https://geodaten.bayern.de/odd_data/festpunkte/pdf/';
+const FP_BY_AB = 13;
+let fpByLayer = null;
+
+/** Die gewählten bayerischen Ebenen, durch Komma getrennt; leer, wenn keine. */
+const fpByEbenen = () => Object.entries(FP_BY_EBENEN).filter(([k]) => fpArtAn(k)).flatMap(([, e]) => e).join(',');
+
+/** Den bayerischen Kartendienst der Wahl anpassen: an, aus, andere Ebenen. */
+function fpBayernSetzen() {
+  const ebenen = map.hasLayer(fpLayer) ? fpByEbenen() : '';
+  if (!ebenen) { if (fpByLayer && map.hasLayer(fpByLayer)) map.removeLayer(fpByLayer); return; }
+  if (!fpByLayer) {
+    const r = HOEHEN_RAHMEN.by;
+    fpByLayer = L.tileLayer.wms(FP_BY_WMS, {
+      layers: ebenen, format: 'image/png', transparent: true, version: '1.3.0',
+      maxZoom: 22, minZoom: FP_BY_AB, zIndex: 50, crossOrigin: 'anonymous',
+      bounds: L.latLngBounds([r.s, r.w], [r.n, r.o]),
+      attribution: 'Festpunkte Bayern: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0)'
+    });
+  } else if (fpByLayer.wmsParams.layers !== ebenen) fpByLayer.setParams({ layers: ebenen });
+  if (!map.hasLayer(fpByLayer)) { fpByLayer.addTo(map); ordneAuflagen(); }
+}
+
+/** Festpunkt in Bayern an der angetippten Stelle (GetFeatureInfo); null, wenn keiner.
+ *  Abgefragt wird ein Fenster von 41 × 41 Punkten zu je vier Bildschirmpunkten,
+ *  genommen der nächste Punkt im Umkreis eines Fingers. */
+async function fpBayernAntippen(latlng) {
+  if (!fpByLayer || !map.hasLayer(fpByLayer) || map.getZoom() < FP_BY_AB) return null;
+  if (!inLandRahmen('by', latlng.lat, latlng.lng)) return null;
+  const ebenen = fpByEbenen();
+  if (!ebenen) return null;
+  const [e, n] = utm32Hin(latlng.lat, latlng.lng);
+  const mpp = 40075016.686 * Math.cos(latlng.lat * Math.PI / 180) / 2 ** (map.getZoom() + 8);
+  const h = 20 * 4 * mpp;
+  const url = `${FP_BY_WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo&CRS=EPSG:25832&STYLES=` +
+    `&WIDTH=41&HEIGHT=41&I=20&J=20&FEATURE_COUNT=20&LAYERS=${ebenen}&QUERY_LAYERS=${ebenen}` +
+    `&BBOX=${[e - h, n - h, e + h, n + h].map(v => v.toFixed(2)).join(',')}&INFO_FORMAT=application/vnd.ogc.gml`;
+  let xml;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    xml = new DOMParser().parseFromString(await r.text(), 'application/xml');
+  } catch { return null; }
+  let best = null, bestD = 16 * mpp;          // höchstens 16 Bildschirmpunkte daneben
+  for (const f of xml.getElementsByTagName('*')) {
+    const m = /^(by_\w+)_feature$/.exec(f.localName);
+    if (!m) continue;
+    const c = f.getElementsByTagNameNS('*', 'coordinates')[0];
+    if (!c) continue;
+    const [pe, pn] = c.textContent.trim().split(/[\s,]+/).map(Number);
+    const d = Math.hypot(pe - e, pn - n);
+    if (!(d < bestD)) continue;
+    const text = tag => { const el = f.getElementsByTagName(tag)[0]; return el ? el.textContent.trim() : ''; };
+    const [la, lo] = utm32Zurueck(pe, pn);
+    bestD = d;
+    best = { art: FP_BY_ART[m[1]] || 'tp', e: pe, n: pn, lat: la, lon: lo, land: 'by',
+      p: { punktkennung: text('punktkennung'), pdf: text('filename') ? FP_BY_PDF + text('filename') : '' } };
+  }
+  return best;
+}
 const FP_AB = Object.fromEntries(FP_ARTEN.map(([k, , , z]) => [k, z]));
 const fpArtAn = k => {
   const v = prefs.fpInhalt && prefs.fpInhalt[k];
@@ -5513,13 +5585,14 @@ function fpAuflageAnlegen() {
   map.getPane('fpPane').style.zIndex = 610;          // unter den KML-Symbolen (620) und Sprechblasen
   fpLayer = L.layerGroup([], { attribution: FP_QUELLE });
   fpLayer.on('add', () => fpAuflageZeichnen());
-  fpLayer.on('remove', () => fpLayer.clearLayers());
+  fpLayer.on('remove', () => { fpLayer.clearLayers(); fpBayernSetzen(); });
   map.on('moveend', () => { if (map.hasLayer(fpLayer)) fpAuflageZeichnen(); });
   return fpLayer;
 }
 
 async function fpAuflageZeichnen() {
   if (!fpLayer || !map.hasLayer(fpLayer)) return;
+  fpBayernSetzen();
   const stand = ++fpStand, z = map.getZoom();
   const b = map.getBounds().pad(0.15);
   const [s, w, n, o] = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
@@ -5575,8 +5648,13 @@ function fpTipp(ev, pt) {
   // Wie aus Tachymeter und Koordinatenliste: ohne Tausenderpunkte, die Zone dahinter
   const fmt = v => v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
   zeilen.push(`<span>E ${fmt(pt.e)} · N ${fmt(pt.n)} (UTM 32)</span>`);
-  zeilen.push(`<a href="${gmapsUrl(pt.lat, pt.lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>`);
-  zeilen.push(`<small>LGL-BW, OGC API (Beta) — keine amtliche Auskunft</small>`);
+  // Bayern: Höhe, Skizze und Beschreibung stehen im amtlichen Nachweis
+  // Je Link eine eigene Zeile (span) — zwei Links hintereinander liefen sonst zusammen
+  if (p.pdf) zeilen.push(`<span><a href="${esc(p.pdf)}" target="_blank" rel="noopener">Festpunktnachweis (PDF)</a></span>`);
+  zeilen.push(`<span><a href="${gmapsUrl(pt.lat, pt.lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a></span>`);
+  zeilen.push(pt.land === 'by'
+    ? `<small>Bayerische Vermessungsverwaltung, CC BY 4.0 — keine amtliche Auskunft</small>`
+    : `<small>LGL-BW, OGC API (Beta) — keine amtliche Auskunft</small>`);
   zeilen.push(`<button type="button" class="kml-km" data-fpkm>Kilometer bestimmen` +
     `<small>rechnet den Punkt auf die Strecke — braucht Netz</small></button>`);
   const blase = L.popup({
@@ -8317,7 +8395,11 @@ function toleranceMeters(latlng) {
  * überflüssig, seit ein langer Druck einen Punkt setzt: Der Griff ist dann
  * bewusst, und die Sprechblase fragt, was damit geschehen soll. Kilometersteine
  * und KML-Objekte bleiben antippbar — die trifft man nicht zufällig. */
-function onMapClick(ev) {
+async function onMapClick(ev) {
+  /* Festpunkte in Bayern sind ein Kartenbild — ob ein Tipp einen trifft, sagt
+   * erst der Dienst. Getroffen: Sprechblase bzw. beim Messen der Punkt selbst. */
+  const fp = await fpBayernAntippen(ev.latlng);
+  if (fp) { fpTipp(ev, fp); return; }
   const ziel = tippZiel();
   if (ziel) ziel(ev.latlng);
 }

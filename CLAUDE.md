@@ -306,7 +306,9 @@ Auflage `fp` (in `AUFLAGEN`), Knopf `#fpBtn` wie DB-Netz über `auswahlKnopfBind
 `crs=EPSG:25832` — die Koordinaten im Popup sind die gespeicherten, nicht zurückgerechnet. Ebene
 `fpPane` in `map._norotatePane` (sonst über den Sprechblasen). Ein Tipp beim Messen fängt den Punkt
 (`tippZiel`). Abstecken auf Festpunkte gibt es noch nicht — `abZielSetzen` erwartet KML-Objekte.
-Für Bayern ist noch nicht geprüft, ob es Festpunkte offen gibt.
+Bayern: WMS-Bild der BVV (`fpByLayer`, `fpBayernSetzen`) plus GetFeatureInfo beim Tippen
+(`fpBayernAntippen` in `onMapClick`). Nicht auf „Punkte per GetFeatureInfo sammeln und selbst zeichnen"
+umbauen — das lieferte je nach Zellgröße verschieden viele Punkte (README).
 
 ## Menü (Einstellungen), Oktober 2026
 
