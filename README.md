@@ -791,6 +791,18 @@ wäscht genau diese kleinen Formen weg und ist deshalb nicht eingebaut. Beides d
 außerhalb antworten die Dienste mit einem leeren Bild und Status 200, also nicht mit einem Fehler,
 den man abfangen könnte — die App warnt daher selbst, wenn die Kartenmitte außerhalb liegt.
 
+**DOP20 auch in Baden-Württemberg** (seit 14.10.2026). Das LGL bietet sein Orthophoto ebenfalls
+offen an (`owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C`, Layer `IMAGES_DOP_20_RGB`,
+EPSG:3857, CORS frei, Datenlizenz Deutschland – Namensnennung 2.0). Auch dieser Dienst liefert
+außerhalb seines Landes eine leere Kachel. Als PNG wäre sie durchsichtig, und man könnte beide
+Dienste einfach übereinanderlegen — aber ein Luftbild als PNG ist gemessen 11-mal (BVV, 17 kB →
+192 kB je Kachel) bzw. knapp 3-mal (LGL, 23 kB → 63 kB) so groß wie als JPEG. Die App entscheidet
+deshalb je Kachel an der Landesgrenze (`bw-grenze.json`, aus dem Basis-DLM über die OGC API des
+LGL, auf 50 m vereinfacht, 79 kB; neu bauen mit `node werkzeug/bw-grenze-bauen.mjs`): ganz in BW
+das LGL als JPEG, ganz außerhalb die BVV als JPEG, nur im Saum von 300 m plus halber Kachel beide,
+BVV als JPEG unten, LGL als PNG darüber. Die Entscheidung kostet 0,2 ms je Kachel. An der Donau
+zwischen Ulm und Neu-Ulm gehen beide Bilder ohne Lücke ineinander über.
+
 **Ganz nah weich statt blockig.** Geholt wird das DOP20 bis Zoomstufe 19 (in Bayern 0,20 m je
 Bildpunkt, so fein wie das Bild selbst), das Relief bis 18; darüber vergrößert Leaflet bzw. MapLibre
 die letzte Stufe weich. Bis Oktober 2026 ging es bis 22 — der MapServer der BVV rechnet so feine
@@ -1594,7 +1606,7 @@ dunkle Karte, Straßen und Ortsnamen von [OpenFreeMap](https://openfreemap.org/)
 Daten © OpenStreetMap). Regenradar: Quelle [Deutscher Wetterdienst](https://www.dwd.de/).
 DOP20, Geländerelief, Parzellarkarte und die Höhen in Profil und Höhenangabe (DGM1, DOM20): Bayerische
 Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de/) (CC BY 4.0); das
-Profil ist daraus berechnet. DGM1, DOM1 und LoD2 in Baden-Württemberg: LGL-BW (2026), Datenlizenz Deutschland –
+Profil ist daraus berechnet. DOP20, DGM1, DOM1, LoD2 und Landesgrenze in Baden-Württemberg: LGL-BW (2026), Datenlizenz Deutschland –
 Namensnennung – Version 2.0, [www.lgl-bw.de](https://www.lgl-bw.de/), bearbeitet.
 Unter `vendor/` liegen [Leaflet](https://leafletjs.com/) (BSD-2-Clause),
 [leaflet-rotate](https://github.com/Raruto/leaflet-rotate) (GPL-3.0) und

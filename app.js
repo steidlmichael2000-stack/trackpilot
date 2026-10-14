@@ -2001,6 +2001,9 @@ const OFM_KACHELN = 'https://tiles.openfreemap.org/planet';
 const OFM_GLYPHEN = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
 const OFM_QUELLE = '<a href="https://openfreemap.org/">OpenFreeMap</a> &copy; OpenMapTiles, Daten &copy; OpenStreetMap';
 const BVV_QUELLE = 'DOP20/Relief/Parzellen: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0)';
+// Das DOP20 kommt aus zwei Ländern (DopWms) — beide Urheber, das LGL mit Jahr des Datenbezugs
+const DOP_QUELLE = 'DOP20: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0), ' +
+  `<a href="https://www.lgl-bw.de/">LGL-BW</a> (${new Date().getFullYear()}, dl-de/by-2-0)`;
 
 /* Die Bilder für MapLibre — dieselben Dienste und Grenzen wie die Leaflet-
  * Ebenen in initMap. Die WMS-Dienste fragt MapLibre über {bbox-epsg-3857} ab;
@@ -2020,7 +2023,8 @@ const BVV_NATIV = { dop: 19, relief: 18 };
 const GL_BILDER = {
   sat: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     maxzoom: 18, quelle: 'Luftbild: Esri, Maxar' },
-  dop: { url: BVV_WMS('dop/v1/dop20', 'by_dop20c'), maxzoom: BVV_NATIV.dop, quelle: BVV_QUELLE },
+  // Bayern und BW, je Kachel entschieden (dopKachel, Protokoll in glLaden)
+  dop: { url: 'dop20://{z}/{x}/{y}', maxzoom: BVV_NATIV.dop, quelle: DOP_QUELLE },
   relief: { url: BVV_WMS('dgm/v1/relief', 'by_relief_schraeglicht'), maxzoom: BVV_NATIV.relief, quelle: BVV_QUELLE }
 };
 
@@ -2232,6 +2236,11 @@ async function glLaden() {
       css.href = 'vendor/maplibre/maplibre-gl.css';
       document.head.appendChild(css);
       const maplibregl = await import('./vendor/maplibre/maplibre-gl.mjs');
+      // DOP20 aus Bayern und BW: dieselbe Kachel wie in Leaflet (dopKachel)
+      maplibregl.addProtocol('dop20', async (anfrage, abbruch) => {
+        const [z, x, y] = anfrage.url.slice('dop20://'.length).split('/').map(Number);
+        return { data: await (await dopKachel(z, x, y, abbruch.signal)).arrayBuffer() };
+      });
       const stil = glStil();
       glStilZuletzt = typeof stil === 'string' ? stil : JSON.stringify(stil);
       gl = new maplibregl.Map({
@@ -2361,10 +2370,8 @@ function initMap() {
    * den man abfangen könnte, sondern weißer Grund. */
   const BVV = BVV_QUELLE;
 
-  baseDop = L.tileLayer.wms('https://geoservices.bayern.de/od/wms/dop/v1/dop20', {
-    layers: 'by_dop20c', format: 'image/jpeg', version: '1.3.0', maxZoom: 22, maxNativeZoom: BVV_NATIV.dop,
-    crossOrigin: 'anonymous', attribution: BVV
-  });
+  // Bayern und Baden-Württemberg, je Kachel entschieden (DopWms)
+  baseDop = new DopWms({ maxZoom: 22, maxNativeZoom: BVV_NATIV.dop, attribution: DOP_QUELLE });
 
   /* Schräglicht und nicht die kombinierte Darstellung: Das Schräglicht zeigt
    * Dämme, Einschnitte und alte Trassen plastisch, die kombinierte Fassung wäscht
@@ -2588,6 +2595,114 @@ function parzPunkteWeg(d, w, h) {
   }
 }
 
+/* ============================ DOP20 aus zwei Ländern ============================
+ *
+ * Eine Ebene „DOP20" über Bayern (BVV) und Baden-Württemberg (LGL). Beide
+ * Dienste antworten außerhalb ihres Landes mit einer leeren Kachel; als PNG wäre
+ * sie durchsichtig, aber ein Luftbild als PNG ist gemessen 11-mal (BVV) bzw.
+ * knapp 3-mal (LGL) so groß wie als JPEG. Deshalb entscheidet die App je Kachel
+ * an der Landesgrenze (bw-grenze.json, werkzeug/bw-grenze-bauen.mjs):
+ *
+ *   ganz in BW            → LGL als JPEG
+ *   ganz außerhalb von BW → BVV als JPEG, wie bisher
+ *   im Saum der Grenze    → BVV als JPEG, LGL als PNG darüber, zusammengesetzt
+ *
+ * Leaflet zeichnet das in DopWms auf Canvas, MapLibre bekommt es über das
+ * Protokoll dop20:// — beide aus dopKachel. Der Saum (DOP_SAUM_M plus halbe
+ * Kacheldiagonale) deckt die 50 m Vereinfachung der Grenze weit ab. */
+const DOP_SAUM_M = 300;
+const DOP_WMS = {
+  by: 'https://geoservices.bayern.de/od/wms/dop/v1/dop20?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0' +
+    '&LAYERS=by_dop20c&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256',
+  bw: 'https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0' +
+    '&LAYERS=IMAGES_DOP_20_RGB&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256'
+};
+let bwGrenze = null;            // Promise der Ringe in UTM, je { p: Float64Array e,n,…, bb }
+
+function bwGrenzeHolen() {
+  if (!bwGrenze) {
+    bwGrenze = fetch('bw-grenze.json').then(r => { if (!r.ok) throw new Error(`Landesgrenze: HTTP ${r.status}`); return r.json(); })
+      .then(j => j.ringe.map(ring => {
+        const p = new Float64Array(ring.length * 2), bb = [Infinity, Infinity, -Infinity, -Infinity];
+        ring.forEach(([lat, lon], i) => {
+          const [e, n] = utm32Hin(lat, lon);
+          p[2 * i] = e; p[2 * i + 1] = n;
+          bb[0] = Math.min(bb[0], e); bb[1] = Math.min(bb[1], n); bb[2] = Math.max(bb[2], e); bb[3] = Math.max(bb[3], n);
+        });
+        return { p, bb };
+      }));
+    bwGrenze.catch(() => { bwGrenze = null; });
+  }
+  return bwGrenze;
+}
+
+/** 'bw', 'by' (außerhalb von BW) oder 'beide', wenn die Kachel die Grenze berühren könnte. */
+async function dopWahl(z, x, y) {
+  const ringe = await bwGrenzeHolen();
+  const n2 = 2 ** z, lon = (x + 0.5) / n2 * 360 - 180;
+  const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / n2))) * 180 / Math.PI;
+  const [e, n] = utm32Hin(lat, lon);
+  const r = 40075016.686 * Math.cos(lat * Math.PI / 180) / n2 * 0.7072 + DOP_SAUM_M;
+  let drin = false;
+  for (const { p, bb } of ringe) {
+    if (e < bb[0] - r || e > bb[2] + r || n < bb[1] - r || n > bb[3] + r) continue;
+    for (let i = 0, k = p.length - 2; i < p.length; k = i, i += 2) {
+      const ax = p[k], ay = p[k + 1], bx = p[i], by = p[i + 1];
+      if ((ay > n) !== (by > n) && e < (bx - ax) * (n - ay) / (by - ay) + ax) drin = !drin;
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.max(0, Math.min(1, ((e - ax) * dx + (n - ay) * dy) / l2)) : 0;
+      if (Math.hypot(e - ax - t * dx, n - ay - t * dy) < r) return 'beide';
+    }
+  }
+  return drin ? 'bw' : 'by';
+}
+
+function dopUrl(land, z, x, y, png = false) {
+  const R = 20037508.342789244, s = 2 * R / 2 ** z;
+  const bbox = [x * s - R, R - (y + 1) * s, (x + 1) * s - R, R - y * s].map(v => v.toFixed(3)).join(',');
+  return `${DOP_WMS[land]}&FORMAT=${png ? 'image/png&TRANSPARENT=TRUE' : 'image/jpeg'}&BBOX=${bbox}`;
+}
+
+async function dopBild(url, signal) {
+  const r = await fetch(url, { signal });
+  if (!r.ok) throw new Error(`DOP20: HTTP ${r.status}`);
+  return r.blob();
+}
+
+/** Eine Kachel als Bild-Blob: aus einem Dienst durchgereicht, an der Grenze
+ *  aus beiden zusammengesetzt (JPEG, damit der Speicher nicht anschwillt). */
+async function dopKachel(z, x, y, signal) {
+  const wahl = await dopWahl(z, x, y);
+  if (wahl !== 'beide') return dopBild(dopUrl(wahl, z, x, y), signal);
+  const [unten, oben] = await Promise.all([dopBild(dopUrl('by', z, x, y), signal), dopBild(dopUrl('bw', z, x, y, true), signal)]);
+  const c = new OffscreenCanvas(256, 256), g = c.getContext('2d');
+  for (const b of [unten, oben]) {
+    const bild = await createImageBitmap(b);
+    g.drawImage(bild, 0, 0, 256, 256);
+    bild.close();
+  }
+  return c.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
+}
+
+/* Die Leaflet-Ebene: zeichnet dopKachel auf Canvas. tile.complete von Hand
+ * wie bei ParzWms, sonst räumt _abortLoading beim Zoomen fertige Kacheln weg. */
+const DopWms = L.GridLayer.extend({
+  createTile(coords, done) {
+    const tile = document.createElement('canvas');
+    tile.width = tile.height = 256;
+    tile.complete = false;
+    dopKachel(coords.z, coords.x, coords.y)
+      .then(blob => createImageBitmap(blob))
+      .then(bild => {
+        tile.getContext('2d').drawImage(bild, 0, 0, 256, 256);
+        bild.close();
+        tile.complete = true;
+        done(null, tile);
+      }, err => done(err, tile));
+    return tile;
+  }
+});
+
 const ParzWms = L.TileLayer.WMS.extend({
   // Hier deklariert, sonst hängte Leaflet „farbe" und „punkte" als WMS-Parameter an jede Abfrage
   options: { farbe: [0, 0, 0], punkte: true },
@@ -2800,8 +2915,12 @@ function setBase(which, still = false) {
   prefs.base = which;
   grundAnwenden();
 
-  if (!still && (which === 'dop' || which === 'relief') && ausserhalbBayerns()) {
+  if (!still && which === 'relief' && ausserhalbBayerns()) {
     toast('Dieser Dienst deckt nur Bayern ab — hier bleibt der Grund weiß.');
+  }
+  // Der Rahmen um BW ist grob; wo beide Rahmen nicht greifen, ist das DOP20 sicher weiß
+  if (!still && which === 'dop' && ausserhalbBayerns() && !inLandRahmen('bw', map.getCenter().lat, map.getCenter().lng)) {
+    toast('Das DOP20 deckt Bayern und Baden-Württemberg ab — hier bleibt der Grund weiß.');
   }
 
   parzFarbeAnpassen();
