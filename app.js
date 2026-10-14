@@ -2000,7 +2000,8 @@ const OFM_DUNKEL = 'https://tiles.openfreemap.org/styles/dark';
 const OFM_KACHELN = 'https://tiles.openfreemap.org/planet';
 const OFM_GLYPHEN = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
 const OFM_QUELLE = '<a href="https://openfreemap.org/">OpenFreeMap</a> &copy; OpenMapTiles, Daten &copy; OpenStreetMap';
-const BVV_QUELLE = 'DOP20/Relief/Parzellen: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0)';
+// Nur noch die Parzellen — DOP20 und Relief nennen beide Länder selbst (LAND_QUELLE)
+const BVV_QUELLE = 'Parzellen: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0)';
 // Das DOP20 kommt aus zwei Ländern (DopWms) — beide Urheber, das LGL mit Jahr des Datenbezugs
 const LAND_QUELLE = was => `${was}: <a href="https://www.geodaten.bayern.de/">Bayerische Vermessungsverwaltung</a> (CC BY 4.0), ` +
   `<a href="https://www.lgl-bw.de/">LGL-BW</a> (${new Date().getFullYear()}, dl-de/by-2-0)`;
@@ -8967,8 +8968,11 @@ function closeBottom() {
 const UNTEN_RAND = 6;
 function updateBH() {
   let grundlinie = UNTEN_RAND;
-  for (const el of [$('#bottom'), $('#ziel')]) {
-    if (el && !el.hidden) grundlinie += el.getBoundingClientRect().height + 8;
+  // Bei offenem Menü sind die Leisten ausgeblendet (openSheet) und zählen nicht
+  if (!document.body.classList.contains('menue-offen')) {
+    for (const el of [$('#bottom'), $('#ziel')]) {
+      if (el && !el.hidden) grundlinie += el.getBoundingClientRect().height + 8;
+    }
   }
   document.documentElement.style.setProperty('--bh', Math.round(grundlinie) + 'px');
 }
@@ -10559,9 +10563,16 @@ function trefferWaehlen(t) {
 
 /* ============================ Menü, Einstellungen, Link ============================ */
 
+/* Solange das Menü offen ist, treten die Leisten unten (Ergebnis, Profil,
+ * Abstecken) zurück — auf dem Handy lagen beide übereinander. Sie bleiben, wie
+ * sie sind, und stehen nach dem Schließen wieder da (body.menue-offen in
+ * style.css, updateBH rechnet sie solange nicht mit). */
 function openSheet() {
   suchZu();
   $('#sheet').hidden = false;
+  document.body.classList.add('menue-offen');
+  updateBH();
+  quellenSetzen(false);   // der aufgeklappte Quellentext lag sonst über dem Menü
   $('#menuBtn').classList.add('is-on');
   $('#menuBtn').setAttribute('aria-expanded', 'true');
   closeSuggest();
@@ -10573,6 +10584,8 @@ function closeSheet() {
   // Lag der Tastaturfokus im Menü, geht er an den Menüknopf zurück statt ins Leere
   const fokusZurueck = $('#sheet').contains(document.activeElement);
   $('#sheet').hidden = true;
+  document.body.classList.remove('menue-offen');
+  updateBH();
   if (fokusZurueck) $('#menuBtn').focus();
   document.querySelectorAll('#sheet [data-sec]').forEach(b => { b.open = false; });
   parzWahlZeigen(false);
@@ -10700,8 +10713,8 @@ function syncButtons() {
 
   const wt = $('#wmsToggle');
   if (wt) {
+    // Ein Schalter wie die übrigen: an heißt hervorgehoben, die Beschriftung bleibt
     wt.classList.toggle('is-on', !!(prefs.wms && prefs.wms.on));
-    wt.textContent = prefs.wms && prefs.wms.on ? 'Ausblenden' : 'Anzeigen';
   }
 
   // Eingeschaltet oder nicht — für Screenreader steht das sonst nur in der Farbe
@@ -10947,6 +10960,10 @@ function bind() {
   });
 
   on('#mapLocBtn', 'click', locate);
+  // Wer bei offenem Menü zu Standort, Messen oder Abstecken greift, will zur Karte
+  for (const s of ['#mapLocBtn', '#mapMessBtn', '#mapZielBtn']) {
+    on(s, 'click', () => { if (!$('#sheet').hidden) closeSheet(); });
+  }
 
   /* Der Messknopf fragt zuerst, was gemessen werden soll; läuft schon etwas,
    * beendet er es. */
@@ -11005,6 +11022,8 @@ function bind() {
   setVal('#wmsUrl', prefs.wms.url || '');
   setVal('#wmsLayers', prefs.wms.layers || '');
   setVal('#wmsOpacity', prefs.wms.opacity || 75);
+  const wmsDeckWert = () => { const v = $('#wmsOpacityVal'); if (v) v.textContent = `${prefs.wms.opacity || 75} %`; };
+  wmsDeckWert();
 
   const wmsSave = () => {
     const u = $('#wmsUrl'), l = $('#wmsLayers');
@@ -11025,6 +11044,7 @@ function bind() {
 
   on('#wmsOpacity', 'input', ev => {
     prefs.wms.opacity = Number(ev.target.value);
+    wmsDeckWert();
     if (wmsLayer) wmsLayer.setOpacity(prefs.wms.opacity / 100);
   });
   on('#wmsOpacity', 'change', saveStore);

@@ -299,6 +299,16 @@ erklärt die Tour eine App, die es so nicht mehr gibt.
   Blase ein, `getBoundingClientRect` meldet dann Zwischenstände. Die gesetzten Werte in `style`
   vergleichen oder vorher einen Screenshot auslösen.
 
+## Menü (Einstellungen), Oktober 2026
+
+- Reihenfolge: Karte, Wetter, KML, **Ansicht**, Eigener WMS-Layer, Hinweise (Ansicht über WMS
+  ausdrücklich so gewünscht). Alle Knöpfe im Menü sind `.seg-btn` — die großen `.btn` gibt es
+  nicht mehr; Regler zeigen ihren Wert (`.slider-val`).
+- **Bei offenem Menü treten die Leisten unten zurück** (`body.menue-offen`, `openSheet`/`closeSheet`,
+  `updateBH` rechnet sie dann nicht mit). Standort-, Mess- und Absteckknopf schließen das Menü.
+- Der Standortknopf ist aktiv in der Signalfarbe; der Standort auf der Karte (`.me-dot`, Kreis, Lot)
+  bleibt **blau** — die Signalfarbe trägt schon der gefundene Punkt.
+
 ## Beim Deployen
 
 `VERSION` in `sw.js` hochzählen. Der Worker arbeitet zwar „erst Netz, dann
