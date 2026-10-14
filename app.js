@@ -5572,8 +5572,9 @@ function fpTipp(ev, pt) {
   if (marke) zeilen.push(`<span><i>Vermarkung</i> ${esc(marke)}</span>`);
   if (p.qualitaet) zeilen.push(`<span><i>Qualität</i> ${esc(p.qualitaet)}</span>`);
   if (p.lagebeschreibung) zeilen.push(`<span>${esc(p.lagebeschreibung)}</span>`);
-  const fmt = v => v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  zeilen.push(`<span>E ${fmt(pt.e)} · N ${fmt(pt.n)} <small>ETRS89/UTM 32</small></span>`);
+  // Wie aus Tachymeter und Koordinatenliste: ohne Tausenderpunkte, die Zone dahinter
+  const fmt = v => v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
+  zeilen.push(`<span>E ${fmt(pt.e)} · N ${fmt(pt.n)} (UTM 32)</span>`);
   zeilen.push(`<a href="${gmapsUrl(pt.lat, pt.lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>`);
   zeilen.push(`<small>LGL-BW, OGC API (Beta) — keine amtliche Auskunft</small>`);
   zeilen.push(`<button type="button" class="kml-km" data-fpkm>Kilometer bestimmen` +
