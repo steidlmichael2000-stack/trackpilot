@@ -74,10 +74,13 @@ MapLibre zeichnet zweierlei (`glStil`): die dunkle Karte als fertigen Stil, oder
 zeichnet MapLibre auch das Bild, und die Leaflet-Grundkarte ist aus (`grundAnwenden`) — nur so
 liegen die Straßen zwischen Bild und Bahn-Layer. Die Bilddienste stehen dafür zweimal im Code:
 als Leaflet-Ebene in `initMap` und in `GL_BILDER`. Wer einen Dienst ändert, ändert beide.
-Ausnahme DOP20 (seit 14.10.2026 Bayern + BW): Beide Wege holen ihre Kacheln aus `dopKachel` —
-Leaflet über `DopWms` (Canvas), MapLibre über das Protokoll `dop20://` (`addProtocol` in `glLaden`).
-Je Kachel entscheidet `dopWahl` an `bw-grenze.json` (BW, Bayern oder im 300-m-Saum beide, dann
-BVV-JPEG + LGL-PNG übereinander). Grenze neu: `node werkzeug/bw-grenze-bauen.mjs`.
+Ausnahme DOP20 und Relief (seit 14.10.2026 Bayern + BW, Dienste in `LAND_WMS`): Beide Wege holen
+ihre Kacheln aus `dopKachel(art, …)` — Leaflet über `DopWms` (Canvas, Option `art`), MapLibre über
+das Protokoll `land://{art}/{z}/{x}/{y}` (`addProtocol` in `glLaden`). Je Kachel entscheidet `dopWahl`
+an `bw-grenze.json`; im 300-m-Saum je Bildpunkt per `dopMaske`, weiße Bildpunkte vom anderen Land.
+Nicht auf „LGL als PNG obendrauf" zurückbauen: Das LGL-Relief reicht deckend über die Grenze und hat
+Löcher (Ulm-Wiblingen). Grenze neu: `node werkzeug/bw-grenze-bauen.mjs`.
+Parzellen sind eine `ParzGruppe` aus zwei `ParzWms` (BVV und LGL-INSPIRE), je mit `bounds` des Landes.
 Straßen und Ortsnamen kamen bis 30.09.2026 als Rasterkacheln von Esri: auf dem Land ab
 Zoomstufe 16 leer und auf dem Handy unscharf. Nicht zurückbauen.
 Über der dunklen Karte ersetzen unsere Straßen und Namen deren eigene (`glDunkelErsetzt`,

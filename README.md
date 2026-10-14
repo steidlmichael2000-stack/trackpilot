@@ -799,9 +799,26 @@ Dienste einfach übereinanderlegen — aber ein Luftbild als PNG ist gemessen 11
 192 kB je Kachel) bzw. knapp 3-mal (LGL, 23 kB → 63 kB) so groß wie als JPEG. Die App entscheidet
 deshalb je Kachel an der Landesgrenze (`bw-grenze.json`, aus dem Basis-DLM über die OGC API des
 LGL, auf 50 m vereinfacht, 79 kB; neu bauen mit `node werkzeug/bw-grenze-bauen.mjs`): ganz in BW
-das LGL als JPEG, ganz außerhalb die BVV als JPEG, nur im Saum von 300 m plus halber Kachel beide,
-BVV als JPEG unten, LGL als PNG darüber. Die Entscheidung kostet 0,2 ms je Kachel. An der Donau
-zwischen Ulm und Neu-Ulm gehen beide Bilder ohne Lücke ineinander über.
+das LGL, ganz außerhalb die BVV, nur im Saum von 300 m plus halber Kachel beide, und dann je
+Bildpunkt das Land, in dem er liegt (die Grenze als Fläche auf die Kachel gezeichnet). Alles als
+JPEG. Ist ein Bildpunkt beim zuständigen Land weiß, kommt er vom anderen: Beide Dienste reichen
+ein Stück über die Grenze, und das LGL hat Löcher. Die Entscheidung kostet 0,2 ms je Kachel.
+
+**Relief und Flurstücke ebenso** (14.10.2026). Das Relief in BW ist die Schummerung des LGL aus dem
+DGM025 (`WMS_LGL-BW_ATKIS_DGM_025_Schummerung`, Layer `Schummerung_DGM_025_BW`) — dunkler und
+flacher als das bayerische Schräglicht, an der Grenze wechselt das Aussehen. Der früher genannte
+Dienst aus dem DGM1 (`…DGM_1_Schummerung`) antwortet mit 500. Bei Ulm-Wiblingen fehlt in der
+Schummerung ein Rechteck (in jeder Zoomstufe weiß); dort füllt der bayerische Dienst, der so weit
+über die Grenze reicht — deshalb holt eine Kachel in BW, die zu mehr als 1 % weiß ist, auch den
+bayerischen Dienst dazu. Tief in Bayern wird nicht nachgesehen.
+
+Die Flurstücke kommen in BW aus dem INSPIRE-WMS des LGL (`WMS_INSP_BW_Flst_ALKIS`, Layer
+`alkis:CP.CadastralParcel`, dl-de/by-2-0): schwarze Umringe mit Flurstücksnummer auf durchsichtigem
+Grund, also genau wie die bayerische Parzellarkarte, und laufen durch dasselbe Umfärben. Beide
+Dienste fragen nur im Rahmen ihres Landes, der des LGL erst ab Zoomstufe 17 (er zeichnet in jedem
+Maßstab, auf Stufe 15 sind es 66 kB je Kachel und ein Gewirr). Die OGC API Features des LGL hätte die
+Flurstücke auch als Vektoren (mit Fläche und Gemarkung, 87 kB gepackt für 400 × 400 m), ist aber
+eine Beta; der Bilddienst passt zur bayerischen Lösung.
 
 **Ganz nah weich statt blockig.** Geholt wird das DOP20 bis Zoomstufe 19 (in Bayern 0,20 m je
 Bildpunkt, so fein wie das Bild selbst), das Relief bis 18; darüber vergrößert Leaflet bzw. MapLibre
