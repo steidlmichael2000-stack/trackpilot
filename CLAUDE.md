@@ -299,6 +299,15 @@ erklärt die Tour eine App, die es so nicht mehr gibt.
   Blase ein, `getBoundingClientRect` meldet dann Zwischenstände. Die gesetzten Werte in `style`
   vergleichen oder vorher einen Screenshot auslösen.
 
+## Festpunkte BW (`fp…`, Oktober 2026)
+
+Auflage `fp` (in `AUFLAGEN`), Knopf `#fpBtn` wie DB-Netz über `auswahlKnopfBinden`, Arten in
+`FP_ARTEN`, gewählt in `prefs.fpInhalt`. Daten aus der OGC API des LGL (Beta) mit
+`crs=EPSG:25832` — die Koordinaten im Popup sind die gespeicherten, nicht zurückgerechnet. Ebene
+`fpPane` in `map._norotatePane` (sonst über den Sprechblasen). Ein Tipp beim Messen fängt den Punkt
+(`tippZiel`). Abstecken auf Festpunkte gibt es noch nicht — `abZielSetzen` erwartet KML-Objekte.
+Für Bayern ist noch nicht geprüft, ob es Festpunkte offen gibt.
+
 ## Menü (Einstellungen), Oktober 2026
 
 - Reihenfolge: Karte, Wetter, KML, **Ansicht**, Eigener WMS-Layer, Hinweise (Ansicht über WMS

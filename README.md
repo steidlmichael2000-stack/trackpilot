@@ -867,6 +867,30 @@ Element hatte 13 Pixel. Zusammenhängende Teile bis 4 sichtbare Pixel werden dur
 verschwanden auf einem Handyausschnitt 46 158 Punktpixel, Grenzen, Gebäude und Straßennamen blieben
 unverändert.
 
+## Festpunkte (Baden-Württemberg)
+
+Eigene Auflage **Festpunkte** (Knopf unter den Auflagen, langer Druck wählt die Arten), aus der
+OGC API Features des LGL (`ogcapi.lgl-bw.de/beta/pygeoapi`, Beta, dl-de/by-2-0, CORS frei):
+
+| Art | Sammlung | ab Zoom | Vorgabe |
+| --- | --- | --- | --- |
+| Höhenfestpunkte | `hoehenfestpunkte` — mit Höhe (NHN), Ordnung, Vermarkung, Lagebeschreibung | 13 | an |
+| Trigonometrische Punkte | `trigonometrische_punkte` | 13 | an |
+| Aufnahmepunkte | `aufnahmepunkte` | 16 | an |
+| Polygonpunkte | `punkte_pl` | 16 | an |
+| Sicherungspunkte | `versicherungspunkte` | 17 | aus |
+| Grenzpunkte | `grenzpunkt` | 18 | aus |
+
+Die Koordinaten kommen mit `crs=EPSG:25832` gleich in UTM 32 — so liegen sie dort gespeichert,
+auf den Zentimeter, ohne Umweg über WGS84. Geholt wird je Zelle (Web-Mercator-Kachel der Stufe 12,
+14 bzw. 16) und Art, nur im Rahmen um BW; die API blättert ab 5000 Punkten weiter („next").
+Gemessen am 14.10.2026, 1 km² Stuttgart-West: 16 TP, 189 Aufnahme-, 62 Polygon-, 227 Sicherungs-
+und über 2000 Grenzpunkte; ein Bildschirm auf Stufe 17 mit 73 Punkten in 0,5 s, auf Stufe 18 mit
+Grenzpunkten 375 in 0,4 s. Ob Bayern Festpunkte offen anbietet, ist noch nicht geprüft.
+
+Die Zeichen liegen wie die KML-Symbole in der nicht mitdrehenden Ebene (`map._norotatePane`), sonst
+lagen sie über den Sprechblasen.
+
 ## Tour
 
 Das **?** im ©-Kasten unten links startet sie, jederzeit. Die Karte wird abgedunkelt, nur das

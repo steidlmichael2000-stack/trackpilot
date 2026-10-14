@@ -2434,7 +2434,7 @@ function initMap() {
   $('#quellenMass').appendChild(massstab.getContainer());
   quellenEinrichten();
 
-  overlayLayers = { orm: ormLayer, parz: parzLayer, ifg: ifgAuflageAnlegen() };
+  overlayLayers = { orm: ormLayer, parz: parzLayer, ifg: ifgAuflageAnlegen(), fp: fpAuflageAnlegen() };
   for (const k of Object.keys(overlayLayers)) auflageSetzen(k);
   auflageSetzen('radar');
   setBase(prefs.base || 'osm', true);     // setzt auch Straßen und Ortsnamen (grundAnwenden)
@@ -3071,7 +3071,7 @@ function applyBaseOpacity() {
  * OSM-Karte stecken sie schon drin: Dort bleiben sie eingeschaltet, werden aber
  * nicht gezeichnet, und beim Wechsel erscheinen sie. */
 const NUR_UEBER_BILD = new Set(['str', 'ort']);
-const AUFLAGEN = ['orm', 'parz', 'ifg', 'str', 'ort', 'radar'];
+const AUFLAGEN = ['orm', 'parz', 'ifg', 'fp', 'str', 'ort', 'radar'];
 
 /** Ist die Auflage gewählt? Der Bahn-Layer ist von Haus aus an, die übrigen aus. */
 function auflageGewaehlt(kennung) {
@@ -3101,6 +3101,11 @@ function toggleOverlay(kennung) {
   }
   if (an && kennung === 'ifg' && map.getZoom() < IFG_AB_ZOOM.strecken) {
     toast(`Das DB-Netz erscheint ab Zoomstufe ${IFG_AB_ZOOM.strecken} — näher heranzoomen.`);
+  }
+  if (an && kennung === 'fp') {
+    const c = map.getCenter(), ab = Math.min(...FP_ARTEN.filter(([k]) => fpArtAn(k)).map(([, , , z]) => z), 99);
+    if (!inLandRahmen('bw', c.lat, c.lng)) toast('Festpunkte gibt es bisher für Baden-Württemberg.');
+    else if (map.getZoom() < ab) toast(`Festpunkte erscheinen ab Zoomstufe ${ab} — näher heranzoomen.`);
   }
   if (an && NUR_UEBER_BILD.has(kennung) && (prefs.base || 'osm') === 'osm') {
     toast('In der Karte schon enthalten — erscheint über Dunkel, Luftbild, DOP20 und Relief.');
@@ -5389,9 +5394,10 @@ function ifgWahlZeigen(an) {
   if (btn) btn.setAttribute('aria-expanded', an ? 'true' : 'false');
 }
 
-/** Tippen schaltet, lange drücken oder Rechtsklick öffnet die Auswahl — genau wie parzKnopfBinden. */
-function ifgKnopfBinden() {
-  const btn = $('#ifgBtn');
+/** Tippen schaltet die Auflage, lange drücken oder Rechtsklick öffnet ihre
+ *  Auswahl — genau wie parzKnopfBinden. Für DB-Netz und Festpunkte. */
+function auswahlKnopfBinden(kennung, wahlBox, zeigen) {
+  const btn = $(`#${kennung}Btn`);
   if (!btn) return;
   let timer = 0, lang = false, zuletzt = 0;
   const wahl = () => {
@@ -5399,7 +5405,7 @@ function ifgKnopfBinden() {
     if (Date.now() - zuletzt < 700) return;
     zuletzt = Date.now();
     lang = true;
-    ifgWahlZeigen($('#ifgWahl').hidden);
+    zeigen($(wahlBox).hidden);
   };
   btn.addEventListener('pointerdown', ev => {
     lang = false;
@@ -5410,9 +5416,207 @@ function ifgKnopfBinden() {
   btn.addEventListener('contextmenu', ev => { ev.preventDefault(); wahl(); });
   btn.addEventListener('click', () => {
     if (lang) { lang = false; return; }
-    toggleOverlay('ifg');
+    toggleOverlay(kennung);
   });
 }
+
+function ifgKnopfBinden() { auswahlKnopfBinden('ifg', '#ifgWahl', ifgWahlZeigen); }
+
+/* ============================ Auflage Festpunkte (BW) ============================
+ *
+ * Lage- und Höhenfestpunkte aus der OGC API Features des LGL (Beta, Datenlizenz
+ * Deutschland – Namensnennung 2.0). Die Koordinaten kommen gleich in UTM 32
+ * (crs=EPSG:25832, so liegen sie dort auch gespeichert) — auf den Zentimeter
+ * wie im Kataster, ohne Umweg über WGS84. Am 14.10.2026 gemessen, 1 km² in
+ * Stuttgart-West: 16 TP, 189 Aufnahmepunkte, 62 Polygonpunkte,
+ * 227 Sicherungspunkte, über 2000 Grenzpunkte; 0,2–1 s je Abfrage.
+ *
+ * Geholt wird je Zelle (Web-Mercator-Kachel der Stufe zell) und Art, nur was an
+ * und ab seiner Zoomstufe sichtbar ist, nur im Rahmen um BW. Höhen hat nur der
+ * Höhenfestpunkt (NHN), mit Ordnung und Lagebeschreibung. Ob Bayern Festpunkte
+ * offen anbietet, ist noch nicht geprüft. */
+const FP_API = 'https://ogcapi.lgl-bw.de/beta/pygeoapi/collections';
+const FP_QUELLE = `Festpunkte: <a href="https://www.lgl-bw.de/">LGL-BW</a> (${new Date().getFullYear()}, dl-de/by-2-0)`;
+// [Schlüssel, Name, Sammlung, ab Zoom, Zellen-Zoom, Vorgabe an]
+const FP_ARTEN = [
+  ['hfp', 'Höhenfestpunkte', 'hoehenfestpunkte', 13, 12, true],
+  ['tp', 'TP', 'trigonometrische_punkte', 13, 12, true],
+  ['ap', 'Aufnahmepunkte', 'aufnahmepunkte', 16, 14, true],
+  ['pl', 'Polygonpunkte', 'punkte_pl', 16, 14, true],
+  ['sp', 'Sicherungspunkte', 'versicherungspunkte', 17, 14, false],
+  ['gp', 'Grenzpunkte', 'grenzpunkt', 18, 16, false]
+];
+const FP_NAME = { hfp: 'Höhenfestpunkt', tp: 'Trigonometrischer Punkt', ap: 'Aufnahmepunkt', pl: 'Polygonpunkt',
+  sp: 'Sicherungspunkt', gp: 'Grenzpunkt' };
+const FP_AB = Object.fromEntries(FP_ARTEN.map(([k, , , z]) => [k, z]));
+const fpArtAn = k => {
+  const v = prefs.fpInhalt && prefs.fpInhalt[k];
+  return v === undefined ? FP_ARTEN.find(a => a[0] === k)[5] : v;
+};
+const FP_ZELLEN_MAX = 300;
+const fpZellen = new Map();     // "ap/14/8712/5640" → Promise<[{ e, n, lat, lon, p }]>
+let fpLayer = null;
+let fpStand = 0;
+
+/** Alle Punkte einer Art in einer Zelle; die API gibt seitenweise, „next" folgt. */
+function fpZelle(art, z, x, y) {
+  const s = `${art}/${z}/${x}/${y}`;
+  const da = fpZellen.get(s);
+  if (da) { fpZellen.delete(s); fpZellen.set(s, da); return da; }
+  const laden = (async () => {
+    const n2 = 2 ** z, lon = v => v / n2 * 360 - 180;
+    const lat = v => Math.atan(Math.sinh(Math.PI * (1 - 2 * v / n2))) * 180 / Math.PI;
+    const samml = FP_ARTEN.find(a => a[0] === art)[2];
+    let url = `${FP_API}/${samml}/items?f=json&limit=5000&crs=${encodeURIComponent('http://www.opengis.net/def/crs/EPSG/0/25832')}` +
+      `&bbox=${[lon(x), lat(y + 1), lon(x + 1), lat(y)].map(v => v.toFixed(6)).join(',')}`;
+    const raus = [];
+    for (let seite = 0; url && seite < 10; seite++) {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Festpunkte: HTTP ${r.status}`);
+      const j = await r.json();
+      for (const f of j.features || []) {
+        const [e, n] = f.geometry.coordinates;
+        const [la, lo] = utm32Zurueck(e, n);
+        raus.push({ e, n, lat: la, lon: lo, p: f.properties || {} });
+      }
+      const weiter = (j.links || []).find(l => l.rel === 'next');
+      url = weiter ? weiter.href : null;
+    }
+    return raus;
+  })();
+  fpZellen.set(s, laden);
+  laden.catch(() => fpZellen.delete(s));
+  while (fpZellen.size > FP_ZELLEN_MAX) fpZellen.delete(fpZellen.keys().next().value);
+  return laden;
+}
+
+/* Zeichen nach Art: Dreieck TP, Kreis mit Querstrich Höhenfestpunkt, Kreis mit
+ * Punkt Aufnahmepunkt, Kreis Polygonpunkt, Quadrat Sicherungspunkt, Punkt
+ * Grenzpunkt. Rot mit weißem Rand, damit sie auf Karte und Luftbild stehen. */
+function fpSymbolSvg(art) {
+  const f = '#dc2626';
+  const formen = {
+    tp: `<path d="M8 2.5 14 13.5H2z" fill="#fff" stroke="${f}" stroke-width="1.8" stroke-linejoin="round"/><circle cx="8" cy="9.6" r="1.4" fill="${f}"/>`,
+    hfp: `<circle cx="8" cy="8" r="5" fill="#fff" stroke="${f}" stroke-width="1.8"/><path d="M3 8h10" stroke="${f}" stroke-width="1.8"/>`,
+    ap: `<circle cx="8" cy="8" r="4.8" fill="#fff" stroke="${f}" stroke-width="1.8"/><circle cx="8" cy="8" r="1.5" fill="${f}"/>`,
+    pl: `<circle cx="8" cy="8" r="4" fill="#fff" stroke="${f}" stroke-width="1.8"/>`,
+    sp: `<rect x="4.2" y="4.2" width="7.6" height="7.6" fill="#fff" stroke="${f}" stroke-width="1.8"/>`,
+    gp: `<circle cx="8" cy="8" r="2.6" fill="${f}" stroke="#fff" stroke-width="1.4"/>`
+  };
+  return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${formen[art]}</svg>`;
+}
+
+function fpAuflageAnlegen() {
+  /* Wie die KML-Symbole in der nicht mitdrehenden Ebene von leaflet-rotate: In der
+   * drehenden lagen die Zeichen über den Sprechblasen (eigener Stapel). */
+  map.createPane('fpPane', map._norotatePane || undefined);
+  map.getPane('fpPane').style.zIndex = 610;          // unter den KML-Symbolen (620) und Sprechblasen
+  fpLayer = L.layerGroup([], { attribution: FP_QUELLE });
+  fpLayer.on('add', () => fpAuflageZeichnen());
+  fpLayer.on('remove', () => fpLayer.clearLayers());
+  map.on('moveend', () => { if (map.hasLayer(fpLayer)) fpAuflageZeichnen(); });
+  return fpLayer;
+}
+
+async function fpAuflageZeichnen() {
+  if (!fpLayer || !map.hasLayer(fpLayer)) return;
+  const stand = ++fpStand, z = map.getZoom();
+  const b = map.getBounds().pad(0.15);
+  const [s, w, n, o] = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
+  const r = HOEHEN_RAHMEN.bw;
+  const arten = FP_ARTEN.filter(([k, , , ab]) => fpArtAn(k) && z >= ab);
+  if (!arten.length || s > r.n || n < r.s || w > r.o || o < r.w) { fpLayer.clearLayers(); return; }
+
+  const kachel = (lat, lon, zz) => {
+    const n2 = 2 ** zz, rr = lat * Math.PI / 180;
+    return [Math.floor((lon + 180) / 360 * n2), Math.floor((1 - Math.log(Math.tan(rr) + 1 / Math.cos(rr)) / Math.PI) / 2 * n2)];
+  };
+  const auftraege = [];
+  for (const [k, , , , zz] of arten) {
+    const [x0, y0] = kachel(n, w, zz), [x1, y1] = kachel(s, o, zz);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+      auftraege.push(fpZelle(k, zz, x, y).then(pk => pk.map(p => ({ art: k, ...p })), () => []));
+    }
+  }
+  if (auftraege.length > 60) { fpLayer.clearLayers(); return; }    // zu weit draußen
+  const punkte = (await Promise.all(auftraege)).flat();
+  if (stand !== fpStand) return;                    // inzwischen weitergeschoben
+
+  fpLayer.clearLayers();
+  for (const pt of punkte) {
+    if (pt.lat < s || pt.lat > n || pt.lon < w || pt.lon > o) continue;
+    const m = L.marker([pt.lat, pt.lon], {
+      pane: 'fpPane', bubblingMouseEvents: false, keyboard: false,
+      icon: L.divIcon({ className: 'fp-sym', iconSize: [16, 16], iconAnchor: [8, 8], html: fpSymbolSvg(pt.art) })
+    });
+    m.on('click', ev => fpTipp(ev, pt));
+    m.addTo(fpLayer);
+  }
+}
+
+/** Ein Tipp: beim Messen und im Profil ein Fangpunkt auf die Katasterkoordinate,
+ *  sonst die Sprechblase. */
+function fpTipp(ev, pt) {
+  L.DomEvent.stopPropagation(ev);
+  const ziel = tippZiel();
+  if (ziel) { ziel(L.latLng(pt.lat, pt.lon)); return; }
+  const p = pt.p, zeilen = [];
+  const kennung = p.punktkennung || '';
+  zeilen.push(`<b>${esc(FP_NAME[pt.art])}${kennung ? ' ' + esc(kennung) : ''}</b>`);
+  if (Number.isFinite(p.hoehe)) {
+    const h = p.hoehe.toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    // Ohne <b>: In der Sprechblase ist das die Überschriftzeile und bräche die Zeile um
+    zeilen.push(`<span><i>Höhe</i> ${h} m ü. NHN${p.ordnung_name ? ' · ' + esc(p.ordnung_name) : ''}</span>`);
+  }
+  const marke = p.vermarkung_name || p.abmarkung_name;
+  if (marke) zeilen.push(`<span><i>Vermarkung</i> ${esc(marke)}</span>`);
+  if (p.qualitaet) zeilen.push(`<span><i>Qualität</i> ${esc(p.qualitaet)}</span>`);
+  if (p.lagebeschreibung) zeilen.push(`<span>${esc(p.lagebeschreibung)}</span>`);
+  const fmt = v => v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  zeilen.push(`<span>E ${fmt(pt.e)} · N ${fmt(pt.n)} <small>ETRS89/UTM 32</small></span>`);
+  zeilen.push(`<a href="${gmapsUrl(pt.lat, pt.lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>`);
+  zeilen.push(`<small>LGL-BW, OGC API (Beta) — keine amtliche Auskunft</small>`);
+  zeilen.push(`<button type="button" class="kml-km" data-fpkm>Kilometer bestimmen` +
+    `<small>rechnet den Punkt auf die Strecke — braucht Netz</small></button>`);
+  const blase = L.popup({
+    className: 'kml-pop', maxWidth: 300,
+    autoPanPaddingTopLeft: L.point(14, 86), autoPanPaddingBottomRight: L.point(14, 24)
+  }).setLatLng([pt.lat, pt.lon]).setContent(zeilen.join('')).openOn(map);
+  const knopf = blase.getElement() && blase.getElement().querySelector('[data-fpkm]');
+  if (knopf) knopf.addEventListener('click', () => {
+    map.closePopup();
+    kmAnStelle(pt.lat, pt.lon, PUNKT_TOL);
+  });
+}
+
+function fpWahlBauen() {
+  const box = $('#fpInhalt');
+  if (!box) return;
+  // Drei Reihen zu zwei: mit drei je Reihe brach „Grenzpunkte" auf 375 px allein in eine dritte
+  const reihen = [FP_ARTEN.slice(0, 2), FP_ARTEN.slice(2, 4), FP_ARTEN.slice(4)];
+  box.innerHTML = reihen.map((reihe, i) =>
+    `<div class="seg seg-paar" role="group" aria-label="Festpunkte"${i ? ' style="margin-top:7px"' : ''}>` +
+    reihe.map(([k, name, , zz]) =>
+      `<button class="seg-btn" type="button" data-fp="${k}" title="ab Zoomstufe ${zz}">${name}</button>`).join('') +
+    `</div>`).join('');
+  box.querySelectorAll('[data-fp]').forEach(btn => btn.addEventListener('click', () => {
+    const k = btn.dataset.fp;
+    prefs.fpInhalt = { ...(prefs.fpInhalt || {}), [k]: !fpArtAn(k) };
+    saveStore();
+    syncButtons();
+    if (!auflageGewaehlt('fp')) toggleOverlay('fp');
+    else fpAuflageZeichnen();
+    if (fpArtAn(k) && map.getZoom() < FP_AB[k]) toast(`${btn.textContent} erscheinen ab Zoomstufe ${FP_AB[k]}.`);
+  }));
+}
+
+function fpWahlZeigen(an) {
+  const box = $('#fpWahl'), btn = $('#fpBtn');
+  if (box) box.hidden = !an;
+  if (btn) btn.setAttribute('aria-expanded', an ? 'true' : 'false');
+}
+
+function fpKnopfBinden() { auswahlKnopfBinden('fp', '#fpWahl', fpWahlZeigen); }
 
 function drawMilestones() {
   msLayer.clearLayers();
@@ -10677,6 +10881,11 @@ function syncButtons() {
     b.classList.toggle('is-on', an);
     b.setAttribute('aria-pressed', String(an));
   });
+  document.querySelectorAll('[data-fp]').forEach(b => {
+    const an = fpArtAn(b.dataset.fp);
+    b.classList.toggle('is-on', an);
+    b.setAttribute('aria-pressed', String(an));
+  });
   // Das Feld im Knopf: die Farbe, in der gerade gezeichnet wird — bei Auto je nach Grund
   const jetzt = $('.parz-jetzt');
   if (jetzt) jetzt.style.setProperty('--parz', parzFarbe());
@@ -10933,6 +11142,8 @@ function bind() {
   buildParzRow();
   ifgKnopfBinden();
   ifgWahlBauen();
+  fpKnopfBinden();
+  fpWahlBauen();
   on('#strBtn', 'click', () => toggleOverlay('str'));
   on('#ortBtn', 'click', () => toggleOverlay('ort'));
   on('#radarBtn', 'click', () => toggleOverlay('radar'));

@@ -761,6 +761,8 @@ body {
   background: var(--panel-2); color: var(--muted); cursor: pointer;
   white-space: nowrap;
 }
+/* Zwei gleich breite Knöpfe je Reihe (Auswahl der Festpunkte) */
+.seg-paar .seg-btn { flex: 1 1 0; }
 /* Rückmeldung beim Tippen — vor allem für die Aktionsknöpfe (Layer laden, Aktualisieren) */
 .seg-btn:active { filter: brightness(1.12); }
 .seg-btn.is-on {
@@ -957,6 +959,8 @@ body {
 
 /* inline würde die Grundlinie mitrechnen und das Symbol um ein Haar versetzen */
 .kml-sym svg { display: block; }
+/* Festpunkte (fpSymbolSvg): ein leichter Schatten hebt sie vom Luftbild ab */
+.fp-sym svg { display: block; filter: drop-shadow(0 0 1px rgba(0, 0, 0, .55)); }
 
 /* Name neben dem Symbol auf der Karte — wie die Kilometerbeschriftung */
 .kml-lbl {

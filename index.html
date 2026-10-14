@@ -219,9 +219,14 @@
                 title="Lange drücken oder Rechtsklick: was gezeigt wird"><svg class="ifg-wahl-zeichen" viewBox="0 0 10 9"
                 aria-hidden="true"><path d="M0 1.5h10M0 4.5h10M0 7.5h10"/></svg>DB-Netz</button>
       </div>
-      <div class="seg" role="group" aria-label="Straßen und Ortsnamen" style="margin-top:7px">
+      <div class="seg" role="group" aria-label="Straßen, Ortsnamen, Festpunkte" style="margin-top:7px">
         <button class="seg-btn" type="button" id="strBtn">Straßen</button>
         <button class="seg-btn" type="button" id="ortBtn">Ortsnamen</button>
+        <!-- Festpunkte (BW) aus der OGC API des LGL. Tippen schaltet, lange drücken
+             oder Rechtsklick öffnet die Auswahl der Punktarten — wie beim DB-Netz. -->
+        <button class="seg-btn parz-knopf" type="button" id="fpBtn" aria-controls="fpWahl" aria-expanded="false"
+                title="Lange drücken oder Rechtsklick: welche Punkte"><svg class="ifg-wahl-zeichen" viewBox="0 0 10 9"
+                aria-hidden="true"><path d="M0 1.5h10M0 4.5h10M0 7.5h10"/></svg>Festpunkte</button>
       </div>
       <!-- Die beiden Auswahlen klappen unter der ganzen Auflagengruppe auf, nicht
            zwischen ihren Reihen: Dort sahen Straßen und Ortsnamen aus, als gehörten
@@ -231,6 +236,11 @@
       <div class="parz-wahl" id="ifgWahl" hidden>
         <p class="pal-label">DB-Netz zeigt</p>
         <div id="ifgInhalt"></div>
+      </div>
+      <!-- Welche Festpunkte; die Knöpfe baut die App aus FP_ARTEN. -->
+      <div class="parz-wahl" id="fpWahl" hidden>
+        <p class="pal-label">Festpunkte zeigen</p>
+        <div id="fpInhalt"></div>
       </div>
       <!-- Farbwahl der Parzellen, zu bis zum langen Druck auf den Knopf. Die Felder
            baut die App aus PARZ_FARBEN. -->
@@ -268,6 +278,14 @@
       Brücken ab 15. Ein Tipp auf einen Bahnübergang, eine Brücke, einen Tunnel, einen Kilometer oder
       eine Betriebsstelle macht daraus ein Ergebnis mit Strecke und Kilometer. Ohne Netz, sobald die
       Gegend einmal geladen war.</p>
+      <p class="fine"><strong>Festpunkte</strong> zeigt in Baden-Württemberg Höhenfestpunkte,
+      trigonometrische Punkte, Aufnahme- und Polygonpunkte, auf Wunsch auch Sicherungs- und
+      Grenzpunkte — aus den Daten des LGL. <strong>Lange drücken oder Rechtsklick</strong> auf den
+      Knopf wählt die Arten. Höhen- und TP ab Zoomstufe 13, Aufnahme- und Polygonpunkte ab 16,
+      Sicherungspunkte ab 17, Grenzpunkte ab 18. Ein Tipp nennt Punktkennung, Vermarkung und die
+      Koordinate in UTM 32 auf den Zentimeter, beim Höhenfestpunkt auch Höhe, Ordnung und
+      Lagebeschreibung. Beim Messen und im Profil fängt ein Tipp den Punkt. Die Schnittstelle des
+      LGL ist noch eine Testfassung — keine amtliche Auskunft.</p>
       <p class="fine"><strong>Dunkel</strong> ist die dunkle Karte von OpenFreeMap. Sie wird
       als Vektorkarte gezeichnet und bleibt deshalb auch ganz nah scharf. Beim ersten Wählen
       lädt die App dafür einmal rund 1&nbsp;MB nach.</p>
@@ -499,7 +517,7 @@
       Bahn-Layer OpenRailwayMap (CC-BY-SA 2.0) · Luftbild Esri, Maxar · Dunkle Karte, Straßen
       und Ortsnamen OpenFreeMap © OpenMapTiles, Daten © OpenStreetMap, gezeichnet mit MapLibre GL
       (BSD-3) · DOP20, Geländerelief, Parzellarkarte sowie DGM1, DOM20 und LoD2 in Profil und Höhe:
-      Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0) · DOP20, Relief, Flurstücke, DGM1, DOM1 und LoD2 in
+      Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0) · DOP20, Relief, Flurstücke, Gebäude, Festpunkte, DGM1, DOM1 und LoD2 in
       Baden-Württemberg: LGL-BW (2026), Datenlizenz Deutschland – Namensnennung – Version 2.0,
       www.lgl-bw.de, bearbeitet · Regenradar: Quelle
       Deutscher Wetterdienst</p>
