@@ -3090,6 +3090,7 @@ function setBase(which, still = false) {
   ordneAuflagen();
   radarZeichnen();      // die Konturen des Radars hängen am Grund (RADAR_LINIE_TON)
   ifgAuflageZeichnen(); // die Linien des DB-Netzes auch
+  if (msLayer) drawMilestones();    // und der Ton der hervorgehobenen Strecke (ifgZeichnen)
   saveStore();
   syncButtons();
 }
@@ -5145,11 +5146,31 @@ function ifgZeichnen() {
     return false;
   }
   const z = map.getZoom();
+
+  /* Nur die Strecke gesucht, ohne Kilometer: Dann ist sie das Ergebnis und steht
+   * kräftig in der Signalfarbe da, auf jeder Zoomstufe, mit einem Rand gegen den
+   * Grund. Sonst sah man weit draußen gar nicht, welche gemeint ist, und näher
+   * dran nur die blasse Linie. Mit einem Kilometer trägt der Pin die Farbe, und
+   * die Linie bleibt zurückhaltend wie bisher.
+   * Der Ton richtet sich nach der Karte, nicht nach der Oberfläche: auf hellem
+   * Grund (Karte, Relief) der dunkle Ton der Palette mit weißem Rand, auf dunkler
+   * Karte und Luftbild der helle mit schwarzem. */
+  const hervor = !view.point && !reihe.length;
+  if (hervor) {
+    const linien = st.abschnitte.map(g => g.pts.map(p => [p.lat, p.lon]));
+    const dunkel = ['dark', 'sat', 'dop'].includes(prefs.base);
+    const pal = PALETTEN[prefs.palette] || PALETTEN.lapis;
+    const farbe = (dunkel ? pal.dark : pal.light).accent;
+    L.polyline(linien, { color: dunkel ? '#000' : '#fff', weight: 8, opacity: 0.85, interactive: false })
+      .addTo(msLayer);
+    L.polyline(linien, { color: farbe, weight: 4.5, opacity: 1, interactive: false, attribution: IFG_QUELLE })
+      .addTo(msLayer);
+  }
   if (z < 9) return true;
 
   const b = map.getBounds().pad(0.3);
   const [s, w, n, o] = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
-  if (prefs.steinLinie !== false) {
+  if (prefs.steinLinie !== false && !hervor) {
     const linien = st.abschnitte
       .filter(g => !(g.bb[0] > n || g.bb[2] < s || g.bb[1] > o || g.bb[3] < w))
       .map(g => g.pts.map(p => [p.lat, p.lon]));
@@ -9501,35 +9522,7 @@ async function search() {
 
   setBusy(true);
   try {
-    if (!kmRaw) {
-      // Nur Strecke: Anfang der Strecke zeigen, damit man sich orientieren kann
-      reihe = []; reiheAktiv = 0; reiheFehler = [];
-      view.ref = ref;
-      const st = await ifgStrecke(ref).catch(() => null);
-      if (st) {
-        view.point = null;
-        drawPoint();
-        let s = 90, w = 180, n = -90, o = -180;
-        for (const g of st.abschnitte) {
-          s = Math.min(s, g.bb[0]); w = Math.min(w, g.bb[1]); n = Math.max(n, g.bb[2]); o = Math.max(o, g.bb[3]);
-        }
-        map.fitBounds([[s, w], [n, o]], { paddingTopLeft: [30, 90], paddingBottomRight: [30, 130] });
-        drawMilestones();
-        const [von, bis] = ifgBereich(st);
-        showStatus(`Strecke ${ref}: km ${fmtKm(von)} bis ${fmtKm(bis)} nach DB InfraGO. ` +
-          `Auf die Linie tippen setzt einen Punkt.`);
-        return;
-      }
-      await coverage(ref, 0);
-      const e = lineCache.get(ref);
-      if (!e.sorted.length) { showError(`Für Strecke ${ref} sind keine Kilometersteine erfasst — Nummer prüfen.`); return; }
-      view.point = null;
-      drawPoint();
-      drawMilestones();
-      fitLine(e);
-      showStatus(`Strecke ${ref}: ${e.alle.length} Kilometersteine geladen. Auf die Linie tippen setzt einen Punkt.`);
-      return;
-    }
+    if (!kmRaw) { await streckeZeigen(ref); return; }
 
     const tokens = kmTokens(kmRaw);
     if (tokens.length > 1) { await searchReihe(ref, tokens); return; }
@@ -9548,6 +9541,48 @@ async function search() {
   } finally {
     setBusy(false);
   }
+}
+
+/* Nur Strecke: die ganze Strecke zeigen und hervorheben (ifgZeichnen), damit man
+ * sich orientieren kann. Auch beim ersten Enter ohne Kilometer, während der
+ * Cursor schon im Kilometerfeld steht — bis Oktober 2026 sprang Enter dort nur
+ * weiter, und die Strecke kam erst mit dem zweiten. */
+async function streckeZeigen(ref) {
+  reihe = []; reiheAktiv = 0; reiheFehler = [];
+  view.ref = ref;
+  view.km = null;            // sonst trüge der Link noch den Kilometer der letzten Suche
+  const st = await ifgStrecke(ref).catch(() => null);
+  if (String(view.ref) !== ref) return;      // inzwischen etwas anderes gesucht
+  if (st) {
+    view.point = null;
+    drawPoint();
+    let s = 90, w = 180, n = -90, o = -180;
+    for (const g of st.abschnitte) {
+      s = Math.min(s, g.bb[0]); w = Math.min(w, g.bb[1]); n = Math.max(n, g.bb[2]); o = Math.max(o, g.bb[3]);
+    }
+    map.fitBounds([[s, w], [n, o]], { paddingTopLeft: [30, 90], paddingBottomRight: [30, 130] });
+    drawMilestones();
+    const [von, bis] = ifgBereich(st);
+    showStatus(`Strecke ${ref}: km ${fmtKm(von)} bis ${fmtKm(bis)} nach DB InfraGO. ` +
+      `Auf die Linie tippen setzt einen Punkt.`);
+    return;
+  }
+  await coverage(ref, 0);
+  const e = lineCache.get(ref);
+  if (!e.sorted.length) { showError(`Für Strecke ${ref} sind keine Kilometersteine erfasst — Nummer prüfen.`); return; }
+  view.point = null;
+  drawPoint();
+  drawMilestones();
+  fitLine(e);
+  showStatus(`Strecke ${ref}: ${e.alle.length} Kilometersteine geladen. Auf die Linie tippen setzt einen Punkt.`);
+}
+
+/** Erstes Enter ohne Kilometer: weiter ins Kilometerfeld und die Strecke schon zeigen. */
+function streckeVorab() {
+  suchAuf();
+  $('#km').focus();
+  const ref = $('#ref').value.trim();
+  if (ref) streckeZeigen(ref).catch(err => showError(err.message || 'Abfrage fehlgeschlagen.'));
 }
 
 /* Mehrere Achspunkte auf einen Schlag — im Feld durch & oder Leerzeichen
@@ -11386,9 +11421,9 @@ function bind() {
     // Bei Freitext und Koordinate nimmt Enter den ersten Treffer.
     if (ortModus(ev.target.value) || koordLesen(ev.target.value) || projLesen(ev.target.value).length) { search(); return; }
     closeSuggest();
-    // Steht noch kein Kilometer da, geht es dorthin weiter — wie früher von
-    // Strecke nach Kilometer. Ein zweites Enter sucht dann die ganze Strecke.
-    if (!$('#km').value.trim()) { suchAuf(); $('#km').focus(); return; }
+    // Steht noch kein Kilometer da, geht es dorthin weiter — und die Strecke steht
+    // schon hervorgehoben auf der Karte (streckeVorab).
+    if (!$('#km').value.trim()) { streckeVorab(); return; }
     ev.target.blur();
     search();
   });
@@ -11423,7 +11458,7 @@ function bind() {
   }, true);
 
   on('#ref', 'keydown', ev => {
-    if (ev.key === 'Enter') { ev.preventDefault(); closeSuggest(); $('#km').focus(); }
+    if (ev.key === 'Enter') { ev.preventDefault(); closeSuggest(); if ($('#km').value.trim()) $('#km').focus(); else streckeVorab(); }
     if (ev.key === 'Escape') closeSuggest();
   });
   on('#ref', 'focus', openSuggest);
