@@ -150,6 +150,18 @@ function haversine(aLat, aLon, bLat, bLon) {
 // Keine eigene Route mehr: In Google Maps ist sie ein Tipp, zwei Knöpfe dafür waren zu viel
 const gmapsUrl = (lat, lon) => `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
 
+/* Street View als Deep-Link: lange drücken oder Rechtsklick auf „In Google Maps
+ * öffnen". Kein Google-Code und kein Schlüssel in der App — Google erfährt die
+ * Stelle erst, wenn man dorthin springt. Google sucht das nächste Panorama selbst;
+ * gibt es keins, steht dort die Karte. Eingebettet (Embed API) ginge auch, aber
+ * Google untersagt seine Dienste neben einer fremden Karte. blick in Grad ab Nord,
+ * am Gleis die Richtung steigender Kilometer. */
+const svUrl = (lat, lon, blick) =>
+  `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat.toFixed(6)},${lon.toFixed(6)}` +
+  (Number.isFinite(blick) ? `&heading=${Math.round(((blick % 360) + 360) % 360)}` : '');
+const svAttr = (lat, lon) => ` data-sv="${lat.toFixed(6)},${lon.toFixed(6)}"`;
+const SV_HINWEIS = '<small class="sv-hinweis">lang drücken: Street View</small>';
+
 /** "12+250" → 12.25, "12,5" → 12.5 */
 function toKm(token) {
   const t = String(token).trim();
@@ -2443,6 +2455,7 @@ function initMap() {
 
   map.on('click', onMapClick);
   merkPunktBinden();
+  svBinden();
   map.on('zoom rotate', gesteBild);
   map.on('zoomend rotateend moveend', gesteEnde);
   map.on('move zoom rotate', messLiveZeichnen);
@@ -4651,7 +4664,7 @@ function kmlPopup(o, akte) {
     zeilen.push(`<span>${fmtCoord(o.koord[0], o.koord[1])}</span>`);
     const hoehe = hoeheZeile(o.koord[0], o.koord[1]);
     if (hoehe) zeilen.push(hoehe);
-    zeilen.push(`<a href="${gmapsUrl(o.koord[0], o.koord[1])}" target="_blank" rel="noopener">In Google Maps öffnen</a>`);
+    zeilen.push(`<a href="${gmapsUrl(o.koord[0], o.koord[1])}"${svAttr(o.koord[0], o.koord[1])} target="_blank" rel="noopener">In Google Maps öffnen${SV_HINWEIS}</a>`);
   }
   const herkunft = [akte.name, o.ordner].filter(Boolean).join(' › ');
   if (herkunft) zeilen.push(`<small>${esc(herkunft)}</small>`);
@@ -5651,7 +5664,7 @@ function fpTipp(ev, pt) {
   // Bayern: Höhe, Skizze und Beschreibung stehen im amtlichen Nachweis
   // Je Link eine eigene Zeile (span) — zwei Links hintereinander liefen sonst zusammen
   if (p.pdf) zeilen.push(`<span><a href="${esc(p.pdf)}" target="_blank" rel="noopener">Festpunktnachweis (PDF)</a></span>`);
-  zeilen.push(`<span><a href="${gmapsUrl(pt.lat, pt.lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a></span>`);
+  zeilen.push(`<span><a href="${gmapsUrl(pt.lat, pt.lon)}"${svAttr(pt.lat, pt.lon)} target="_blank" rel="noopener">In Google Maps öffnen${SV_HINWEIS}</a></span>`);
   zeilen.push(pt.land === 'by'
     ? `<small>Bayerische Vermessungsverwaltung, CC BY 4.0 — keine amtliche Auskunft</small>`
     : `<small>LGL-BW, OGC API (Beta) — keine amtliche Auskunft</small>`);
@@ -5852,7 +5865,7 @@ function merkPunkt(lat, lon) {
     `<b>Gesetzter Punkt</b>` +
     `<span>${fmtCoord(lat, lon)}</span>` +
     hoeheZeile(lat, lon) +
-    `<a href="${gmapsUrl(lat, lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>` +
+    `<a href="${gmapsUrl(lat, lon)}"${svAttr(lat, lon)} target="_blank" rel="noopener">In Google Maps öffnen${SV_HINWEIS}</a>` +
     `<button type="button" class="kml-km" data-merkkm>Kilometer bestimmen` +
     `<small>rechnet die Stelle auf die Strecke</small></button>`
   ).openOn(map);
@@ -5915,6 +5928,67 @@ function merkPunktBinden() {
 
   flaeche.addEventListener('touchend', abbrechen, { passive: true });
   flaeche.addEventListener('touchcancel', abbrechen, { passive: true });
+}
+
+/* Street View an jedem Link mit data-sv — einmal am Dokument, weil Leiste und
+ * Sprechblasen ständig neu gezeichnet werden. Geöffnet wird erst beim Loslassen:
+ * Ein Fenster darf der Browser nur aus einer Nutzerhandlung heraus aufmachen, und
+ * das ist beim Finger erst pointerup, nicht der Ablauf des Zeitgebers. Bricht der
+ * Browser die Geste ab (pointercancel) oder blockt er das Fenster, wird der Link
+ * selbst zum Street-View-Link — dann reicht ein Tipp. */
+function svBinden() {
+  let timer = 0, link = null, lang = false, maus = false, zuletzt = 0;
+
+  const url = a => {
+    const [lat, lon] = a.dataset.sv.split(',').map(Number);
+    return svUrl(lat, lon, a.dataset.blick ? Number(a.dataset.blick) : NaN);
+  };
+  const umstellen = a => {
+    a.href = url(a);
+    delete a.dataset.sv;
+    const h = a.querySelector('.sv-hinweis');
+    if (h) h.textContent = 'tippen: Street View';
+  };
+  const oeffnen = a => {
+    if (Date.now() - zuletzt < 700) return;
+    zuletzt = Date.now();
+    const w = window.open(url(a), '_blank');
+    if (w) w.opener = null;
+    else umstellen(a);
+  };
+  const ende = () => { clearTimeout(timer); timer = 0; };
+
+  document.addEventListener('pointerdown', ev => {
+    ende();
+    link = ev.target.closest && ev.target.closest('a[data-sv]');
+    lang = false;
+    if (!link) return;
+    maus = ev.pointerType === 'mouse';
+    if (ev.button === 0) timer = setTimeout(() => { timer = 0; lang = true; }, MERK_DAUER);
+  });
+  document.addEventListener('pointerup', () => {
+    ende();
+    if (link && lang && !maus) oeffnen(link);
+  });
+  document.addEventListener('pointercancel', () => {
+    ende();
+    if (link && lang && link.dataset.sv) umstellen(link);
+  });
+  document.addEventListener('contextmenu', ev => {
+    const a = ev.target.closest && ev.target.closest('a[data-sv]');
+    if (!a) return;
+    ev.preventDefault();
+    link = a; lang = true;
+    if (ev.pointerType === 'mouse' || maus) oeffnen(a);   // Rechtsklick; der Finger öffnet beim Loslassen
+  });
+  // Nach dem langen Druck nicht noch zusätzlich Google Maps öffnen
+  document.addEventListener('click', ev => {
+    const a = ev.target.closest && ev.target.closest('a[data-sv]');
+    if (!a || !lang) return;
+    ev.preventDefault();
+    lang = false;
+    if (maus) oeffnen(a);
+  }, true);
 }
 
 /* ============================ Messen ============================ */
@@ -9155,7 +9229,7 @@ function renderBottom() {
     <!-- Navigation läuft über Google Maps, die Route ist dort ein Tipp. Info und
          Teilen als Symbole, damit der Hauptknopf Platz hat. -->
     <div class="bb-actions">
-      <a class="maps" href="${gmapsUrl(p.lat, p.lon)}" target="_blank" rel="noopener">In Google Maps öffnen</a>
+      <a id="mapsBtn" class="maps" href="${gmapsUrl(p.lat, p.lon)}"${svAttr(p.lat, p.lon)} target="_blank" rel="noopener">In Google Maps öffnen${SV_HINWEIS}</a>
       ${profilKnopf}
       <button type="button" id="infoBtn" class="bb-ikon${infoOffen ? ' is-on' : ''}" aria-label="Koordinaten und Herkunft"
               title="Koordinaten und Herkunft" aria-controls="bbInfo" aria-expanded="${infoOffen}">
@@ -9173,6 +9247,17 @@ function renderBottom() {
   bindBottom();
   hoeheFuellen(b);
   updateBH();
+  if (mitProfil) svBlickSetzen(view.ref, view.km);
+}
+
+/* Street View am Gleis längs schauen lassen. Im Hintergrund nachgetragen: Die
+ * Richtung braucht zwei weitere Lagen, das Ergebnis soll darauf nicht warten. */
+async function svBlickSetzen(ref, km) {
+  let r = null;
+  try { r = await gleisRichtung(ref, km); } catch { r = null; }
+  const a = $('#mapsBtn');
+  if (!r || !a || view.ref !== ref || view.km !== km) return;
+  a.dataset.blick = String(Math.atan2(r[0], r[1]) * 180 / Math.PI);
 }
 
 /* Steht das Info-Feld offen? Gemerkt über das Neuzeichnen hinweg — beim

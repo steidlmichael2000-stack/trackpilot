@@ -1002,6 +1002,10 @@ body {
 .kml-pop i { font-style: normal; color: var(--muted-2); }
 .kml-pop a { display: inline-block; margin-top: 6px; color: var(--accent); }
 .kml-pop small { display: block; margin-top: 6px; color: var(--muted-2); font-size: .68rem; }
+/* Street View hinter dem langen Druck auf „In Google Maps öffnen" (svBinden):
+   kein Menü des Browsers und keine Textauswahl unter dem Finger */
+a[data-sv] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.kml-pop a .sv-hinweis { margin-top: 1px; color: var(--muted); }
 
 /* Knopf in der Sprechblase — dieselbe Sprache wie die Feinrechnung unten,
    nur schmaler, weil die Blase wenig Platz hat. In der Signalfarbe: Das ist
@@ -1146,6 +1150,8 @@ body {
    „in Ordnung", sondern war bloß die frühere Festfarbe. */
 .bb-actions .maps { flex: 1 1 0; background: var(--accent); border-color: transparent; color: var(--accent-ink); }
 .bb-actions .maps:active { filter: brightness(.92); }
+.bb-actions .maps { padding-top: 7px; padding-bottom: 7px; }
+.sv-hinweis { display: block; font-size: .68rem; font-weight: 500; opacity: .78; }
 /* Info und Teilen als quadratische Symbole, so hoch wie der Maps-Knopf daneben */
 .bb-actions .bb-ikon { flex: none; width: 46px; padding: 0; }
 .bb-ikon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
