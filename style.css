@@ -404,7 +404,8 @@ body {
 #q::placeholder { color: var(--muted-2); font-weight: 500; opacity: 1; }
 
 /* Das Kreuz steht nur da, wenn auch etwas in der Zeile steht. */
-.search:not(.hat-text) .qclear { display: none; }
+/* Das × leert und klappt zu — es steht da, sobald etwas drinsteht oder die Leiste offen ist */
+.search:not(.hat-text):not(.offen) .qclear { display: none; }
 
 .qclear {
   flex: none; width: 30px; height: 30px; padding: 0;

@@ -11428,21 +11428,17 @@ function bind() {
     search();
   });
 
-  /* Der Loeschknopf darf dem Feld nicht den Fokus nehmen -- sonst klappt die
-   * Leiste unter dem Finger zu, statt eine leere Zeile zum Weitertippen
-   * dazulassen. */
+  /* Das × leert die Zeile und klappt die Leiste zu, Tastatur inklusive. Bis
+   * Oktober 2026 blieb sie offen mit einer leeren Zeile zum Weitertippen — der
+   * Nutzer wollte sie aber los sein. Wer neu suchen will, tippt in die Zeile. */
   on('#qClear', 'mousedown', ev => ev.preventDefault());
   on('#qClear', 'click', () => {
     setVal('#q', '');
     setVal('#ref', '');
     setVal('#km', '');
     suchTextMerken();
-    suchAuf();
-    $('#q').focus();
-    /* Leeren heißt leeren — nicht den Verlauf aufklappen. Der focus-Handler
-     * öffnet ihn, wenn das Feld den Fokus erst jetzt bekommt; deshalb danach
-     * schließen. Wer den Verlauf will, tippt ins leere Feld. */
-    closeSuggest();
+    if (document.activeElement && $('#search').contains(document.activeElement)) document.activeElement.blur();
+    suchZu();
   });
 
   /* Aufgeklappter Teil: bleibt offen, solange darin gearbeitet wird, und
