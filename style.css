@@ -788,10 +788,16 @@ body {
 .pal-btn.is-on { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 3px var(--text); }
 .pal-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
-/* Parzellen: Das Feld im Knopf zeigt die Farbe, in der sie gerade gezeichnet
- * werden. Lange drücken öffnet die Wahl — dabei darf das Handy weder Text
- * markieren noch sein Kontextmenü zeigen. */
-.parz-knopf { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+/* Überall, wo ein langer Druck etwas tut, darf das Handy weder Text markieren
+ * noch sein Kontextmenü zeigen: die Knöpfe Parzellen, DB-Netz und Festpunkte
+ * (Auswahl), „In Google Maps öffnen" (Street View) und die Karte selbst (Punkt
+ * setzen — dort markierte es sonst die Schilder). Wer eine neue Geste einbaut,
+ * hängt sie hier an. Die Sprechblasen bleiben markierbar, damit man Koordinaten
+ * herauskopieren kann. */
+.parz-knopf, a[data-sv], .leaflet-container {
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
+.leaflet-container .leaflet-popup-content { -webkit-user-select: text; user-select: text; }
 .parz-jetzt {
   display: inline-block; width: 9px; height: 9px; margin-right: 7px;
   border: 1px solid var(--muted-2); background: var(--parz, #000);
@@ -1002,9 +1008,8 @@ body {
 .kml-pop i { font-style: normal; color: var(--muted-2); }
 .kml-pop a { display: inline-block; margin-top: 6px; color: var(--accent); }
 .kml-pop small { display: block; margin-top: 6px; color: var(--muted-2); font-size: .68rem; }
-/* Street View in der Ergebnisleiste hinter dem langen Druck auf „In Google Maps
-   öffnen" (svBinden): kein Menü des Browsers, keine Textauswahl unter dem Finger */
-a[data-sv] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+/* Street View hinter dem langen Druck auf „In Google Maps öffnen" (svBinden);
+   gegen die Textauswahl siehe .parz-knopf */
 .bb-actions .sv-hinweis { display: block; font-size: .68rem; font-weight: 500; opacity: .78; }
 /* Street View in der Sprechblase: ein Link, der aussieht wie die Knöpfe darüber */
 .kml-pop a.kml-km { box-sizing: border-box; color: var(--accent); text-decoration: none; }

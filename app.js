@@ -2680,7 +2680,13 @@ function parzPunkteWeg(d, w, h) {
  * Grenze weit ab. */
 const DOP_LOCH_ANTEIL = 0.01;
 const DOP_SAUM_M = 300;
-const LAND_WMS_TEIL = '?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256&LAYERS=';
+const LAND_WMS_TEIL = '?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&STYLES=&CRS=EPSG:3857&LAYERS=';
+/* Luftbild und Relief der BVV gibt es nur bis 1:3,5 Mio. (MaxScaleDenominator),
+ * darüber kommt eine weiße Kachel — weit herausgezoomt (ab Zoomstufe 6) fehlte
+ * Bayern deshalb ganz, BW nicht. Der Maßstab hängt an der Bildgröße: Dieselbe
+ * Kachel mit 2-, 4- oder 8-mal so vielen Bildpunkten abgefragt liegt wieder
+ * darunter, verkleinert wird sie in dopPixel. Mit etwas Abstand zur Grenze. */
+const BY_MASSSTAB_MAX = 3.0e6;
 const LAND_WMS = {
   dop: {
     by: 'https://geoservices.bayern.de/od/wms/dop/v1/dop20' + LAND_WMS_TEIL + 'by_dop20c',
@@ -2732,10 +2738,20 @@ async function dopWahl(z, x, y) {
   return drin ? 'bw' : 'by';
 }
 
+/** Kantenlänge der Abfrage in Bildpunkten: 256, nur für Bayern weit draußen mehr. */
+function dopGroesse(land, z, y) {
+  if (land !== 'by') return 256;
+  const n2 = 2 ** z, lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / n2)));
+  const massstab = 40075016.686 * Math.cos(lat) / n2 / 256 / 0.00028;   // 0,28 mm je Bildpunkt wie im WMS
+  let f = 1;
+  while (massstab / f > BY_MASSSTAB_MAX && f < 16) f *= 2;
+  return 256 * f;
+}
+
 function dopUrl(art, land, z, x, y) {
-  const R = 20037508.342789244, s = 2 * R / 2 ** z;
+  const R = 20037508.342789244, s = 2 * R / 2 ** z, px = dopGroesse(land, z, y);
   const bbox = [x * s - R, R - (y + 1) * s, (x + 1) * s - R, R - y * s].map(v => v.toFixed(3)).join(',');
-  return `${LAND_WMS[art][land]}&FORMAT=image/jpeg&BBOX=${bbox}`;
+  return `${LAND_WMS[art][land]}&WIDTH=${px}&HEIGHT=${px}&FORMAT=image/jpeg&BBOX=${bbox}`;
 }
 
 async function dopBild(url, signal) {
@@ -2791,9 +2807,12 @@ async function dopKachel(art, z, x, y, signal) {
     // Tief in Bayern hat der LGL nichts, was ein Loch füllen könnte
     const n2 = 2 ** z, lon = (x + 0.5) / n2 * 360 - 180;
     const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / n2))) * 180 / Math.PI;
-    if (wahl === 'by' && !inLandRahmen('bw', lat, lon)) return blob;
+    // Größer abgefragt (dopGroesse) geht sie durch dopPixel, damit die Kachel 256 px bleibt
+    const gross = dopGroesse(wahl, z, y) > 256;
+    if (wahl === 'by' && !inLandRahmen('bw', lat, lon) && !gross) return blob;
     eigen = await dopPixel(blob);
-    if (dopLeerAnteil(eigen.data) <= DOP_LOCH_ANTEIL) return blob;
+    if (dopLeerAnteil(eigen.data) <= DOP_LOCH_ANTEIL && !gross) return blob;
+    if (wahl === 'by' && !inLandRahmen('bw', lat, lon)) return dopAlsJpeg(eigen);
   }
   const holen = land => dopBild(dopUrl(art, land, z, x, y), signal).then(dopPixel);
   const [by, bw, maske] = await Promise.all([
@@ -2809,8 +2828,12 @@ async function dopKachel(art, z, x, y, signal) {
     if (quelle !== a) { a[i] = quelle[i]; a[i + 1] = quelle[i + 1]; a[i + 2] = quelle[i + 2]; }
     a[i + 3] = 255;
   }
+  return dopAlsJpeg(by);
+}
+
+function dopAlsJpeg(bild) {
   const c = new OffscreenCanvas(256, 256);
-  c.getContext('2d').putImageData(by, 0, 0);
+  c.getContext('2d').putImageData(bild, 0, 0);
   return c.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
 }
 
@@ -7558,17 +7581,56 @@ function tmHin(lat, lon, { a, f }, l0, k0, e0) {
   return [e0 + k0 * A * eta, k0 * A * xi];
 }
 
-/** ETRS89 (Grad) → DB_REF Gauß-Krüger im Streifen 3 oder 4: [Rechts, Hoch]. */
-function dbrefGk(lat, lon, streifen) {
+/** Rückweg der transversalen Mercator: [Rechts, Hoch] → [lat, lon] in Grad. */
+function tmZurueck(e, nord, { a, f }, l0, k0, e0) {
+  const n = f / (2 - f), n2 = n * n, n3 = n2 * n, n4 = n3 * n;
+  const A = a / (1 + n) * (1 + n2 / 4 + n4 / 64);
+  const beta = [n / 2 - 2 * n2 / 3 + 37 * n3 / 96 - n4 / 360, n2 / 48 + n3 / 15 - 437 * n4 / 1440,
+    17 * n3 / 480 - 37 * n4 / 840, 4397 * n4 / 161280];
+  const delta = [2 * n - 2 * n2 / 3 - 2 * n3 + 116 * n4 / 45, 7 * n2 / 3 - 8 * n3 / 5 - 227 * n4 / 45,
+    56 * n3 / 15 - 136 * n4 / 35, 4279 * n4 / 630];
+  const xi = nord / (k0 * A), eta = (e - e0) / (k0 * A);
+  let xi1 = xi, eta1 = eta;
+  for (let j = 1; j <= 4; j++) {
+    xi1 -= beta[j - 1] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta);
+    eta1 -= beta[j - 1] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta);
+  }
+  const chi = Math.asin(Math.sin(xi1) / Math.cosh(eta1));
+  let p = chi;
+  for (let j = 1; j <= 4; j++) p += delta[j - 1] * Math.sin(2 * j * chi);
+  return [p * 180 / Math.PI, l0 + Math.atan2(Math.sinh(eta1), Math.cos(xi1)) * 180 / Math.PI];
+}
+
+/** ETRS89 (Grad) → Gauß-Krüger im Bezugssystem par (Parameter wie DBREF): [Rechts, Hoch]. */
+function gkHin(lat, lon, streifen, par) {
   const [x, y, z] = ellXyz(lat, lon, 0, ELL_GRS80);
-  const sek = Math.PI / 180 / 3600, rx = DBREF.rx * sek, ry = DBREF.ry * sek, rz = DBREF.rz * sek;
-  const m = 1 + DBREF.s * 1e-6;
-  // Umkehrung von X_etrs = T + m·R·X_dbref: X_dbref = Rᵀ·(X_etrs − T) / m
-  const u = (x - DBREF.tx) / m, v = (y - DBREF.ty) / m, w = (z - DBREF.tz) / m;
+  const sek = Math.PI / 180 / 3600, rx = par.rx * sek, ry = par.ry * sek, rz = par.rz * sek;
+  const m = 1 + par.s * 1e-6;
+  // Umkehrung von X_etrs = T + m·R·X_alt: X_alt = Rᵀ·(X_etrs − T) / m
+  const u = (x - par.tx) / m, v = (y - par.ty) / m, w = (z - par.tz) / m;
   const xd = u - rz * v + ry * w, yd = rz * u + v - rx * w, zd = -ry * u + rx * v + w;
   const [pb, lb] = ellAusXyz([xd, yd, zd], ELL_BESSEL);
   return tmHin(pb, lb, ELL_BESSEL, 3 * streifen, 1, streifen * 1e6 + 500000);
 }
+
+/** Gauß-Krüger [Rechts, Hoch] im Bezugssystem par → ETRS89 [lat, lon]. Für die
+ *  Koordinatensuche (projLesen). Der
+ *  Streifen steht in der ersten Ziffer des Rechtswerts. */
+function gkZurueck(r, h, par) {
+  const streifen = Math.floor(r / 1e6);
+  const [pb, lb] = tmZurueck(r, h, ELL_BESSEL, 3 * streifen, 1, streifen * 1e6 + 500000);
+  const [x, y, z] = ellXyz(pb, lb, 0, ELL_BESSEL);
+  const sek = Math.PI / 180 / 3600, rx = par.rx * sek, ry = par.ry * sek, rz = par.rz * sek;
+  const m = 1 + par.s * 1e-6;
+  // X_etrs = T + m·R·X_alt, R wie oben, nur nicht transponiert
+  const xe = par.tx + m * (x + rz * y - ry * z);
+  const ye = par.ty + m * (-rz * x + y + rx * z);
+  const ze = par.tz + m * (ry * x - rx * y + z);
+  return ellAusXyz([xe, ye, ze], ELL_GRS80);
+}
+
+/** ETRS89 (Grad) → DB_REF Gauß-Krüger im Streifen 3 oder 4: [Rechts, Hoch]. */
+function dbrefGk(lat, lon, streifen) { return gkHin(lat, lon, streifen, DBREF); }
 
 /* Die Streifengrenze liegt bei 10,5° O, mitten durch Bayern. Nahe daran
  * (±0,5°) stehen beide Streifen da — welcher im Plan gilt, ist dort nicht klar. */
@@ -9413,6 +9475,8 @@ async function search() {
 
   const k = koordLesen(frei);
   if (k) { koordWaehlen(k); return; }
+  const proj = projLesen(frei);
+  if (proj.length) { projWaehlen(proj[0]); return; }
 
   if (ortModus(frei)) {
     if (suggestEintraege.length) { suggestEintraege[0].tun(); return; }
@@ -9607,6 +9671,24 @@ function suchTextMerken() {
   if (!s || !q) return;
   s.classList.toggle('hat-text', !!q.value.trim());
   s.classList.toggle('frei', !streckeModus(q.value));
+}
+
+/* Was man eingeben kann, als Platzhalter im Wechsel: je eins für jede Art, die
+ * die Zeile versteht. Ruhig getauscht, ohne Bewegung — nur ein Hinweis. */
+const SUCH_BEISPIELE = ['5100 30,5', 'Lichtenfels', '5100 30,5 & 31,2', '646568 5556410', '5100'];
+const SUCH_BEISPIEL_MS = 4500;
+
+function suchBeispieleStarten() {
+  const q = $('#q');
+  if (!q) return;
+  let i = 0;
+  q.placeholder = 'z. B. ' + SUCH_BEISPIELE[0];
+  setInterval(() => {
+    // Nur tauschen, solange man ihn sieht — und nicht, während jemand gerade hineintippt
+    if (q.value || document.activeElement === q) return;
+    i = (i + 1) % SUCH_BEISPIELE.length;
+    q.placeholder = 'z. B. ' + SUCH_BEISPIELE[i];
+  }, SUCH_BEISPIEL_MS);
 }
 
 function suchAuf() { $('#search').classList.add('offen'); }
@@ -10667,7 +10749,7 @@ function pushRecentOrt(t) {
  * weiß man beim Tippen jederzeit, was gerade passiert, ohne dass die Leiste
  * hin und her springt. */
 
-function ortModus(text) { return /[^\s\d.,+&;:\/-]/.test(text || ''); }
+function ortModus(text) { return /[^\s\d.,+&;:\/-]/.test(text || '') && !projLesen(text).length; }
 
 /* Geht es überhaupt um eine Strecke? Nur dann werden die beiden Felder
  * darunter gezeigt und gefüllt. Eine Streckennummer ist eine ganze Zahl —
@@ -10676,8 +10758,44 @@ function ortModus(text) { return /[^\s\d.,+&;:\/-]/.test(text || ''); }
 function streckeModus(text) {
   const t = String(text || '').trim();
   if (!t) return true;                       // leer: die Felder dürfen dastehen
-  if (ortModus(t) || koordLesen(t)) return false;
+  if (ortModus(t) || koordLesen(t) || projLesen(t).length) return false;
   return /^\d{1,6}(?![\d.,])/.test(t);
+}
+
+/* Rechts- und Hochwert: UTM 32 (sechs Stellen, oder acht mit der 32 davor) oder
+ * Gauß-Krüger (sieben Stellen, der Streifen vorn). GK wird als DB_REF gerechnet:
+ * Dieselben Zahlen als DHDN gelesen lägen in Bayern und BW höchstens 0,48 m
+ * daneben (im Mittel 0,24 m, gerechnet im 0,1°-Raster) — weniger, als die sieben
+ * Parameter für DHDN selbst hergeben (1–3 m). Bis Oktober 2026 standen beide als
+ * eigene Zeilen zur Wahl; die Wahl änderte auf der Karte nichts Sichtbares.
+ * Beschriftungen wie „E … · N … (UTM 32)" aus der eigenen Sprechblase oder
+ * „R=… H=…" werden überlesen, damit Kopiertes direkt passt. */
+const PROJ_RE = /^(\d{6,8}(?:[.,]\d{1,4})?)(?:\s*,\s+|\s+)(\d{6,8}(?:[.,]\d{1,4})?)$/;
+
+function projLesen(text) {
+  const t = String(text || '')
+    .replace(/\b(?:utm\s*32|utm|gk\s*[2-5]?|db[_ ]?ref|dhdn|etrs\s*89)\b/gi, ' ')
+    .replace(/\b(?:ost|nord|rechts(?:wert)?|hoch(?:wert)?|rw|hw|[enrh])\b\s*[:=]?/gi, ' ')
+    .replace(/[·()\/;]/g, ' ').replace(/\s+/g, ' ').trim();
+  const m = PROJ_RE.exec(t);
+  if (!m) return [];
+  let [e, n] = [m[1], m[2]].map(s => Number(s.replace(',', '.')));
+  if (e >= 5e6 && e < 6.2e6 && n < 1e6) [e, n] = [n, e];      // Hochwert zuerst geschrieben
+  if (!(n >= 5e6 && n < 6.2e6)) return [];
+  const inDe = ([lat, lon]) => lat > 47 && lat < 55.2 && lon > 5.5 && lon < 15.2;
+  const zahl = v => v.toLocaleString('de-DE', { maximumFractionDigits: 2, useGrouping: false });
+  const werte = `${zahl(e)} / ${zahl(n)}`;
+  const raus = [];
+  const utm = e >= 32e6 && e < 33e6 ? e - 32e6 : e;
+  if (utm >= 1e5 && utm < 9e5) {
+    const ll = utm32Zurueck(utm, n);
+    if (inDe(ll)) raus.push({ sys: 'utm', name: `UTM 32: ${werte}`, sub: 'ETRS89 · setzt dort einen Punkt', lat: ll[0], lon: ll[1] });
+  } else if (e >= 2e6 && e < 6e6) {
+    const ll = gkZurueck(e, n, DBREF);
+    if (inDe(ll)) raus.push({ sys: 'gk', name: `GK${Math.floor(e / 1e6)}: ${werte}`,
+      sub: 'DB_REF oder DHDN · auf etwa 1–3 m', lat: ll[0], lon: ll[1] });
+  }
+  return raus;
 }
 
 /* Eine eingefügte Koordinate. Die App gibt selbst welche heraus — der Knopf
@@ -10771,6 +10889,8 @@ function openSuggest() {
   const text = $('#q') ? $('#q').value : '';
   const k = koordLesen(text);
   if (k) { ortAbbrechen(); koordZeigen(k); return; }
+  const proj = projLesen(text);
+  if (proj.length) { ortAbbrechen(); projZeigen(proj); return; }
   if (ortModus(text)) { ortSpaeter(text.trim()); return; }
   ortAbbrechen();
   verlaufZeigen();
@@ -10798,6 +10918,16 @@ function koordZeigen(k) {
     tun: () => koordWaehlen(k)
   }]);
 }
+
+/* Je Bezugssystem eine Zeile — die Wahl ist der Tipp darauf. */
+function projZeigen(liste) {
+  suggestSetzen(liste.map(p => ({
+    html: i => suggestZeile(i, IKON_KOORD, p.name, p.sub),
+    tun: () => projWaehlen(p)
+  })));
+}
+
+function projWaehlen(p) { koordWaehlen({ lat: p.lat, lon: p.lon }); }
 
 function koordWaehlen(k) {
   closeSuggest();
@@ -11254,7 +11384,7 @@ function bind() {
     // Ist in der Liste eine Zeile markiert, gilt die — sonst das, was dasteht.
     if (suggestNehmen()) return;
     // Bei Freitext und Koordinate nimmt Enter den ersten Treffer.
-    if (ortModus(ev.target.value) || koordLesen(ev.target.value)) { search(); return; }
+    if (ortModus(ev.target.value) || koordLesen(ev.target.value) || projLesen(ev.target.value).length) { search(); return; }
     closeSuggest();
     // Steht noch kein Kilometer da, geht es dorthin weiter — wie früher von
     // Strecke nach Kilometer. Ein zweites Enter sucht dann die ganze Strecke.
@@ -11476,15 +11606,12 @@ function boot() {
   bind();
   kmlBoot();      // nebenher: die Karte soll nicht auf den Speicher warten
 
+  /* Ohne Link startet die Zeile leer, mit Beispielen in Grau. Bis Oktober 2026
+   * stand hier die zuletzt gesuchte Strecke — das las sich wie eine Eingabe, die
+   * man erst löschen muss. Der Verlauf liegt weiter unter der Zeile. */
   if (readHash()) search();
-  else {
-    /* Beim Start die zuletzt gesuchte Strecke vorlegen. Im Verlauf stehen jetzt
-     * auch Orte -- ein Ort hat keine Streckennummer und wuerde als "undefined"
-     * in der Zeile landen. */
-    const letzte = recent.find(r => recentArt(r) === 'strecke');
-    if (letzte) setVal('#ref', letzte.ref);
-  }
   felderAufQ();
+  suchBeispieleStarten();
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register('sw.js').catch(() => { /* Offlinebetrieb ist optional */ });

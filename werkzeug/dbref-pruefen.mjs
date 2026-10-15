@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 
 const src = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const stueck = src.slice(src.indexOf('const DBREF = {'), src.indexOf('/* Die Streifengrenze'));
-const { dbrefGk } = new Function(stueck + '; return { dbrefGk };')();
+const { dbrefGk, gkZurueck, DBREF } = new Function(stueck + '; return { dbrefGk, gkZurueck, DBREF };')();
 
 // [lat, lon, Streifen, Rechts, Hoch]
 const REFERENZ = [
@@ -35,4 +35,12 @@ for (const [lat, lon, s, r, h] of REFERENZ) {
 }
 const ok = groesste < 0.002;
 console.log(`${ok ? 'ok    ' : 'FEHLER'}  DB_REF GK3/GK4 gegen proj4: größte Abweichung ${(groesste * 1000).toFixed(1)} mm an ${REFERENZ.length} Punkten`);
-process.exit(ok ? 0 : 1);
+
+/* Rückweg (Koordinatensuche, gkZurueck): die proj4-Werte zurück auf lat/lon.
+ * Abstand in Metern über eine einfache Näherung — auf diese Entfernungen genügt sie. */
+const meter = (a, b) => Math.hypot((a[0] - b[0]) * 111320, (a[1] - b[1]) * 111320 * Math.cos(a[0] * Math.PI / 180));
+let zurueck = 0;
+for (const [lat, lon, , r, h] of REFERENZ) zurueck = Math.max(zurueck, meter([lat, lon], gkZurueck(r, h, DBREF)));
+const ok2 = zurueck < 0.002;
+console.log(`${ok2 ? 'ok    ' : 'FEHLER'}  DB_REF zurück auf ETRS89 gegen proj4: größte Abweichung ${(zurueck * 1000).toFixed(1)} mm`);
+process.exit(ok && ok2 ? 0 : 1);

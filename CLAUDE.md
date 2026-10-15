@@ -277,6 +277,16 @@ der Rückfall für Strecken und Kilometer, die InfraGO nicht kennt. Eingehängt 
 - Freies Profil: `profVersatz` und `profLinie()` — gerechnet wird immer auf `profLinie()`, nicht auf
   `profPunkte`.
 
+## Koordinatensuche (`projLesen`, Oktober 2026)
+
+Die Suchzeile nimmt Rechts-/Hochwert in UTM 32 und Gauß-Krüger, erkannt an der
+Stellenzahl. GK wird immer als DB_REF gerechnet (`gkZurueck`/`tmZurueck`) und steht als
+**eine** Zeile da: Als DHDN gelesen lägen dieselben Zahlen in BY/BW höchstens 0,48 m
+daneben — die erst gebaute Wahl zwischen DB_REF und DHDN hat der Nutzer am 15.10.2026
+zugunsten einer Zeile verworfen. Geografische Grad zeigt die Zeile nicht als Beispiel:
+Die gibt dort niemand ein. Nach Änderungen `node werkzeug/dbref-pruefen.mjs` (prüft auch
+den Rückweg).
+
 ## Tour (`tour.js`, Oktober 2026)
 
 Das ? im ©-Kasten startet sie; beim ersten Start einmal angeboten (`prefs.tourAngeboten`). Die
